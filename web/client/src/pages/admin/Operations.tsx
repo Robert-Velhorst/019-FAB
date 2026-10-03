@@ -326,6 +326,7 @@ export default function AdminOperations() {
       connectionStatus={authLoading ? copy("Checking access", "Toegang controleren") : text(data?.connection.status, copy("Local API offline", "Lokale API offline"))}
       organization="FAB Local Ledger"
       operatorLabel={operatorLabel}
+      managedOperator={user?.loginMethod === "fab-operator-secret"}
       search={search}
       onSearchChange={setSearch}
       onRefresh={() => { void refresh(); }}
@@ -338,6 +339,7 @@ export default function AdminOperations() {
           <LockKeyhole aria-hidden="true" />
           <h1>{copy("Operator access required", "Operatortoegang vereist")}</h1>
           <p>{copy("Sign in with an administrator account to operate the authoritative FAB ledger.", "Log in met een beheerdersaccount om het gezaghebbende FAB-grootboek te bedienen.")}</p>
+          <a className="fab-primary-button" href="/operator/login">{copy("Sign in", "Inloggen")}</a>
         </div>
       ) : controlCenter.isLoading || authLoading || operatorAccess.isLoading ? (
         <FabLoadingState />

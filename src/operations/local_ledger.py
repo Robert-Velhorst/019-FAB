@@ -1,8 +1,10 @@
 import hashlib
 import json
+import math
 import os
 import re
 import sqlite3
+import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import date, datetime, timezone
@@ -12,6 +14,23 @@ from typing import Any, Dict, Optional, Sequence
 VENDOR_CATEGORY_RULE_STATUSES = {"suggested", "approved", "rejected", "disabled", "learned"}
 GOVERNED_VENDOR_CATEGORY_RULE_STATUSES = {"approved", "rejected", "disabled"}
 LEDGER_SCHEMA_VERSION = 1
+MISSING_REVIEW_MATCH_REFERENCE_SQL = (
+    "CASE WHEN json_valid(corrected_data_json) THEN CAST(COALESCE("
+    "json_extract(corrected_data_json, '$.reconciliationMatchId'), "
+    "json_extract(corrected_data_json, '$.reconciliation_match_id')) AS INTEGER) END"
+)
+RECONCILIATION_BANK_REFERENCE_SQL = (
+    "CASE WHEN json_valid(metadata_json) THEN CAST(COALESCE("
+    "json_extract(metadata_json, '$.bankTransaction.ledgerBankTransactionId'), "
+    "json_extract(metadata_json, '$.bankTransaction.ledger_bank_transaction_id'), "
+    "json_extract(metadata_json, '$.bankTransaction.bankTransactionRecordId'), "
+    "json_extract(metadata_json, '$.bankTransaction.bank_transaction_record_id')) AS INTEGER) END"
+)
+RECONCILIATION_AD_HOC_ACCOUNT_SQL = (
+    "CASE WHEN json_valid(metadata_json) THEN COALESCE("
+    "json_extract(metadata_json, '$.bankTransaction.account_identifier'), "
+    "json_extract(metadata_json, '$.bankTransaction.accountIdentifier'), '') END"
+)
 LEDGER_SCHEMA_MIGRATIONS = {
     1: {
         "name": "operations_ledger_baseline_2026_08_09",
@@ -49,6 +68,9 @@ class LocalOperationsLedger:
         self._read_snapshot_connection: ContextVar[Optional[sqlite3.Connection]] = (
             ContextVar(f"fab_ledger_read_snapshot_{id(self)}", default=None)
         )
+        self._write_transaction_connection: ContextVar[Optional[sqlite3.Connection]] = (
+            ContextVar(f"fab_ledger_write_transaction_{id(self)}", default=None)
+        )
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
         self._last_schema_backup = self._prepare_schema_migration_backup()
         self._init_schema()
@@ -77,6 +99,10 @@ class LocalOperationsLedger:
 
     @contextmanager
     def _connection(self):
+        transaction_connection = self._write_transaction_connection.get()
+        if transaction_connection is not None:
+            yield transaction_connection
+            return
         snapshot_connection = self._read_snapshot_connection.get()
         if snapshot_connection is not None:
             yield snapshot_connection
@@ -91,6 +117,9 @@ class LocalOperationsLedger:
     @contextmanager
     def read_snapshot(self):
         """Reuse one query-only SQLite snapshot across a compound read."""
+        if self._write_transaction_connection.get() is not None:
+            yield self
+            return
         active_connection = self._read_snapshot_connection.get()
         if active_connection is not None:
             yield self
@@ -110,6 +139,40 @@ class LocalOperationsLedger:
                 connection.rollback()
             finally:
                 connection.close()
+
+    @contextmanager
+    def write_transaction(self):
+        """Commit a compound local change once, with savepoints for nested changes."""
+        if self._read_snapshot_connection.get() is not None:
+            raise RuntimeError("Cannot start a write transaction inside a read-only snapshot")
+        active = self._write_transaction_connection.get()
+        if active is not None:
+            savepoint = "fab_write_" + uuid.uuid4().hex
+            active.execute(f"SAVEPOINT {savepoint}")
+            try:
+                yield self
+                active.execute(f"RELEASE SAVEPOINT {savepoint}")
+            except BaseException:
+                active.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
+                active.execute(f"RELEASE SAVEPOINT {savepoint}")
+                raise
+            return
+
+        connection = self._connect()
+        token = None
+        try:
+            # Reserve the writer before reading a decision that will be changed.
+            connection.execute("BEGIN IMMEDIATE")
+            token = self._write_transaction_connection.set(connection)
+            yield self
+            connection.commit()
+        except BaseException:
+            connection.rollback()
+            raise
+        finally:
+            if token is not None:
+                self._write_transaction_connection.reset(token)
+            connection.close()
 
     def _init_schema(self) -> None:
         with self._connection() as connection:
@@ -883,6 +946,7 @@ class LocalOperationsLedger:
             self._ensure_wave_operation_snapshot_schema(connection)
             self._ensure_wave_entity_mirror_schema(connection)
             self._ensure_review_item_schema(connection)
+            self._ensure_reconciliation_lookup_indexes(connection)
             self._record_schema_migration(connection)
 
     def schema_status(self) -> Dict[str, Any]:
@@ -1180,23 +1244,70 @@ class LocalOperationsLedger:
             raise ValueError("lease_name, actor, and reason are required")
 
         with self._connection() as connection:
-            row = connection.execute(
-                "SELECT owner_token FROM runtime_leases WHERE lease_name = ? LIMIT 1",
-                (normalized_name,),
-            ).fetchone()
+            connection.execute("BEGIN IMMEDIATE")
+            return self._force_release_runtime_lease_with_connection(
+                connection, normalized_name, normalized_actor, normalized_reason
+            )
+
+    def force_release_stopped_runtime_leases(self, *, actor: str) -> list:
+        """Release only local worker/API leases after all owning services stop.
+
+        The caller must verify shutdown first. A failed delete or audit insert
+        rolls back the entire batch, including leases from earlier pages.
+        """
+        normalized_actor = str(actor or "").strip()
+        if not normalized_actor:
+            raise ValueError("actor is required")
+        released = []
+        last_name = ""
+        prefix = "hai_command:"
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            while True:
+                rows = connection.execute(
+                    "SELECT lease_name FROM runtime_leases WHERE "
+                    "(lease_name IN (?, ?) OR substr(lease_name, 1, length(?)) = ?) "
+                    "AND lease_name > ? ORDER BY lease_name LIMIT 100",
+                    ("local_connector_intake", "local_autonomous_cycle", prefix, prefix, last_name),
+                ).fetchall()
+                if not rows:
+                    break
+                for row in rows:
+                    name = row["lease_name"]
+                    reason = "owned_hai_api_stopped" if name.startswith(prefix) else "owned_services_stopped"
+                    if not self._force_release_runtime_lease_with_connection(
+                        connection, name, normalized_actor, reason
+                    ):
+                        raise RuntimeError("Stopped runtime lease could not be released")
+                    released.append(name)
+                last_name = rows[-1]["lease_name"]
+        return released
+
+    def _force_release_runtime_lease_with_connection(
+        self, connection: sqlite3.Connection, name: str, actor: str, reason: str
+    ) -> bool:
+        row = connection.execute(
+            "SELECT owner_token FROM runtime_leases WHERE lease_name = ? LIMIT 1",
+            (name,),
+        ).fetchone()
         if not row:
             return False
-
         owner_token = str(row["owner_token"] or "").strip()
-        if not owner_token or not self.release_runtime_lease(normalized_name, owner_token):
+        if not owner_token:
             return False
-        self.record_audit_event({
+        deleted = connection.execute(
+            "DELETE FROM runtime_leases WHERE lease_name = ? AND owner_token = ?",
+            (name, owner_token),
+        )
+        if int(deleted.rowcount) != 1:
+            return False
+        self._record_audit_event_with_connection(connection, {
             "action": "runtime_lease.force_released",
             "entityType": "runtime_lease",
-            "entityId": normalized_name,
+            "entityId": name,
             "details": {
-                "actor": normalized_actor,
-                "reason": normalized_reason,
+                "actor": actor,
+                "reason": reason,
                 "externalSubmission": "not_executed",
             },
         })
@@ -3450,7 +3561,14 @@ class LocalOperationsLedger:
         return [self._row_to_dict(row) for row in rows]
 
     def record_audit_event(self, payload: Dict[str, Any], preferred_id: Optional[int] = None) -> int:
-        return self._insert(
+        with self._connection() as connection:
+            return self._record_audit_event_with_connection(connection, payload, preferred_id)
+
+    def _record_audit_event_with_connection(
+        self, connection: sqlite3.Connection, payload: Dict[str, Any], preferred_id: Optional[int] = None
+    ) -> int:
+        return self._insert_with_connection(
+            connection,
             "audit_events",
             {
                 "id": preferred_id,
@@ -4225,6 +4343,18 @@ class LocalOperationsLedger:
             rows = connection.execute(query, params).fetchall()
         return [self._row_to_dict(row) for row in rows]
 
+    def list_reconcilable_documents(self, statuses: Sequence[str], limit: int = 100) -> list:
+        where = ["COALESCE(reconciliation_status, 'not_started') NOT IN ('approved', 'reconciled', 'ignored')",
+                 "COALESCE(duplicate_of_document_id, 0) = 0"]
+        params = []
+        self._append_status_filter(where, params, "processing_status", statuses)
+        query = "SELECT * FROM bookkeeping_documents WHERE " + " AND ".join(where)
+        query += " ORDER BY updated_at DESC, id DESC LIMIT ?"
+        params.append(self._bounded_limit(limit))
+        with self._connection() as connection:
+            rows = connection.execute(query, params).fetchall()
+        return [self._row_to_dict(row) for row in rows]
+
     def get_documents_with_review_items(
         self,
         document_ids: Sequence[int],
@@ -4654,6 +4784,14 @@ class LocalOperationsLedger:
             row = connection.execute(query, params).fetchone()
         return self._row_to_dict(row) if row else None
 
+    def get_document_core(self, document_id: int) -> Optional[Dict[str, Any]]:
+        """Read retained document facts without materializing related histories."""
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT * FROM bookkeeping_documents WHERE id = ? LIMIT 1", (document_id,),
+            ).fetchone()
+        return self._row_to_dict(row) if row else None
+
     def get_document(self, document_id: int) -> Optional[Dict[str, Any]]:
         with self._connection() as connection:
             document = connection.execute(
@@ -4778,6 +4916,23 @@ class LocalOperationsLedger:
             query = f"{query} WHERE {' AND '.join(where)}"
         query = f"{query} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
         params.extend((limit, offset))
+        with self._connection() as connection:
+            rows = connection.execute(query, params).fetchall()
+        return [self._row_to_dict(row) for row in rows]
+
+    def list_missing_receipt_review_items(
+        self, limit: int = 100, before_id: Optional[int] = None, reconciliation_match_id: Optional[int] = None,
+    ) -> list:
+        query = "SELECT * FROM review_items WHERE document_id IS NULL AND reason = 'missing_receipt'"
+        params = []
+        if reconciliation_match_id is not None:
+            query += f" AND ({MISSING_REVIEW_MATCH_REFERENCE_SQL}) = ?"
+            params.append(reconciliation_match_id)
+        if before_id is not None:
+            query += " AND id < ?"
+            params.append(int(before_id))
+        query += " ORDER BY id DESC LIMIT ?"
+        params.append(self._bounded_limit(limit))
         with self._connection() as connection:
             rows = connection.execute(query, params).fetchall()
         return [self._row_to_dict(row) for row in rows]
@@ -5060,12 +5215,26 @@ class LocalOperationsLedger:
             ).fetchone()
         return self._row_to_dict(row) if row else None
 
+    def has_other_final_document_match(self, document_id: int, match_id: int) -> bool:
+        with self._connection() as connection:
+            return connection.execute(
+                "SELECT 1 FROM reconciliation_matches WHERE document_id = ? AND id != ? "
+                "AND status IN ('approved', 'reconciled', 'ignored') LIMIT 1",
+                (document_id, match_id),
+            ).fetchone() is not None
+
     def list_reconciliation_matches(
         self,
         status: Optional[Any] = None,
         document_id: Optional[int] = None,
         bank_transaction_id: Optional[str] = None,
         limit: int = 100,
+        documentless_only: bool = False,
+        bank_transaction_record_id: Optional[int] = None,
+        ad_hoc_bank_only: bool = False,
+        before_id: Optional[int] = None,
+        keyset_order: bool = False,
+        ad_hoc_account_identifier: Optional[str] = None,
     ) -> list:
         limit = self._bounded_limit(limit)
         query = "SELECT * FROM reconciliation_matches"
@@ -5084,12 +5253,26 @@ class LocalOperationsLedger:
         if document_id is not None:
             where.append("document_id = ?")
             params.append(document_id)
+        elif documentless_only:
+            where.append("document_id IS NULL")
         if bank_transaction_id:
             where.append("bank_transaction_id = ?")
             params.append(bank_transaction_id)
+        if bank_transaction_record_id is not None:
+            where.append(f"({RECONCILIATION_BANK_REFERENCE_SQL}) = ?")
+            params.append(bank_transaction_record_id)
+        elif ad_hoc_bank_only:
+            where.append(f"({RECONCILIATION_BANK_REFERENCE_SQL}) IS NULL")
+        if ad_hoc_account_identifier is not None:
+            where.append(f"({RECONCILIATION_AD_HOC_ACCOUNT_SQL}) = ?")
+            params.append(ad_hoc_account_identifier)
+        if before_id is not None:
+            where.append("id < ?")
+            params.append(before_id)
         if where:
             query = f"{query} WHERE {' AND '.join(where)}"
-        query = f"{query} ORDER BY created_at DESC, id DESC LIMIT ?"
+        ordering = "id DESC" if keyset_order else "created_at DESC, id DESC"
+        query = f"{query} ORDER BY {ordering} LIMIT ?"
         params.append(limit)
         with self._connection() as connection:
             rows = connection.execute(query, params).fetchall()
@@ -5802,6 +5985,25 @@ class LocalOperationsLedger:
                 return f"referenced_by_{table}"
         return None
 
+    def _ensure_reconciliation_lookup_indexes(self, connection: sqlite3.Connection) -> None:
+        # Keep expressions identical to lookup predicates so SQLite can use the indexes.
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_local_missing_review_match "
+            f"ON review_items (({MISSING_REVIEW_MATCH_REFERENCE_SQL}), id DESC) "
+            "WHERE document_id IS NULL AND reason = 'missing_receipt'"
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_local_reconciliation_bank_record "
+            f"ON reconciliation_matches (bank_transaction_id, ({RECONCILIATION_BANK_REFERENCE_SQL}), "
+            "document_id, id DESC)"
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_local_reconciliation_ad_hoc_account "
+            f"ON reconciliation_matches (bank_transaction_id, ({RECONCILIATION_AD_HOC_ACCOUNT_SQL}), "
+            "document_id, created_at DESC, id DESC) "
+            f"WHERE ({RECONCILIATION_BANK_REFERENCE_SQL}) IS NULL"
+        )
+
     def _ensure_review_item_schema(self, connection: sqlite3.Connection) -> None:
         duplicate_groups = connection.execute(
             """
@@ -6443,11 +6645,12 @@ class LocalOperationsLedger:
 
     @staticmethod
     def _float(value: Any) -> Optional[float]:
-        if value is None or value == "":
+        if value is None or isinstance(value, bool) or value == "":
             return None
         try:
-            return float(value)
-        except (TypeError, ValueError):
+            number = float(value)
+            return number if math.isfinite(number) else None
+        except (TypeError, ValueError, OverflowError):
             return None
 
     @staticmethod

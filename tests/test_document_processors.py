@@ -131,10 +131,13 @@ class TestDocumentProcessors(unittest.TestCase):
         common_ocr_variant = TesseractProcessor._extract_data_from_text("BIW 21% 2,10\nTotaal EUR 12,10")
         self.assertEqual(common_ocr_variant["vat_amount"], 2.1)
 
+    @patch("src.document_processors.tesseract_processor.pdfinfo_from_path")
     @patch("src.document_processors.tesseract_processor.convert_from_path")
     @patch("src.document_processors.tesseract_processor.pytesseract.image_to_string")
-    def test_tesseract_processor_renders_and_reads_pdf_pages(self, mock_image_to_string, mock_convert):
-        mock_convert.return_value = [MagicMock(), MagicMock()]
+    def test_tesseract_processor_renders_and_reads_pdf_pages(self, mock_image_to_string, mock_convert, mock_pdfinfo):
+        pages = [MagicMock(), MagicMock()]
+        mock_pdfinfo.return_value = {"Pages": 2}
+        mock_convert.side_effect = [[pages[0]], [pages[1]]]
         mock_image_to_string.side_effect = ["Page one", "Page two"]
         with open(os.path.join(self.temp_dir.name, "pdftoppm.exe"), "wb") as handle:
             handle.write(b"test")
@@ -144,13 +147,27 @@ class TestDocumentProcessors(unittest.TestCase):
 
         self.assertEqual(result["ocr_text"], "Page one\n\nPage two")
         self.assertEqual(mock_image_to_string.call_count, 2)
-        mock_convert.assert_called_once_with(
+        mock_pdfinfo.assert_called_once_with(
             self.dummy_pdf_path,
-            dpi=220,
-            first_page=1,
-            last_page=20,
             poppler_path=self.temp_dir.name,
+            timeout=30,
         )
+        self.assertEqual(mock_convert.call_count, 2)
+        for number, render_call in enumerate(mock_convert.call_args_list, 1):
+            self.assertEqual(render_call.args, (self.dummy_pdf_path,))
+            self.assertEqual(render_call.kwargs, {
+                "dpi": 220,
+                "first_page": number,
+                "last_page": number,
+                "poppler_path": self.temp_dir.name,
+                "size": 3000,
+                "timeout": 30,
+                "thread_count": 1,
+            })
+        for page in pages:
+            page.close.assert_called_once()
+        for ocr_call in mock_image_to_string.call_args_list:
+            self.assertEqual(ocr_call.kwargs["timeout"], 30)
 
     @patch("src.document_processors.dutch_ocr_processor.TesseractProcessor")
     def test_dutch_ocr_processor(self, MockTesseractProcessor):

@@ -899,6 +899,86 @@ class TestDriveWaveDeliveryService(unittest.TestCase):
         self.assertIn("wave_expected_fields_changed_or_unbound", plan["reasons"])
         self.assertIn("wave_field_mismatch:category", plan["reasons"])
 
+    def test_corrupt_expected_fields_cannot_be_verified_by_equally_invalid_readback(self):
+        service = DriveWaveDeliveryService(self.ledger, self.config)
+        cases = (("date", "record_date", "not-a-date", "also-invalid"),
+                 ("amount", "amount", "NaN", "NaN"),
+                 ("amount", "amount", float("inf"), float("inf")),
+                 ("vendor", "vendor_name", " ", "\t"))
+        for field, column, expected, observed in cases:
+            with self.subTest(field=field, expected=str(expected)):
+                # Simulate malformed legacy ledger values without normalizing them away.
+                with self.ledger._connection() as connection:
+                    connection.execute("UPDATE bookkeeping_records SET record_date = ?, amount = ?, vendor_name = ? WHERE id = ?",
+                                       ("2026-07-22", 121.0, "Example Vendor", self.record_id))
+                    connection.execute(f"UPDATE bookkeeping_records SET {column} = ? WHERE id = ?", (expected, self.record_id))
+                evidence = self._evidence()
+                evidence["observedFields"][field] = observed
+                result = service.record_attachment_readback(self.document_id, self.source_bytes,
+                    filename="invoice.pdf", mime_type="application/pdf", evidence=evidence)
+                self.assertFalse(result["success"])
+                self.assertIn("wave_field_mismatch:" + field, result["reasons"])
+                self.assertIsNone(self.ledger.find_audit_event("drive_wave.attachment_verified",
+                    "bookkeeping_document", str(self.document_id)))
+                self.assertFalse(service.plan_archive(self.document_id)["canArchive"])
+                with open(os.path.join(self.temp_dir.name, "invoice.pdf"), "rb") as source:
+                    self.assertEqual(source.read(), self.source_bytes)
+
+    def test_invalid_expected_fields_hold_work_orders_for_processing(self):
+        service = DriveWaveDeliveryService(self.ledger, self.config)
+        cases = (("date", "record_date", "not-a-date"),
+                 ("amount", "amount", "NaN"),
+                 ("vendor", "vendor_name", " "),
+                 ("taxAmount", "vat_amount", "Infinity"))
+        for field, column, value in cases:
+            with self.subTest(field=field):
+                with self.ledger._connection() as connection:
+                    connection.execute("UPDATE bookkeeping_records SET record_date = ?, amount = ?, vendor_name = ?, vat_amount = ? WHERE id = ?",
+                                       ("2026-07-22", 121.0, "Example Vendor", 21.0, self.record_id))
+                    connection.execute(f"UPDATE bookkeeping_records SET {column} = ? WHERE id = ?", (value, self.record_id))
+                order = service.work_order(self.document_id)
+                self.assertEqual(order["stage"], "needs_processing")
+                self.assertIn(field, order["wave"]["missingExpectedFields"])
+
+    def test_normalized_record_tax_requires_matching_readback_even_without_document_tax(self):
+        self.ledger.clear_document_financial_fields(self.document_id, ["vat_amount"])
+        self.assertIsNone(self.ledger.get_document(self.document_id)["vat_amount"])
+        evidence = self._evidence()
+        evidence["observedFields"].pop("taxAmount")
+        service = DriveWaveDeliveryService(self.ledger, self.config)
+        result = service.record_attachment_readback(self.document_id, self.source_bytes,
+            filename="invoice.pdf", mime_type="application/pdf", evidence=evidence)
+        self.assertFalse(result["success"])
+        self.assertIn("wave_field_mismatch:taxAmount", result["reasons"])
+        self.assertIsNone(self.ledger.find_audit_event("drive_wave.attachment_verified",
+            "bookkeeping_document", str(self.document_id)))
+        evidence["observedFields"]["taxAmount"] = 21.0
+        verified = service.record_attachment_readback(self.document_id, self.source_bytes,
+            filename="invoice.pdf", mime_type="application/pdf", evidence=evidence)
+        self.assertTrue(verified["success"])
+
+    def test_authenticated_readback_route_blocks_corrupt_expected_and_observed_date(self):
+        self.ledger.update_bookkeeping_record(self.record_id, {"recordDate": "not-a-date"})
+        evidence = self._evidence()
+        evidence["observedFields"]["date"] = "also-invalid"
+        client = create_app({**self.config,
+            "fab_local_ledger_path": os.path.join(self.temp_dir.name, "fab.sqlite3"),
+            "fab_local_api_token": "synthetic-operator", "fab_hai_api_token": "synthetic-hai",
+        }).test_client()
+        response = client.post(f"/api/drive-wave/documents/{self.document_id}/attachment-readback",
+            headers={"Authorization": "Bearer synthetic-hai"},
+            data={"attachment": (io.BytesIO(self.source_bytes), "invoice.pdf", "application/pdf"),
+                  "evidence": json.dumps(evidence)}, content_type="multipart/form-data")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("wave_field_mismatch:date", response.get_json()["reasons"])
+        plan_path = f"/api/drive-wave/documents/{self.document_id}/archive-plan"
+        self.assertEqual(client.get(plan_path, headers={"Authorization": "Bearer synthetic-hai"}).status_code, 403)
+        plan = client.get(plan_path, headers={"Authorization": "Bearer synthetic-operator"})
+        self.assertEqual(plan.status_code, 200)
+        self.assertFalse(plan.get_json()["canArchive"])
+        self.assertIsNone(self.ledger.find_audit_event("drive_wave.attachment_verified",
+            "bookkeeping_document", str(self.document_id)))
+
     def test_wave_entry_must_be_unique_finished_and_bound_to_attachment(self):
         service = DriveWaveDeliveryService(self.ledger, self.config)
         cases = (
@@ -942,9 +1022,213 @@ class TestDriveWaveDeliveryService(unittest.TestCase):
         )
         plan = service.plan_archive(self.document_id)
 
-        self.assertTrue(verification["success"])
+        self.assertFalse(verification["success"])
+        self.assertIn("source_size_missing", verification["reasons"])
         self.assertFalse(plan["canArchive"])
         self.assertIn("source_size_missing", plan["reasons"])
+
+    def test_invalid_source_size_blocks_work_order_and_readback_without_losing_source(self):
+        service = DriveWaveDeliveryService(self.ledger, self.config)
+        original = self.ledger.get_document(self.document_id)
+        for value in (self.source_size + 0.5, float("inf"), "1_7", True, 0, "17.0"):
+            with self.subTest(size=str(value)):
+                metadata = dict(original["metadata"])
+                metadata["providerMetadata"] = {**metadata["providerMetadata"], "size": value}
+                self.ledger.update_document(self.document_id, {"metadata": metadata})
+                order = service.work_order(self.document_id)
+                self.assertEqual(order["stage"], "source_incompatible")
+                self.assertFalse(order["source"]["waveUpload"]["compatible"])
+                verification = service.record_attachment_readback(self.document_id, self.source_bytes,
+                    filename="invoice.pdf", mime_type="application/pdf", evidence=self._evidence())
+                self.assertFalse(verification["success"])
+                self.assertIn("source_size_missing", verification["reasons"])
+                self.assertIsNone(self.ledger.find_audit_event("drive_wave.attachment_verified",
+                    "bookkeeping_document", str(self.document_id)))
+                self.assertFalse(service.plan_archive(self.document_id)["canArchive"])
+                with open(original["storage_path"], "rb") as source:
+                    self.assertEqual(source.read(), self.source_bytes)
+
+    def test_missing_current_provider_size_prevents_any_archive_move(self):
+        archiver = FakeDriveArchiver(self.source_hash, self.source_size)
+        original_inspect = archiver.inspect_file
+
+        def inspect_without_size(file_id):
+            result = original_inspect(file_id)
+            result.pop("size")
+            return result
+
+        archiver.inspect_file = inspect_without_size
+        service = DriveWaveDeliveryService(self.ledger, self.config, drive_archiver=archiver)
+        verification = service.record_attachment_readback(self.document_id, self.source_bytes,
+            filename="invoice.pdf", mime_type="application/pdf", evidence=self._evidence())
+        self.assertTrue(verification["success"])
+        result = service.archive_document(self.document_id)
+        self.assertFalse(result["success"])
+        self.assertEqual(archiver.moves, [])
+        self.assertEqual(archiver.restores, [])
+        self.assertFalse(archiver.archived)
+
+    def test_missing_post_move_provider_size_restores_source_without_archival_marker(self):
+        archiver = FakeDriveArchiver(self.source_hash, self.source_size)
+        original_inspect = archiver.inspect_file
+
+        def inspect_without_post_move_size(file_id):
+            result = original_inspect(file_id)
+            if archiver.archived:
+                result.pop("size")
+            return result
+
+        archiver.inspect_file = inspect_without_post_move_size
+        service = DriveWaveDeliveryService(self.ledger, self.config, drive_archiver=archiver)
+        verification = service.record_attachment_readback(self.document_id, self.source_bytes,
+            filename="invoice.pdf", mime_type="application/pdf", evidence=self._evidence())
+        self.assertTrue(verification["success"])
+        result = service.archive_document(self.document_id)
+        self.assertFalse(result["success"])
+        self.assertEqual(archiver.moves, [("drive-file-1", SOURCE_FOLDER, ARCHIVE_FOLDER)])
+        self.assertEqual(archiver.restores, [("drive-file-1", SOURCE_FOLDER, ARCHIVE_FOLDER)])
+        self.assertFalse(archiver.archived)
+        self.assertIsNone(self.ledger.find_audit_event("drive_wave.source_archived",
+            "bookkeeping_document", str(self.document_id)))
+
+    def test_prior_verified_readback_does_not_override_invalid_source_size(self):
+        archiver = FakeDriveArchiver(self.source_hash, self.source_size)
+        service = DriveWaveDeliveryService(self.ledger, self.config, drive_archiver=archiver)
+        verification = service.record_attachment_readback(self.document_id, self.source_bytes,
+            filename="invoice.pdf", mime_type="application/pdf", evidence=self._evidence())
+        self.assertTrue(verification["success"])
+        prior = self.ledger.find_audit_event("drive_wave.attachment_verified", "bookkeeping_document", str(self.document_id))
+        document = self.ledger.get_document(self.document_id)
+        metadata = dict(document["metadata"])
+        metadata["providerMetadata"] = {**metadata["providerMetadata"], "size": 0}
+        self.ledger.update_document(self.document_id, {"metadata": metadata})
+        plan = service.plan_archive(self.document_id)
+        self.assertFalse(plan["canArchive"])
+        self.assertIn("source_size_missing", plan["reasons"])
+        self.assertFalse(service.archive_document(self.document_id)["success"])
+        self.assertEqual(archiver.moves, [])
+        self.assertEqual(self.ledger.find_audit_event("drive_wave.attachment_verified", "bookkeeping_document", str(self.document_id)), prior)
+        with open(document["storage_path"], "rb") as source:
+            self.assertEqual(source.read(), self.source_bytes)
+
+    def test_bulk_work_orders_project_invalid_amount_without_emitting_nonfinite_json(self):
+        with self.ledger._connection() as connection:
+            connection.execute("UPDATE bookkeeping_records SET amount=? WHERE id=?", (float("inf"), self.record_id))
+        client = create_app({**self.config,
+            "fab_local_ledger_path": os.path.join(self.temp_dir.name, "fab.sqlite3"),
+            "fab_local_api_token": "synthetic-operator", "fab_hai_api_token": "synthetic-hai",
+        }).test_client()
+        response = client.get("/api/drive-wave/work-orders", headers={"Authorization": "Bearer synthetic-hai"})
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        json.dumps(payload, allow_nan=False)
+        order = payload["workOrders"][0]
+        self.assertEqual(order["stage"], "needs_processing")
+        self.assertIsNone(order["wave"]["expectedFields"]["amount"])
+        self.assertIn("amount", order["wave"]["missingExpectedFields"])
+        self.assertEqual(self.ledger.get_bookkeeping_record(self.record_id)["amount"], float("inf"))
+
+    def test_invalid_line_item_numbers_block_handoff_readback_and_archive(self):
+        self.ledger.replace_bookkeeping_record_line_items(self.record_id, [{"itemName": "Synthetic item",
+            "quantity": 1, "unitPrice": 121, "amount": 121, "taxAmount": 21, "taxRate": 21, "confidenceScore": 0.9}])
+        service = DriveWaveDeliveryService(self.ledger, self.config)
+        for field in ("quantity", "unit_price", "amount", "tax_amount", "tax_rate", "confidence_score"):
+            for value in (float("inf"), "not-a-number"):
+                with self.subTest(field=field, value=str(value)):
+                    with self.ledger._connection() as connection:
+                        connection.execute("UPDATE bookkeeping_record_line_items SET quantity=1, unit_price=121, amount=121, tax_amount=21, tax_rate=21, confidence_score=0.9 WHERE bookkeeping_record_id=?", (self.record_id,))
+                        connection.execute(f"UPDATE bookkeeping_record_line_items SET {field}=? WHERE bookkeeping_record_id=?", (value, self.record_id))
+                    path = "lineItems[0]." + field
+                    order = service.work_order(self.document_id)
+                    self.assertEqual(order["stage"], "needs_processing")
+                    compact = service.list_work_orders(compact=True)
+                    self.assertEqual(compact["workOrders"][0]["stage"], "needs_processing")
+                    self.assertEqual(compact["summary"]["needsProcessing"], 1)
+                    self.assertIn(path, order["wave"]["invalidLineItemFields"])
+                    self.assertIsNone(order["wave"]["lineItems"][0][field])
+                    json.dumps(order, allow_nan=False)
+                    result = service.record_attachment_readback(self.document_id, self.source_bytes,
+                        filename="invoice.pdf", mime_type="application/pdf", evidence=self._evidence())
+                    self.assertFalse(result["success"])
+                    self.assertIn("bookkeeping_line_item_invalid:" + path, result["reasons"])
+                    self.assertFalse(service.plan_archive(self.document_id)["canArchive"])
+                    self.assertEqual(self.ledger.list_bookkeeping_record_line_items(self.record_id)[0][field], value)
+
+    def test_nonfinite_line_metadata_is_reported_without_mutating_ledger(self):
+        self.ledger.replace_bookkeeping_record_line_items(self.record_id, [{"itemName": "Synthetic item", "amount": 121,
+            "metadata": {"extraction": {"confidence": float("inf")}}}])
+        service = DriveWaveDeliveryService(self.ledger, self.config)
+        order = service.work_order(self.document_id)
+        self.assertEqual(order["stage"], "needs_processing")
+        self.assertIn("lineItems[0].metadata.extraction.confidence", order["wave"]["invalidLineItemFields"])
+        self.assertIsNone(order["wave"]["lineItems"][0]["metadata"]["extraction"]["confidence"])
+        json.dumps(order, allow_nan=False)
+        self.assertEqual(self.ledger.list_bookkeeping_record_line_items(self.record_id)[0]["metadata"]["extraction"]["confidence"], float("inf"))
+
+    def test_prior_verified_readback_does_not_override_invalid_line_items(self):
+        archiver = FakeDriveArchiver(self.source_hash, self.source_size)
+        service = DriveWaveDeliveryService(self.ledger, self.config, drive_archiver=archiver)
+        result = service.record_attachment_readback(self.document_id, self.source_bytes,
+            filename="invoice.pdf", mime_type="application/pdf", evidence=self._evidence())
+        self.assertTrue(result["success"])
+        prior = self.ledger.find_audit_event("drive_wave.attachment_verified", "bookkeeping_document", str(self.document_id))
+        self.ledger.replace_bookkeeping_record_line_items(self.record_id, [{"itemName": "Synthetic item", "amount": 121}])
+        with self.ledger._connection() as connection:
+            connection.execute("UPDATE bookkeeping_record_line_items SET amount=? WHERE bookkeeping_record_id=?", (float("inf"), self.record_id))
+        plan = service.plan_archive(self.document_id)
+        self.assertFalse(plan["canArchive"])
+        self.assertIn("bookkeeping_line_item_invalid:lineItems[0].amount", plan["reasons"])
+        self.assertFalse(service.archive_document(self.document_id)["success"])
+        self.assertEqual(archiver.moves, [])
+        self.assertEqual(self.ledger.find_audit_event("drive_wave.attachment_verified", "bookkeeping_document", str(self.document_id)), prior)
+        with open(self.ledger.get_document(self.document_id)["storage_path"], "rb") as source:
+            self.assertEqual(source.read(), self.source_bytes)
+
+    def test_valid_line_items_keep_precision_and_allow_readback(self):
+        self.ledger.replace_bookkeeping_record_line_items(self.record_id, [{"itemName": "Synthetic item",
+            "quantity": 0.123456, "unitPrice": 980.10012, "amount": 121, "taxAmount": 21,
+            "metadata": {"notes": ["NaN is plain text here", {"confidence": 0.91}]}}])
+        original = self.ledger.list_bookkeeping_record_line_items(self.record_id)
+        service = DriveWaveDeliveryService(self.ledger, self.config)
+        order = service.work_order(self.document_id)
+        self.assertEqual(order["wave"]["invalidLineItemFields"], [])
+        self.assertEqual(order["wave"]["lineItems"], original)
+        self.assertEqual(order["stage"], "locate_or_create_transaction")
+        json.dumps(order, allow_nan=False)
+        result = service.record_attachment_readback(self.document_id, self.source_bytes,
+            filename="invoice.pdf", mime_type="application/pdf", evidence=self._evidence())
+        self.assertTrue(result["success"])
+        self.assertTrue(service.plan_archive(self.document_id)["canArchive"])
+
+    def test_authenticated_routes_block_infinite_source_size_without_server_error(self):
+        document = self.ledger.get_document(self.document_id)
+        metadata = dict(document["metadata"])
+        metadata["providerMetadata"] = {**metadata["providerMetadata"], "size": float("inf")}
+        self.ledger.update_document(self.document_id, {"metadata": metadata})
+        client = create_app({**self.config,
+            "fab_local_ledger_path": os.path.join(self.temp_dir.name, "fab.sqlite3"),
+            "fab_local_api_token": "synthetic-operator", "fab_hai_api_token": "synthetic-hai",
+        }).test_client()
+        headers = {"Authorization": "Bearer synthetic-hai"}
+        individual = client.get(f"/api/drive-wave/documents/{self.document_id}/work-order", headers=headers)
+        self.assertEqual(individual.status_code, 403)
+        orders = client.get("/api/drive-wave/work-orders", headers=headers)
+        self.assertEqual(orders.status_code, 200)
+        self.assertEqual(orders.get_json()["summary"]["sourceIncompatible"], 1)
+        order = orders.get_json()["workOrders"][0]
+        self.assertEqual(order["stage"], "source_incompatible")
+        self.assertIsNone(order["source"]["sizeBytes"])
+        self.assertIn("wave_receipt_size_missing_or_invalid", order["source"]["waveUpload"]["reasons"])
+        response = client.post(f"/api/drive-wave/documents/{self.document_id}/attachment-readback", headers=headers,
+            data={"attachment": (io.BytesIO(self.source_bytes), "invoice.pdf", "application/pdf"),
+                  "evidence": json.dumps(self._evidence())}, content_type="multipart/form-data")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("source_size_missing", response.get_json()["reasons"])
+        self.assertIsNone(self.ledger.find_audit_event("drive_wave.attachment_verified",
+            "bookkeeping_document", str(self.document_id)))
+        self.assertEqual(self.ledger.get_document(self.document_id)["metadata"]["providerMetadata"]["size"], float("inf"))
+        with open(document["storage_path"], "rb") as source:
+            self.assertEqual(source.read(), self.source_bytes)
 
     def test_post_move_hash_failure_restores_source_and_never_marks_archived(self):
         archiver = FakeDriveArchiver(

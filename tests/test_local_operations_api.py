@@ -31,6 +31,47 @@ from src.utils.runtime_identity import local_instance_id
 
 
 class TestLocalOperationsApi(unittest.TestCase):
+    def test_api_exposes_failed_source_block_without_provider_dispatch(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reset_all_limiters()
+            self.addCleanup(reset_all_limiters)
+            ledger_path = os.path.join(temp_dir, "fab.sqlite3")
+            ledger = LocalOperationsLedger(ledger_path)
+            document_id = ledger.register_document({
+                "source": "scanner", "sourceDocumentId": "failed-export-api",
+                "originalFilename": "receipt.txt", "documentType": "receipt",
+                "processingStatus": "reviewed", "vendorName": "Office Shop",
+                "category": "Office Supplies", "transactionDate": "2026-06-28",
+                "totalAmount": 42.5,
+            })
+            client = create_app({"fab_local_ledger_path": ledger_path}).test_client()
+            route = client.post(f"/api/documents/{document_id}/route", json={}).get_json()
+            prepared = client.post(f"/api/routing/{route['routingAttemptId']}/export-attempt", json={})
+            self.assertEqual(prepared.status_code, 200)
+            attempt_id = prepared.get_json()["exportAttemptId"]
+            approved = client.post(f"/api/export-attempts/{attempt_id}/approve", json={
+                "confirmation": EXPORT_APPROVAL_PHRASE,
+            })
+            self.assertEqual(approved.status_code, 200)
+            ledger.update_document(document_id, {"processingStatus": "failed"})
+
+            with patch("src.data_entry.waveapps_api_executor.WaveappsApiExecutor.execute") as dispatch:
+                response = client.post(f"/api/export-attempts/{attempt_id}/execute", json={})
+                retry_approval = client.post(f"/api/export-attempts/{attempt_id}/approve", json={
+                    "confirmation": EXPORT_APPROVAL_PHRASE,
+                })
+
+            dispatch.assert_not_called()
+            for result in (response, retry_approval):
+                self.assertEqual(result.status_code, 400)
+                self.assertEqual(result.get_json()["status"], "blocked_processing")
+                self.assertEqual(result.get_json()["externalSubmission"], "not_executed")
+            attempt = client.get(f"/api/export-attempts/{attempt_id}").get_json()
+            self.assertEqual(attempt["status"], "attention_required")
+            records = client.get("/api/bookkeeping-records").get_json()["bookkeepingRecords"]
+            self.assertEqual(records[0]["export_status"], "blocked_processing")
+            self.assertFalse(records[0]["metadata"]["exportReadiness"]["readyForWaveDraft"])
+
     def test_control_center_batch_reads_fixed_resources_in_one_snapshot(self):
         expected_resources = {
             "autonomy",
@@ -193,6 +234,53 @@ class TestLocalOperationsApi(unittest.TestCase):
             self.assertNotIn("nonce", str(audit).lower())
             self.assertNotIn("ticket", str(audit).lower())
             self.assertNotIn(token, str(audit))
+
+    def test_managed_handoff_stops_working_when_parent_is_revoked(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            token = "D7pH8sAk3C5nZ9wL2tB6eQ0rV1mF4yUj"
+            now = int(time.time())
+            app = create_app({
+                "fab_local_ledger_path": os.path.join(temp_dir, "fab.sqlite3"),
+                "fab_local_api_token": token,
+                "fab_operator_session_validation_url": "http://127.0.0.1:3000/api/fab/operator-session/status",
+            })
+            client = app.test_client()
+            ticket = self._operator_session_ticket(token, {
+                "actor": "fab_dashboard:admin:test", "aud": "fab-local-operator-session",
+                "exp": now + 45, "iat": now, "nonce": "parent_session_nonce_1234",
+                "next": "/api/live", "v": 2,
+                "parent": {"id": "a" * 32, "exp": now + 600},
+            })
+            with patch("src.operations.local_api.parent_session_active", return_value=True) as validation:
+                response = client.get(f"/operator/session/bootstrap?ticket={ticket}")
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(client.get("/api/live").status_code, 200)
+                self.assertEqual(validation.call_count, 2)
+            with patch("src.operations.local_api.parent_session_active", return_value=False):
+                self.assertEqual(client.get("/api/live").status_code, 401)
+                self.assertEqual(client.get("/api/live", headers={"Authorization": f"Bearer {token}"}).status_code, 200)
+
+    def test_managed_validation_rejects_legacy_cookie_and_unbound_handoff(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            token = "D7pH8sAk3C5nZ9wL2tB6eQ0rV1mF4yUj"
+            app = create_app({
+                "fab_local_ledger_path": os.path.join(temp_dir, "fab.sqlite3"),
+                "fab_local_api_token": token,
+                "fab_operator_session_validation_url": "http://127.0.0.1:3000/api/fab/operator-session/status",
+            })
+            client = app.test_client()
+            with client.session_transaction() as browser_session:
+                browser_session["fab_local_api_authenticated"] = True
+            self.assertEqual(client.get("/api/live").status_code, 401)
+            now = int(time.time())
+            ticket = self._operator_session_ticket(token, {
+                "actor": "fab_dashboard:admin:test", "aud": "fab-local-operator-session",
+                "exp": now + 45, "iat": now, "nonce": "unbound_parent_nonce_1234",
+                "next": "/api/live", "v": 1,
+            })
+            self.assertEqual(client.get(f"/operator/session/bootstrap?ticket={ticket}").status_code, 401)
+            self.assertEqual(client.post("/login", data={"token": token}).status_code, 302)
+            self.assertEqual(client.get("/api/live").status_code, 200)
 
     def test_operator_session_handoff_rejects_expired_tampered_and_unsafe_tickets(self):
         with tempfile.TemporaryDirectory() as temp_dir:

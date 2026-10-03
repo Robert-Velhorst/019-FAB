@@ -4,21 +4,23 @@ from difflib import SequenceMatcher
 import re
 from typing import Dict, Any, List, Optional, Tuple
 import unicodedata
+from src.validation.financial_consistency import finite_number
+
+MatchFeatures = Tuple[Optional[Decimal], Optional[date], str]
 
 class AutomatedReconciliation:
     """Automates the reconciliation process between bank statements and processed documents."""
 
     def __init__(self, config: Dict[str, Any]):
         self.config = config
-        self.match_threshold = float(self.config.get("reconciliation_match_threshold", 0.9))
-        self.amount_tolerance = Decimal(
-            str(
-                self.config.get(
-                    "reconciliation_threshold",
-                    self.config.get("reconciliation_amount_tolerance", 0.01),
-                )
-            )
-        )
+        self.match_threshold = finite_number(self.config.get("reconciliation_match_threshold", 0.9))
+        if self.match_threshold is None or not 0 <= self.match_threshold <= 1:
+            raise ValueError("reconciliation_match_threshold must be finite and between 0 and 1")
+        self.amount_tolerance = self._amount(self.config.get(
+            "reconciliation_threshold", self.config.get("reconciliation_amount_tolerance", 0.01),
+        ))
+        if self.amount_tolerance is None or self.amount_tolerance < 0:
+            raise ValueError("reconciliation_amount_tolerance must be finite and non-negative")
         self.date_tolerance_days = int(self.config.get("reconciliation_date_tolerance_days", 0))
         self.use_absolute_amounts = self._as_bool(
             self.config.get("reconciliation_use_absolute_amounts", True)
@@ -44,9 +46,15 @@ class AutomatedReconciliation:
         if value is None or isinstance(value, bool):
             return None
         if isinstance(value, Decimal):
-            return value
+            return value if finite_number(value) is not None else None
         if isinstance(value, (int, float)):
-            return Decimal(str(value))
+            return Decimal(str(value)) if finite_number(value) is not None else None
+
+        try:
+            number = Decimal(str(value).strip())
+            return number if finite_number(number) is not None else None
+        except InvalidOperation:
+            pass
 
         text = re.sub(r"[^\d,.\-]", "", str(value).strip())
         if not text or text in {"-", ".", ","}:
@@ -65,7 +73,8 @@ class AutomatedReconciliation:
             text = "".join(parts[:-1]) + "." + parts[-1]
 
         try:
-            return Decimal(text)
+            number = Decimal(text)
+            return number if finite_number(number) is not None else None
         except InvalidOperation:
             return None
 
@@ -111,10 +120,14 @@ class AutomatedReconciliation:
         self,
         bank_transaction: Dict[str, Any],
         document: Dict[str, Any],
+        *,
+        bank_features: Optional[MatchFeatures] = None,
+        document_features: Optional[MatchFeatures] = None,
     ) -> Optional[Tuple[float, float]]:
-        doc_data = self._document_payload(document)
-        bank_amount = self._amount(bank_transaction.get("amount"))
-        doc_amount = self._amount(doc_data.get("total_amount") or doc_data.get("amount"))
+        doc_data = self._document_payload(document) if document_features is None else None
+        bank_amount = bank_features[0] if bank_features is not None else self._amount(bank_transaction.get("amount"))
+        doc_amount = document_features[0] if document_features is not None else self._amount(
+            doc_data.get("total_amount") if doc_data.get("total_amount") is not None else doc_data.get("amount"))
         if bank_amount is None or doc_amount is None:
             return None
 
@@ -125,19 +138,32 @@ class AutomatedReconciliation:
             return None
 
         score = 0.6
-        bank_date = self._date(bank_transaction.get("date") or bank_transaction.get("transaction_date"))
-        doc_date = self._date(doc_data.get("transaction_date") or doc_data.get("date"))
+        bank_date = bank_features[1] if bank_features is not None else self._date(
+            bank_transaction.get("date") or bank_transaction.get("transaction_date"))
+        doc_date = document_features[1] if document_features is not None else self._date(
+            doc_data.get("transaction_date") or doc_data.get("date"))
         if bank_date and doc_date:
             if abs((bank_date - doc_date).days) > self.date_tolerance_days:
                 return None
             score += 0.3
 
-        bank_vendor = self._vendor_text(bank_transaction)
-        doc_vendor = self._vendor_text(doc_data)
+        bank_vendor = bank_features[2] if bank_features is not None else self._vendor_text(bank_transaction)
+        doc_vendor = document_features[2] if document_features is not None else self._vendor_text(doc_data)
         if bank_vendor and doc_vendor:
-            score += 0.1 * SequenceMatcher(None, bank_vendor, doc_vendor).ratio()
+            similarity = (1.0 if bank_features is not None and document_features is not None and bank_vendor == doc_vendor
+                          else SequenceMatcher(None, bank_vendor, doc_vendor).ratio())
+            score += 0.1 * similarity
 
         return round(score, 4), float(amount_difference)
+
+    def _prepare_document(self, document: Dict[str, Any]) -> MatchFeatures:
+        data = self._document_payload(document)
+        return (self._amount(data.get("total_amount") if data.get("total_amount") is not None else data.get("amount")),
+                self._date(data.get("transaction_date") or data.get("date")), self._vendor_text(data))
+
+    def _prepare_bank(self, transaction: Dict[str, Any]) -> MatchFeatures:
+        return (self._amount(transaction.get("amount")),
+                self._date(transaction.get("date") or transaction.get("transaction_date")), self._vendor_text(transaction))
 
     def reconcile(self, bank_transactions: List[Dict[str, Any]], processed_documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Attempts to match bank transactions with processed documents.
@@ -151,15 +177,24 @@ class AutomatedReconciliation:
         """
         reconciliation_results = []
         matched_doc_ids = set()
+        # Per-run features only; custom scoring keeps its original two-argument contract.
+        prepare = (getattr(self._match_score, "__func__", None) is AutomatedReconciliation._match_score
+                   and bool(bank_transactions) and bool(processed_documents))
+        prepared_documents = [self._prepare_document(doc) for doc in processed_documents] if prepare else []
 
         for bt in bank_transactions:
             best_match = None
-            for doc in processed_documents:
+            bank_features = self._prepare_bank(bt) if prepare else None
+            for index, doc in enumerate(processed_documents):
                 document_id = self._document_id(doc)
                 if document_id in matched_doc_ids:
                     continue
 
-                match_result = self._match_score(bt, doc)
+                if prepare:
+                    match_result = self._match_score(bt, doc, bank_features=bank_features,
+                                                     document_features=prepared_documents[index])
+                else:
+                    match_result = self._match_score(bt, doc)
                 if match_result is None:
                     continue
                 confidence_score, amount_difference = match_result

@@ -8,6 +8,7 @@ import mimetypes
 import os
 import re
 import secrets
+import stat
 import threading
 import time
 from pathlib import Path
@@ -19,6 +20,9 @@ from werkzeug.exceptions import BadRequest, HTTPException
 from werkzeug.utils import secure_filename
 
 from src.config_loader import ConfigLoader
+from src.security.deployment_secrets import MAX_API_TOKEN_BYTES
+from src.operations.deployment_preflight import require_deployment_ready
+from src.operations.parent_operator_session import parent_session_active, requires_parent_session
 from src.data_entry.waveapps_account_discovery import WaveappsAccountDiscoveryService
 from src.data_entry.waveapps_entity_sync import WaveappsEntitySyncService
 from src.document_handling.duplicate_detector import DuplicateDetector
@@ -66,7 +70,7 @@ from src.operations.local_health import LocalOperationsHealth
 from src.operations.local_grouping import LocalDocumentGroupingService
 from src.operations.local_google_drive_auth import LocalGoogleDriveAuthorizationCoordinator
 from src.operations.local_gmail_auth import LocalGmailAuthorizationCoordinator
-from src.operations.local_hai_connector import LocalHaiConnector
+from src.operations.local_hai_connector import LocalHaiConnector, MAX_HAI_PAYLOAD_BYTES
 from src.operations.local_intake import DEFAULT_ALLOWED_EXTENSIONS, LocalFolderIntake
 from src.operations.local_ledger import (
     VENDOR_CATEGORY_RULE_STATUSES,
@@ -80,7 +84,7 @@ from src.operations.local_photos_picker import LocalGooglePhotosPickerService
 from src.operations.local_processing import LocalDocumentProcessor
 from src.operations.local_readiness import LocalReadinessService
 from src.operations.local_support_bundle import LocalSupportBundleService
-from src.operations.local_reconciliation import LocalReconciliationService
+from src.operations.local_reconciliation import LocalReconciliationService, MAX_RECONCILIATION_JSON_BYTES
 from src.operations.local_reporting import LocalFinancialReportingService, LocalScheduledReportService
 from src.operations.local_review import LocalReviewService
 from src.operations.local_routing import LocalRoutingService
@@ -97,6 +101,7 @@ from src.utils.runtime_identity import local_instance_id
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 DEFAULT_LOCAL_UPLOAD_MAX_BYTES = 6 * 1024 * 1024
 DEFAULT_LOCAL_API_MAX_REQUEST_BYTES = 101 * 1024 * 1024
+MAX_RECONCILIATION_REQUEST_BYTES = MAX_RECONCILIATION_JSON_BYTES + 1024 * 1024
 MAX_LOCAL_API_MAX_REQUEST_BYTES = 128 * 1024 * 1024
 LOCAL_SOURCE_PREVIEW_MAX_BYTES = 25 * 1024 * 1024
 LOCAL_SOURCE_PREVIEW_MIME_TYPES = {
@@ -3972,8 +3977,14 @@ LOGIN_TEMPLATE = """
 """
 
 
+def _ascii_credential_matches(supplied: str, expected: str) -> bool:
+    return (len(supplied) <= MAX_API_TOKEN_BYTES + len("Bearer ")
+            and supplied.isascii() and hmac.compare_digest(supplied, expected))
+
+
 def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
     config = config or {}
+    require_deployment_ready(config)
     maintenance_mode = _bool_value(
         config.get("fab_maintenance_mode")
         or config.get("operations_maintenance_mode"),
@@ -4140,14 +4151,14 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         if request.endpoint in {"login", "operator_session_bootstrap"}:
             return None
         supplied_authorization = request.headers.get("Authorization", "")
-        operator_authenticated = hmac.compare_digest(
+        operator_authenticated = _ascii_credential_matches(
             supplied_authorization,
             f"Bearer {token}",
         )
-        if operator_authenticated or session.get("fab_local_api_authenticated"):
+        if operator_authenticated:
             g.fab_api_principal = "operator"
             return None
-        hai_authenticated = bool(hai_token) and hmac.compare_digest(
+        hai_authenticated = bool(hai_token) and _ascii_credential_matches(
             supplied_authorization,
             f"Bearer {hai_token}",
         )
@@ -4156,9 +4167,34 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             if _hai_request_allowed(request.method, request.path):
                 return None
             return jsonify({"error": "HAI credential is not permitted for this route"}), 403
+        if session.get("fab_local_api_authenticated"):
+            parent = session.get("fab_operator_parent")
+            requires_parent = requires_parent_session(config)
+            if parent is not None:
+                authenticated = parent_session_active(parent, config, token)
+            else:
+                authenticated = not requires_parent or session.get("fab_local_api_auth_method") == "token"
+            if authenticated:
+                g.fab_api_principal = "operator"
+                return None
+            session.clear()
         if not request.path.startswith("/api/"):
             return redirect(url_for("login"))
         return jsonify({"error": "Unauthorized"}), 401
+
+    @app.before_request
+    def bound_local_operation_request():
+        if request.method != "POST":
+            return None
+        if request.endpoint in {"run_reconciliation", "run_reconciliation_form"}:
+            maximum = MAX_RECONCILIATION_REQUEST_BYTES
+        elif request.endpoint in {"hai_command_plan_api", "hai_command_execute_api"}:
+            maximum = MAX_HAI_PAYLOAD_BYTES + 1024 * 1024
+        else:
+            return None
+        # Enforce the stream bound after authentication, before JSON or form decoding.
+        request.max_content_length = min(app.config["MAX_CONTENT_LENGTH"], maximum)
+        return None
 
     @app.before_request
     def validate_json_mutation_body():
@@ -4166,7 +4202,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             return None
         try:
             payload = request.get_json(silent=False)
-        except BadRequest:
+        except (BadRequest, ValueError, RecursionError):
             return jsonify({"error": "Request body must contain valid JSON"}), 400
         if not isinstance(payload, dict):
             return jsonify({"error": "Request JSON body must be an object"}), 400
@@ -4200,8 +4236,10 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             return redirect(url_for("dashboard_page"))
         if request.method == "POST":
             submitted = request.form.get("token", "")
-            if hmac.compare_digest(submitted, token):
+            if _ascii_credential_matches(submitted, token):
+                session.clear()
                 session["fab_local_api_authenticated"] = True
+                session["fab_local_api_auth_method"] = "token"
                 return redirect(url_for("dashboard_page"))
             return render_template_string(LOGIN_TEMPLATE, error="Invalid token."), 401
         return render_template_string(LOGIN_TEMPLATE, error=None)
@@ -4247,7 +4285,8 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             and not isinstance(expires_at, bool)
         )
         if (
-            payload.get("v") != 1
+            type(payload.get("v")) is not int
+            or payload.get("v") not in {1, 2}
             or payload.get("aud") != OPERATOR_SESSION_AUDIENCE
             or not valid_integer_times
             or issued_at < now - OPERATOR_SESSION_MAX_TTL_SECONDS
@@ -4263,6 +4302,14 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         ):
             return "Invalid or expired FAB operator session.", 401
 
+        parent = payload.get("parent")
+        requires_parent = requires_parent_session(config)
+        if payload["v"] == 2:
+            if not parent_session_active(parent, config, token, nonce=nonce, ticket_expiry=expires_at):
+                return "Invalid or expired FAB operator session.", 401
+        elif requires_parent or parent is not None:
+            return "Invalid or expired FAB operator session.", 401
+
         with operator_session_nonce_lock:
             for consumed_nonce, consumed_expiry in list(consumed_operator_session_nonces.items()):
                 if consumed_expiry <= now:
@@ -4273,6 +4320,8 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
 
         session.clear()
         session["fab_local_api_authenticated"] = True
+        if payload["v"] == 2:
+            session["fab_operator_parent"] = parent
         session[LOCAL_FORM_SESSION_KEY] = secrets.token_urlsafe(24)
         ledger.record_audit_event({
             "action": "local_api.operator_session_bootstrapped",
@@ -4960,11 +5009,13 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
     def hai_command_execute_api():
         payload = request.get_json(silent=True) or {}
         command_payload = payload.get("payload")
+        # Attribute HTTP commands to the verified credential class, not a body label.
+        actor = "fab_hai_api:" + getattr(g, "fab_api_principal", "loopback")
         result = hai_connector().execute(
-            request_id=str(payload.get("requestId") or ""),
+            request_id=payload.get("requestId"),
             command_id=str(payload.get("commandId") or ""),
             payload={} if command_payload is None else command_payload,
-            actor=str(payload.get("actor") or "hai"),
+            actor=actor,
         )
         status = result.get("status")
         if result.get("success"):
@@ -6360,27 +6411,37 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         if len(expected_sha256) != 64 or any(character not in "0123456789abcdef" for character in expected_sha256):
             return jsonify({"error": "The retained source file has no valid integrity hash"}), 409
 
-        source_size = os.path.getsize(normalized_path)
-        if source_size > LOCAL_SOURCE_PREVIEW_MAX_BYTES:
-            return jsonify({
-                "error": "The retained source file exceeds the preview limit",
-                "maxBytes": LOCAL_SOURCE_PREVIEW_MAX_BYTES,
-            }), 413
-
         digest = hashlib.sha256()
         source_chunks = []
         verified_size = 0
         try:
-            with open(normalized_path, "rb") as source_file:
-                for chunk in iter(lambda: source_file.read(1024 * 1024), b""):
-                    verified_size += len(chunk)
-                    if verified_size > LOCAL_SOURCE_PREVIEW_MAX_BYTES:
+            flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+            descriptor = os.open(normalized_path, flags)
+            try:
+                with os.fdopen(descriptor, "rb", buffering=0, closefd=False) as source_file:
+                    opened = os.fstat(descriptor)
+                    if not stat.S_ISREG(opened.st_mode):
+                        return jsonify({"error": "The retained source file could not be verified"}), 409
+                    if opened.st_size > LOCAL_SOURCE_PREVIEW_MAX_BYTES:
                         return jsonify({
                             "error": "The retained source file exceeds the preview limit",
                             "maxBytes": LOCAL_SOURCE_PREVIEW_MAX_BYTES,
                         }), 413
-                    digest.update(chunk)
-                    source_chunks.append(chunk)
+                    while True:
+                        # A growing file can consume at most one byte beyond the limit.
+                        chunk = source_file.read(min(1024 * 1024, LOCAL_SOURCE_PREVIEW_MAX_BYTES - verified_size + 1))
+                        if not chunk:
+                            break
+                        verified_size += len(chunk)
+                        if verified_size > LOCAL_SOURCE_PREVIEW_MAX_BYTES:
+                            return jsonify({
+                                "error": "The retained source file exceeds the preview limit",
+                                "maxBytes": LOCAL_SOURCE_PREVIEW_MAX_BYTES,
+                            }), 413
+                        digest.update(chunk)
+                        source_chunks.append(chunk)
+            finally:
+                os.close(descriptor)
         except OSError:
             return jsonify({"error": "The retained source file could not be verified"}), 409
         if not hmac.compare_digest(digest.hexdigest(), expected_sha256):
@@ -7426,9 +7487,18 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
 
     @app.post("/api/reconciliation/run")
     def run_reconciliation():
-        payload = request.get_json(silent=True) or {}
+        try:
+            payload = request.get_json(silent=True)
+        except (ValueError, RecursionError):
+            return jsonify({"error": "Reconciliation request must be a JSON object"}), 400
+        if payload is None:
+            if request.get_data():
+                return jsonify({"error": "Reconciliation request must be a JSON object"}), 400
+            payload = {}
+        if not isinstance(payload, dict):
+            return jsonify({"error": "Reconciliation request must be a JSON object"}), 400
         if "bankTransactions" in payload:
-            bank_transactions = payload.get("bankTransactions") or []
+            bank_transactions = payload["bankTransactions"]
         else:
             bank_transactions = LocalBankTransactionImportService(ledger, config).transactions_for_reconciliation(
                 limit=_bounded_positive_int(payload.get("limit"), default=100, maximum=500),
@@ -7459,7 +7529,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
                 bank_transactions,
                 limit=100,
             )
-        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        except (TypeError, ValueError, json.JSONDecodeError, RecursionError) as exc:
             session["fab_last_reconciliation_summary"] = {
                 "error": f"Could not run reconciliation: {exc}",
                 "requestedTransactions": 0,
@@ -7487,6 +7557,8 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         status_code = 404 if result.get("status") == "not_found" else 200
         if result.get("status") == "invalid_status":
             status_code = 400
+        if result.get("status") == "stale_evidence":
+            status_code = 409
         return jsonify(result), status_code
 
     @app.post("/reconciliation/<int:reconciliation_match_id>/resolve")
@@ -7494,11 +7566,13 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         status = str(request.form.get("status") or "resolved")
         if status not in RECONCILIATION_RESOLUTION_STATUSES:
             status = "resolved"
-        LocalReconciliationService(ledger, config).resolve_match(
+        result = LocalReconciliationService(ledger, config).resolve_match(
             reconciliation_match_id,
             status=status,
             resolution=f"Resolved from FAB dashboard as {status}.",
         )
+        if not result.get("success"):
+            return jsonify(result), {"not_found": 404, "invalid_status": 400}.get(result.get("status"), 409)
         return redirect(url_for("dashboard_page", _anchor="reconciliation"))
 
     @app.get("/api/backups")
@@ -7940,6 +8014,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             "duplicate_candidate_selection_required": 409,
             "invalid_duplicate_decision": 400,
             "invalid_financial_correction": 400,
+            "stale_evidence": 409,
         }.get(result.get("status"), 200)
         return jsonify(result), status_code
 
@@ -7949,13 +8024,15 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         if status not in REVIEW_RESOLUTION_STATUSES:
             status = "resolved"
         resolution = request.form.get("resolution") or None
-        LocalReviewService(ledger).resolve_review_item(
+        result = LocalReviewService(ledger).resolve_review_item(
             review_item_id,
             status=status,
             resolution=resolution,
             corrections=_corrections_from_mapping(request.form),
             learn_rule=True,
         )
+        if not result.get("success"):
+            return jsonify(result), {"not_found": 404, "invalid_financial_correction": 400}.get(result.get("status"), 409)
         return redirect(url_for("dashboard_page", _anchor="review"))
 
     @app.get("/api/rules")

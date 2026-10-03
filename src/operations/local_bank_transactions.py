@@ -9,6 +9,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, Iterable, List, Optional
 
 from src.operations.local_ledger import LocalOperationsLedger
+from src.validation.financial_consistency import finite_number
 
 
 FINAL_RECONCILIATION_STATUSES = {"approved", "reconciled", "ignored"}
@@ -243,12 +244,10 @@ class LocalBankTransactionImportService:
         return summary
 
     def transactions_for_reconciliation(self, limit: int = 100) -> List[Dict[str, Any]]:
-        rows = [
-            row
-            for row in self.ledger.list_bank_transactions(limit=limit)
-            if row.get("reconciliation_status") not in FINAL_RECONCILIATION_STATUSES
-        ]
-        return [_transaction_for_reconciliation(row) for row in rows[: _bounded_limit(limit)]]
+        rows = self.ledger.list_bank_transactions(
+            reconciliation_status=OPEN_RECONCILIATION_STATUSES, limit=limit,
+        )
+        return [_transaction_for_reconciliation(row) for row in rows]
 
 
 def normalize_bank_transaction(
@@ -441,13 +440,15 @@ def _parse_mt940_61(line: str, sequence: int) -> Dict[str, Any]:
 
 
 def _parse_amount(lookup: _Lookup) -> Optional[float]:
-    amount = _parse_number(
-        lookup.first("amount", "transactionAmount", "transaction_amount", "bedrag", "value")
-    )
-    if amount is not None:
-        return amount
-    debit = _parse_number(lookup.first("debit", "af", "withdrawal"))
-    credit = _parse_number(lookup.first("credit", "bij", "deposit"))
+    value = lookup.first("amount", "transactionAmount", "transaction_amount", "bedrag", "value")
+    if value is not None:
+        return _parse_number(value)
+    debit_value = lookup.first("debit", "af", "withdrawal")
+    credit_value = lookup.first("credit", "bij", "deposit")
+    debit = _parse_number(debit_value)
+    credit = _parse_number(credit_value)
+    if (debit_value is not None and debit is None) or (credit_value is not None and credit is None):
+        return None
     if debit is None and credit is None:
         return None
     total = Decimal("0")
@@ -455,17 +456,21 @@ def _parse_amount(lookup: _Lookup) -> Optional[float]:
         total -= abs(Decimal(str(debit)))
     if credit is not None:
         total += abs(Decimal(str(credit)))
-    return float(total)
+    return finite_number(total)
 
 
 def _parse_number(value: Any) -> Optional[float]:
     if value is None or isinstance(value, bool):
         return None
     if isinstance(value, (int, float, Decimal)):
-        return float(value)
+        return finite_number(value)
     text = str(value).strip()
     if not text:
         return None
+    try:
+        return finite_number(Decimal(text))
+    except InvalidOperation:
+        pass
     negative = text.startswith("(") and text.endswith(")")
     text = re.sub(r"[^\d,.\-]", "", text)
     if not text or text in {"-", ".", ","}:
@@ -487,7 +492,7 @@ def _parse_number(value: Any) -> Optional[float]:
         return None
     if negative:
         number = -abs(number)
-    return float(number)
+    return finite_number(number)
 
 
 def _normalize_date(value: Any) -> Optional[str]:

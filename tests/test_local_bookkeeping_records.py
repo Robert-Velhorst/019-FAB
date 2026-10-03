@@ -7,6 +7,37 @@ from src.operations.local_ledger import LocalOperationsLedger
 
 
 class TestLocalBookkeepingRecordService(unittest.TestCase):
+    def test_current_document_block_overrides_old_prepared_route(self):
+        for processing_status, expected in (
+            ("failed", "blocked_processing"),
+            ("duplicate", "blocked_duplicate"),
+            ("needs_review", "blocked_by_review"),
+        ):
+            with self.subTest(status=processing_status), tempfile.TemporaryDirectory() as temp_dir:
+                ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+                document_id = ledger.register_document({
+                    "source": "scanner", "sourceDocumentId": "old-draft",
+                    "processingStatus": "export_draft_prepared",
+                    "vendorName": "Office Shop", "category": "Office Supplies",
+                    "transactionDate": "2026-06-28", "totalAmount": 42.5,
+                })
+                route_id = ledger.create_routing_attempt({
+                    "documentId": document_id, "target": "waveapps_business",
+                    "status": "draft_prepared",
+                })
+                service = LocalBookkeepingRecordService(ledger)
+                service.upsert_from_document(document_id)
+                ledger.update_document(document_id, {"processingStatus": processing_status})
+
+                result = service.upsert_from_document(document_id)
+                record = ledger.get_bookkeeping_record(result["recordId"])
+
+                self.assertEqual(record["export_status"], expected)
+                self.assertTrue(record["review_required"])
+                self.assertFalse(record["metadata"]["exportReadiness"]["readyForWaveDraft"])
+                self.assertEqual(ledger.get_routing_attempt(route_id)["status"], "draft_prepared")
+                self.assertEqual(record["amount"], 42.5)
+
     def test_upsert_from_document_creates_export_ready_record(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))

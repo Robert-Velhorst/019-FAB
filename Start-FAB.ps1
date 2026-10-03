@@ -2,13 +2,22 @@
 param(
     [switch]$NoBrowser,
     [switch]$Development,
-    [switch]$Maintenance
+    [switch]$Maintenance,
+    [ValidateSet("local", "windows")][string]$DeploymentProfile
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $root "scripts\Windows-Profile.ps1")
+. (Join-Path $root "scripts\Windows-Job.ps1")
+. (Join-Path $root "scripts\Windows-Process.ps1")
+$lifecycleLock = Enter-FabLifecycleLock -Root $root
+try {
+if ($DeploymentProfile) {
+    $env:FAB_DEPLOYMENT_PROFILE = $DeploymentProfile
+}
 $webRoot = Join-Path $root "web"
 $dataRoot = Join-Path $root "data"
 $logsRoot = Join-Path $root "logs"
@@ -46,10 +55,16 @@ function Test-FabEndpoint {
     )
 
     try {
+        $uri = [System.Uri]$Url
+        $probeHost = $uri.DnsSafeHost
+        if ($probeHost -ne 'localhost') { $probeHost = ([Net.IPAddress]$probeHost).ToString() }
+        if (-not $uri.IsAbsoluteUri -or $uri.Scheme -notin @('http', 'https') -or
+            $probeHost -notin @('127.0.0.1', 'localhost', '::1') -or $uri.UserInfo) { return $false }
         $request = @{
             Uri = $Url
             UseBasicParsing = $true
             TimeoutSec = 2
+            MaximumRedirection = 0
         }
         if ($ApiToken) {
             $request.Headers = @{ Authorization = "Bearer $ApiToken" }
@@ -127,14 +142,15 @@ function Find-AvailableFabPort {
 function Get-FabProcessId {
     param(
         [AllowNull()][object]$ProcessId,
-        [Parameter(Mandatory = $true)][string]$CommandMarker
+        [Parameter(Mandatory = $true)][string]$CommandMarker,
+        [uint32]$OperationTimeoutSeconds = 0
     )
 
     if (-not $ProcessId) {
         return $null
     }
 
-    $process = Get-CimInstance Win32_Process -Filter "ProcessId = $ProcessId" -ErrorAction SilentlyContinue
+    $process = Get-CimInstance Win32_Process -Filter "ProcessId = $ProcessId" -OperationTimeoutSec $OperationTimeoutSeconds -ErrorAction SilentlyContinue
     $normalizedCommand = if ($process -and $process.CommandLine) { ([string]$process.CommandLine).Replace("\", "/") } else { "" }
     $normalizedMarker = $CommandMarker.Replace("\", "/")
     if (-not $process -or -not $normalizedCommand -or $normalizedCommand -notlike "*$normalizedMarker*") {
@@ -207,15 +223,19 @@ function Get-FabDashboardProcessRoot {
 function Test-FabProcessAncestor {
     param(
         [Parameter(Mandatory = $true)][int]$AncestorProcessId,
-        [Parameter(Mandatory = $true)][int]$DescendantProcessId
+        [Parameter(Mandatory = $true)][int]$DescendantProcessId,
+        [System.Diagnostics.Stopwatch]$Watch,
+        [int]$TimeoutSeconds = 0
     )
 
     $currentId = $DescendantProcessId
     for ($depth = 0; $depth -lt 12 -and $currentId; $depth++) {
+        if ($Watch -and $Watch.Elapsed.TotalSeconds -ge $TimeoutSeconds) { return $false }
         if ($currentId -eq $AncestorProcessId) {
             return $true
         }
-        $process = Get-CimInstance Win32_Process -Filter "ProcessId = $currentId" -ErrorAction SilentlyContinue
+        $operationSeconds = if ($Watch) { [uint32][Math]::Min(2, [Math]::Max(1, [Math]::Ceiling($TimeoutSeconds - $Watch.Elapsed.TotalSeconds))) } else { 0 }
+        $process = Get-CimInstance Win32_Process -Filter "ProcessId = $currentId" -OperationTimeoutSec $operationSeconds -ErrorAction SilentlyContinue
         if (-not $process -or -not $process.ParentProcessId) {
             break
         }
@@ -356,7 +376,8 @@ function Find-RunningFabApi {
 function Get-FabWorkerRuntimeProcessId {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
-        [Parameter(Mandatory = $true)][string]$ExpectedRoot
+        [Parameter(Mandatory = $true)][string]$ExpectedRoot,
+        [uint32]$OperationTimeoutSeconds = 0
     )
 
     if (-not (Test-Path -LiteralPath $Path)) {
@@ -369,11 +390,43 @@ function Get-FabWorkerRuntimeProcessId {
         if ($actualRoot -ne $expected) {
             return $null
         }
-        return Get-FabProcessId -ProcessId $runtime.pid -CommandMarker "src.run_worker"
+        return Get-FabProcessId -ProcessId $runtime.pid -CommandMarker "src.run_worker" -OperationTimeoutSeconds $OperationTimeoutSeconds
     }
     catch {
         return $null
     }
+}
+
+function Wait-FabWorkerRuntime {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$ExpectedRoot,
+        [Parameter(Mandatory = $true)][int]$ExpectedProcessId,
+        [ValidateRange(1, 120)][int]$TimeoutSeconds = 30
+    )
+
+    $watch = [System.Diagnostics.Stopwatch]::StartNew()
+    do {
+        $remaining = $TimeoutSeconds - $watch.Elapsed.TotalSeconds
+        if ($remaining -le 0) { break }
+        $operationSeconds = [uint32][Math]::Min(2, [Math]::Ceiling($remaining))
+        $registeredPid = Get-FabWorkerRuntimeProcessId -Path $Path -ExpectedRoot $ExpectedRoot -OperationTimeoutSeconds $operationSeconds
+        if ($watch.Elapsed.TotalSeconds -ge $TimeoutSeconds) { break }
+        if ($registeredPid -and (Test-FabProcessAncestor -AncestorProcessId $ExpectedProcessId -DescendantProcessId $registeredPid -Watch $watch -TimeoutSeconds $TimeoutSeconds)) {
+            if ($watch.Elapsed.TotalSeconds -lt $TimeoutSeconds) { return $registeredPid }
+            break
+        }
+        $remaining = $TimeoutSeconds - $watch.Elapsed.TotalSeconds
+        if ($remaining -le 0) { break }
+        $operationSeconds = [uint32][Math]::Min(2, [Math]::Ceiling($remaining))
+        if (-not (Get-FabProcessId -ProcessId $ExpectedProcessId -CommandMarker "src.run_worker" -OperationTimeoutSeconds $operationSeconds)) {
+            throw "FAB autonomous worker exited before confirming runtime ownership. Check logs\worker.err.log."
+        }
+        $remaining = $TimeoutSeconds - $watch.Elapsed.TotalSeconds
+        if ($remaining -le 0) { break }
+        Start-Sleep -Milliseconds ([int][Math]::Min(250, [Math]::Ceiling($remaining * 1000)))
+    } while ($watch.Elapsed.TotalSeconds -lt $TimeoutSeconds)
+    throw "FAB autonomous worker did not confirm runtime ownership within $TimeoutSeconds seconds. Check logs\worker.err.log."
 }
 
 function Wait-FabEndpoint {
@@ -400,16 +453,12 @@ function Wait-FabEndpoint {
 }
 
 function Stop-FabSpawnedProcessTree {
-    param([AllowNull()][object]$ProcessId)
+    param(
+        [AllowNull()][System.Diagnostics.Process]$Process,
+        [ValidateRange(0, 32)][int]$Depth = 0
+    )
 
-    if (-not $ProcessId) {
-        return
-    }
-    $children = Get-CimInstance Win32_Process -Filter "ParentProcessId = $ProcessId" -ErrorAction SilentlyContinue
-    foreach ($child in $children) {
-        Stop-FabSpawnedProcessTree -ProcessId ([int]$child.ProcessId)
-    }
-    Stop-Process -Id ([int]$ProcessId) -Force -ErrorAction SilentlyContinue
+    Stop-FabOwnedProcessTree -Process $Process -Depth $Depth
 }
 
 function Invoke-FabNativeCommand {
@@ -545,8 +594,23 @@ if (-not (Test-Path -LiteralPath (Join-Path $webRoot ".env"))) {
     Copy-Item -LiteralPath (Join-Path $webRoot ".env.example") -Destination (Join-Path $webRoot ".env")
 }
 
-$apiToken = [string]$env:FAB_LOCAL_API_TOKEN
-if ($apiToken.Length -lt 32) {
+$startupSettingsJson = & $python.Source -c "import hashlib,json; from src.config_loader import ConfigLoader; c=ConfigLoader('config/config.ini').get_all_config(); storage=[c.get('fab_local_ledger_path', c.get('operations_ledger_path', '')), c.get('fab_local_backup_dir', c.get('operations_backup_dir', c.get('backup_dir', '')))]; print(json.dumps({'profile': c.get('fab_deployment_profile', c.get('operations_deployment_profile', 'local')), 'apiToken': c.get('fab_local_api_token', c.get('fab_operations_api_token', c.get('operations_api_token', ''))), 'haiToken': c.get('fab_hai_api_token', c.get('operations_hai_api_token', '')), 'apiPort': c.get('fab_local_api_port', c.get('operations_api_port', 5001)), 'storageId': hashlib.sha256(json.dumps(storage).encode()).hexdigest()}))"
+if ($LASTEXITCODE -ne 0) {
+    throw "FAB could not load deployment settings or secret files."
+}
+$startupSettings = $startupSettingsJson | ConvertFrom-Json
+$startupSettingsJson = $null
+$deploymentProfile = [string]$startupSettings.profile
+$deploymentStorageId = [string]$startupSettings.storageId
+if ($deploymentProfile -notin @("local", "windows")) {
+    throw "Start-FAB.ps1 supports local and windows profiles only. Use the VM deployment entrypoints for vm."
+}
+if ($deploymentProfile -ne "local" -and $Development) {
+    throw "The Windows production profile requires the production dashboard; omit -Development."
+}
+$env:FAB_DEPLOYMENT_PROFILE = $deploymentProfile
+$apiToken = [string]$startupSettings.apiToken
+if (-not $apiToken -or ($deploymentProfile -eq "local" -and $apiToken.Length -lt 32)) {
     $apiToken = & $python.Source -c "from src.config_loader import ConfigLoader; from src.security.local_secret_store import LocalSecretStore; c=ConfigLoader('config/config.ini').get_all_config(); print(LocalSecretStore(c).get_or_create_runtime_secret('operator_api_token'))"
     if ($LASTEXITCODE -ne 0 -or ([string]$apiToken).Length -lt 32) {
         throw "FAB could not provision its encrypted operator API credential."
@@ -554,8 +618,8 @@ if ($apiToken.Length -lt 32) {
     $apiToken = [string]$apiToken
 }
 
-$haiApiToken = [string]$env:FAB_HAI_API_TOKEN
-if ($haiApiToken.Length -lt 32) {
+$haiApiToken = [string]$startupSettings.haiToken
+if (-not $haiApiToken -or ($deploymentProfile -eq "local" -and $haiApiToken.Length -lt 32)) {
     $haiApiToken = & $python.Source -c "from src.config_loader import ConfigLoader; from src.security.local_secret_store import LocalSecretStore; c=ConfigLoader('config/config.ini').get_all_config(); print(LocalSecretStore(c).get_or_create_runtime_secret('hai_api_token'))"
     if ($LASTEXITCODE -ne 0 -or ([string]$haiApiToken).Length -lt 32) {
         throw "FAB could not provision its encrypted HAI API credential."
@@ -566,13 +630,52 @@ if ([System.StringComparer]::Ordinal.Equals($apiToken, $haiApiToken)) {
     throw "FAB operator and HAI credentials must be different."
 }
 
-$webJwtSecret = [string]$env:JWT_SECRET
-if ($webJwtSecret.Length -lt 32) {
+$previousPreflightInstanceRoot = $env:FAB_INSTANCE_ROOT
+try {
+    $env:FAB_INSTANCE_ROOT = $root
+    Invoke-FabWithServiceCredentials -ApiToken $apiToken -HaiApiToken $haiApiToken -Action {
+        & $python.Source -m src.run_deployment_preflight
+        if ($LASTEXITCODE -ne 0) {
+            throw "FAB deployment preflight blocked startup. No services were started."
+        }
+    }
+}
+finally {
+    [Environment]::SetEnvironmentVariable("FAB_INSTANCE_ROOT", $previousPreflightInstanceRoot, "Process")
+}
+if ($deploymentProfile -ne "local") {
+    $defaultApiPort = [int]$startupSettings.apiPort
+    if ($env:PORT) {
+        $defaultWebPort = [int]$env:PORT
+    }
+    if ($defaultWebPort -lt 1 -or $defaultWebPort -gt 65535) {
+        throw "The Windows dashboard port must be between 1 and 65535."
+    }
+    if ($defaultWebPort -eq $defaultApiPort) {
+        throw "The Windows API and dashboard must use different ports."
+    }
+}
+$startupSettings = $null
+
+$webJwtSecret = & $python.Source -c "from src.security.deployment_secrets import read_secret; print(read_secret('JWT_SECRET'))"
+if ($LASTEXITCODE -ne 0) {
+    throw "FAB could not resolve the dashboard signing secret. Configure JWT_SECRET or JWT_SECRET_FILE, not both."
+}
+$webJwtSecret = [string]$webJwtSecret
+if (-not $webJwtSecret -or ($deploymentProfile -eq "local" -and $webJwtSecret.Length -lt 32)) {
     $webJwtSecret = & $python.Source -c "from src.config_loader import ConfigLoader; from src.security.local_secret_store import LocalSecretStore; c=ConfigLoader('config/config.ini').get_all_config(); print(LocalSecretStore(c).get_or_create_runtime_secret('web_jwt_secret'))"
     if ($LASTEXITCODE -ne 0 -or ([string]$webJwtSecret).Length -lt 32) {
         throw "FAB could not provision its encrypted dashboard signing secret."
     }
     $webJwtSecret = [string]$webJwtSecret
+}
+if ($deploymentProfile -ne "local") {
+    Invoke-FabWithServiceCredentials -ApiToken $apiToken -HaiApiToken $haiApiToken -JwtSecret $webJwtSecret -Action {
+        & $python.Source -c "import os; from src.security.deployment_secrets import strong_secret; raise SystemExit(0 if strong_secret(os.environ.get('JWT_SECRET')) else 1)"
+        if ($LASTEXITCODE -ne 0) {
+            throw "FAB requires a strong dashboard signing secret for the Windows profile."
+        }
+    }
 }
 
 $mijngeldzakenExportDir = & $python.Source -c "from src.config_loader import ConfigLoader; c=ConfigLoader('config/config.ini').get_all_config(); print(str(c.get('mijngeldzaken_export_dir') or c.get('operations_mijngeldzaken_export_dir') or 'data/exports/mijngeldzaken'))"
@@ -664,6 +767,14 @@ if (Test-Path -LiteralPath $runtimePath) {
     }
 }
 if ($savedRuntime) {
+    $savedProfileProperty = $savedRuntime.PSObject.Properties["deploymentProfile"]
+    $savedStorageProperty = $savedRuntime.PSObject.Properties["deploymentStorageId"]
+    $savedProfile = if ($savedProfileProperty) { [string]$savedProfileProperty.Value } else { "local" }
+    $savedStorageId = if ($savedStorageProperty) { [string]$savedStorageProperty.Value } else { "" }
+    if (($deploymentProfile -ne "local" -or $savedProfile -ne "local") -and
+        ($savedProfile -ne $deploymentProfile -or $savedStorageId -ne $deploymentStorageId)) {
+        throw "FAB production storage configuration changed. Run Stop-FAB.cmd with the previous configuration before starting this profile. No ledger is moved automatically."
+    }
     $savedMaintenanceMode = $false
     $savedMaintenanceProperty = $savedRuntime.PSObject.Properties["maintenanceMode"]
     if ($savedMaintenanceProperty) {
@@ -704,6 +815,9 @@ if ($savedRuntime) {
 }
 
 $apiPid = $null
+$apiProcess = $null
+$workerProcess = $null
+$webProcess = $null
 $workerPid = $null
 $webPid = $null
 $webListenerPid = $null
@@ -728,6 +842,9 @@ if ($savedRuntime) {
 if (-not $apiPid) {
     $runningApi = Find-RunningFabApi -ExpectedRoot $root -ApiToken $apiToken -ExpectedMaintenanceMode $requestedMaintenanceMode
     if ($runningApi) {
+        if ($deploymentProfile -ne "local" -and -not $savedRuntime) {
+            throw "The Windows profile cannot adopt an unverified running API. Run Stop-FAB.cmd first."
+        }
         $apiPid = [int]$runningApi.ProcessId
         $apiUrl = [string]$runningApi.Url
     }
@@ -740,6 +857,9 @@ if (-not $apiPid) {
 }
 
 $managedWorkerPid = Get-FabWorkerRuntimeProcessId -Path $workerRuntimePath -ExpectedRoot $root
+if ($deploymentProfile -ne "local" -and $managedWorkerPid -and -not $savedRuntime) {
+    throw "The Windows profile cannot adopt an unverified running worker. Run Stop-FAB.cmd first."
+}
 if ($requestedMaintenanceMode -and $managedWorkerPid) {
     throw "The FAB autonomous worker is still active. Run Stop-FAB.cmd, then start maintenance again."
 }
@@ -753,25 +873,53 @@ if ($requestedMaintenanceMode) {
     $workerPid = $null
 }
 
+if ($deploymentProfile -ne "local") {
+    if ($apiPid -and ([System.Uri]$apiUrl).Port -ne $defaultApiPort) {
+        throw "The running FAB API uses a different production port. Run Stop-FAB.cmd first."
+    }
+    if ($savedRuntime -and $savedRuntime.dashboardUrl -and ([System.Uri]$savedRuntime.dashboardUrl).Port -ne $defaultWebPort) {
+        throw "The saved FAB dashboard uses a different production port. Run Stop-FAB.cmd first."
+    }
+    if (-not $apiPid -and -not (Test-TcpPortAvailable -Port $defaultApiPort)) {
+        throw "The configured FAB API port is occupied. Stop the conflicting service or explicitly configure another port."
+    }
+    $expectedApiBase = "http://127.0.0.1:$defaultApiPort"
+    $expectedWebIdentity = "http://127.0.0.1:$defaultWebPort/api/fab/runtime"
+    $ownedDashboardReady = $savedRuntime -and (Test-FabEndpoint -Url $expectedWebIdentity -ExpectedService "fab-operator-dashboard" -ExpectedLocalApiEndpoint $expectedApiBase -ExpectedInstanceRoot $root)
+    if (-not $ownedDashboardReady -and -not (Test-TcpPortAvailable -Port $defaultWebPort)) {
+        throw "The configured FAB dashboard port is occupied. Stop the conflicting service or explicitly configure another port."
+    }
+}
+
+# Roll back only services created here if any startup or registration step fails.
+$startupCompleted = $false
+try {
 if (-not $apiPid) {
-    $apiPort = Find-AvailableFabPort -StartPort $defaultApiPort
+    $apiPort = Find-AvailableFabPort -StartPort $defaultApiPort -Attempts $(if ($deploymentProfile -eq "local") { 20 } else { 1 })
     $apiUrl = "http://127.0.0.1:$apiPort/api/live"
     $previousApiPort = $env:FAB_LOCAL_API_PORT
+    $previousApiHost = $env:FAB_LOCAL_API_HOST
     $previousMaintenanceMode = $env:FAB_MAINTENANCE_MODE
     $previousApiInstanceRoot = $env:FAB_INSTANCE_ROOT
     $previousLocalApiToken = $env:FAB_LOCAL_API_TOKEN
     $previousHaiApiToken = $env:FAB_HAI_API_TOKEN
     try {
         $env:FAB_LOCAL_API_PORT = [string]$apiPort
+        if ($deploymentProfile -ne "local") {
+            $env:FAB_LOCAL_API_HOST = "127.0.0.1"
+        }
         $env:FAB_MAINTENANCE_MODE = if ($requestedMaintenanceMode) { "true" } else { "false" }
         $env:FAB_INSTANCE_ROOT = $root
         $env:FAB_LOCAL_API_TOKEN = $apiToken
         $env:FAB_HAI_API_TOKEN = $haiApiToken
-        $apiProcess = Start-Process -FilePath $python.Source -ArgumentList @("-m", "src.operations.local_api") -WorkingDirectory $root -WindowStyle Hidden -RedirectStandardOutput (Join-Path $logsRoot "local-api.out.log") -RedirectStandardError (Join-Path $logsRoot "local-api.err.log") -PassThru
+        $apiProcess = Invoke-FabWithServiceCredentials -ApiToken $apiToken -HaiApiToken $haiApiToken -Action {
+            Start-FabContainedProcess -FilePath $python.Source -ArgumentList @("-m", "src.operations.local_api") -WorkingDirectory $root -RedirectStandardOutput (Join-Path $logsRoot "local-api.out.log") -RedirectStandardError (Join-Path $logsRoot "local-api.err.log")
+        }
         $apiPid = $apiProcess.Id
         $apiStartedThisRun = $true
     }
     finally {
+        [Environment]::SetEnvironmentVariable("FAB_LOCAL_API_HOST", $previousApiHost, "Process")
         if ($null -eq $previousApiPort) {
             Remove-Item Env:FAB_LOCAL_API_PORT -ErrorAction SilentlyContinue
         }
@@ -846,26 +994,8 @@ if (-not $webPid) {
     }
 }
 
-if (-not $requestedMaintenanceMode -and -not $workerPid) {
-    $previousWorkerInstanceRoot = $env:FAB_INSTANCE_ROOT
-    try {
-        $env:FAB_INSTANCE_ROOT = $root
-        $workerProcess = Start-Process -FilePath $python.Source -ArgumentList @("-m", "src.run_worker") -WorkingDirectory $root -WindowStyle Hidden -RedirectStandardOutput (Join-Path $logsRoot "worker.out.log") -RedirectStandardError (Join-Path $logsRoot "worker.err.log") -PassThru
-        $workerPid = $workerProcess.Id
-        $workerStartedThisRun = $true
-    }
-    finally {
-        if ($null -eq $previousWorkerInstanceRoot) {
-            Remove-Item Env:FAB_INSTANCE_ROOT -ErrorAction SilentlyContinue
-        }
-        else {
-            $env:FAB_INSTANCE_ROOT = $previousWorkerInstanceRoot
-        }
-    }
-}
-
 if (-not $webPid) {
-    $webPort = Find-AvailableFabPort -StartPort $defaultWebPort
+    $webPort = Find-AvailableFabPort -StartPort $defaultWebPort -Attempts $(if ($deploymentProfile -eq "local") { 20 } else { 1 })
     $dashboardUrl = "http://127.0.0.1:$webPort/admin/operations"
     $webIdentityUrl = "http://127.0.0.1:$webPort/api/fab/runtime"
     $webMode = if ($Development) { "development" } else { "production" }
@@ -889,7 +1019,9 @@ if (-not $webPid) {
     try {
         $env:PORT = [string]$webPort
         $env:FAB_LOCAL_API_URL = $apiBaseUrl
-        $env:FAB_LOCAL_API_PUBLIC_URL = $apiBaseUrl
+        if (-not $env:FAB_LOCAL_API_PUBLIC_URL) {
+            $env:FAB_LOCAL_API_PUBLIC_URL = $apiBaseUrl
+        }
         $env:FAB_INSTANCE_ROOT = $root
         $env:JWT_SECRET = $webJwtSecret
         $env:FAB_WEB_HOST = "127.0.0.1"
@@ -903,13 +1035,21 @@ if (-not $webPid) {
             Remove-Item Env:FAB_OPERATIONS_SERVICE_TOKEN -ErrorAction SilentlyContinue
         }
         if ($webMode -eq "development") {
+            $tsxCli = Join-Path $webRoot "node_modules\tsx\dist\cli.mjs"
+            if (-not (Test-Path -LiteralPath $tsxCli -PathType Leaf)) {
+                throw "FAB development runner is missing. Install the locked web dependencies first."
+            }
             $env:NODE_ENV = "development"
-            $webProcess = Start-Process -FilePath $pnpm.Source -ArgumentList @("--dir", $webRoot, "dev") -WorkingDirectory $root -WindowStyle Hidden -RedirectStandardOutput (Join-Path $logsRoot "web.out.log") -RedirectStandardError (Join-Path $logsRoot "web.err.log") -PassThru
+            $webProcess = Invoke-FabWithServiceCredentials -ApiToken $apiToken -HaiApiToken $haiApiToken -JwtSecret $webJwtSecret -Action {
+                Start-FabContainedProcess -FilePath $node.Source -ArgumentList @($tsxCli, "watch", (Join-Path $webRoot "server\dev.ts")) -WorkingDirectory $webRoot -RedirectStandardOutput (Join-Path $logsRoot "web.out.log") -RedirectStandardError (Join-Path $logsRoot "web.err.log")
+            }
             $webProcessMarker = "dev"
         }
         else {
             $env:NODE_ENV = "production"
-            $webProcess = Start-Process -FilePath $node.Source -ArgumentList @((Join-Path $webRoot "dist\fab-standalone.js")) -WorkingDirectory $webRoot -WindowStyle Hidden -RedirectStandardOutput (Join-Path $logsRoot "web.out.log") -RedirectStandardError (Join-Path $logsRoot "web.err.log") -PassThru
+            $webProcess = Invoke-FabWithServiceCredentials -ApiToken $apiToken -HaiApiToken $haiApiToken -JwtSecret $webJwtSecret -Action {
+                Start-FabContainedProcess -FilePath $node.Source -ArgumentList @((Join-Path $webRoot "dist\fab-standalone.js")) -WorkingDirectory $webRoot -RedirectStandardOutput (Join-Path $logsRoot "web.out.log") -RedirectStandardError (Join-Path $logsRoot "web.err.log")
+            }
             $webProcessMarker = "dist/fab-standalone.js"
         }
         $webPid = $webProcess.Id
@@ -983,33 +1123,40 @@ else {
     $webIdentityUrl = "$($dashboardUri.GetLeftPart([System.UriPartial]::Authority))/api/fab/runtime"
 }
 
-try {
-    Wait-FabEndpoint -Url $apiUrl -Name "FAB ledger API" -ExpectedService "fab-ledger-api" -ApiToken $apiToken -ExpectedInstanceRoot $root -ExpectedMaintenanceMode $requestedMaintenanceMode -TimeoutSeconds 120
-    Wait-FabEndpoint -Url $webIdentityUrl -Name "FAB operator dashboard" -ExpectedService "fab-operator-dashboard" -ExpectedLocalApiEndpoint $apiBaseUrl -ExpectedInstanceRoot $root -TimeoutSeconds 120
-    $webListenerPid = Get-FabListenerProcessId -Url $webIdentityUrl
-    if (-not $webListenerPid) {
-        throw "FAB dashboard is responding but its loopback listener process could not be identified."
+Wait-FabEndpoint -Url $apiUrl -Name "FAB ledger API" -ExpectedService "fab-ledger-api" -ApiToken $apiToken -ExpectedInstanceRoot $root -ExpectedMaintenanceMode $requestedMaintenanceMode -TimeoutSeconds 120
+Wait-FabEndpoint -Url $webIdentityUrl -Name "FAB operator dashboard" -ExpectedService "fab-operator-dashboard" -ExpectedLocalApiEndpoint $apiBaseUrl -ExpectedInstanceRoot $root -TimeoutSeconds 120
+$webListenerPid = Get-FabListenerProcessId -Url $webIdentityUrl
+if (-not $webListenerPid) {
+    throw "FAB dashboard is responding but its loopback listener process could not be identified."
+}
+if (-not (Test-FabProcessAncestor -AncestorProcessId $webPid -DescendantProcessId $webListenerPid)) {
+    if ($webStartedThisRun) {
+        throw "The newly started FAB dashboard does not own the responding listener. Startup was stopped."
     }
-    if (-not (Test-FabProcessAncestor -AncestorProcessId $webPid -DescendantProcessId $webListenerPid)) {
-        $webPid = Get-FabDashboardProcessRoot -ListenerProcessId $webListenerPid -ExpectedWebRoot $webRoot
+    $webPid = Get-FabDashboardProcessRoot -ListenerProcessId $webListenerPid -ExpectedWebRoot $webRoot
+}
+
+if (-not $requestedMaintenanceMode -and -not $workerPid) {
+    $previousWorkerInstanceRoot = $env:FAB_INSTANCE_ROOT
+    try {
+        $env:FAB_INSTANCE_ROOT = $root
+        $workerProcess = Invoke-FabWithServiceCredentials -ApiToken $apiToken -HaiApiToken $haiApiToken -Action {
+            Start-FabContainedProcess -FilePath $python.Source -ArgumentList @("-m", "src.run_worker") -WorkingDirectory $root -RedirectStandardOutput (Join-Path $logsRoot "worker.out.log") -RedirectStandardError (Join-Path $logsRoot "worker.err.log")
+        }
+        $workerPid = $workerProcess.Id
+        $workerStartedThisRun = $true
     }
-    if (-not $requestedMaintenanceMode -and -not (Get-FabProcessId -ProcessId $workerPid -CommandMarker "src.run_worker")) {
-        throw "FAB autonomous worker exited during startup. Check logs\worker.err.log."
+    finally {
+        if ($null -eq $previousWorkerInstanceRoot) {
+            Remove-Item Env:FAB_INSTANCE_ROOT -ErrorAction SilentlyContinue
+        }
+        else {
+            $env:FAB_INSTANCE_ROOT = $previousWorkerInstanceRoot
+        }
     }
 }
-catch {
-    if ($webStartedThisRun) {
-        Stop-FabSpawnedProcessTree -ProcessId $webPid
-    }
-    if ($workerStartedThisRun) {
-        Stop-FabSpawnedProcessTree -ProcessId $workerPid
-        Remove-Item -LiteralPath $workerRuntimePath -Force -ErrorAction SilentlyContinue
-    }
-    if ($apiStartedThisRun) {
-        Stop-FabSpawnedProcessTree -ProcessId $apiPid
-    }
-    Remove-Item -LiteralPath $runtimePath -Force -ErrorAction SilentlyContinue
-    throw
+if (-not $requestedMaintenanceMode) {
+    $workerPid = Wait-FabWorkerRuntime -Path $workerRuntimePath -ExpectedRoot $root -ExpectedProcessId $workerPid -TimeoutSeconds 30
 }
 
 if (-not $requestedMaintenanceMode) {
@@ -1050,7 +1197,7 @@ catch {
 }
 }
 
-[ordered]@{
+$runtimeMetadata = [ordered]@{
     startedAt = (Get-Date).ToUniversalTime().ToString("o")
     root = $root
     apiPid = $apiPid
@@ -1065,7 +1212,69 @@ catch {
     webIdentityUrl = $webIdentityUrl
     sourceFingerprint = $sourceFingerprint
     maintenanceMode = $requestedMaintenanceMode
-} | ConvertTo-Json | Set-Content -LiteralPath $runtimePath -Encoding utf8
+    deploymentProfile = $deploymentProfile
+    deploymentStorageId = $deploymentStorageId
+}
+$processIdentities = @{}
+$savedIdentitiesOwned = $false
+if ($savedRuntime -and $savedRuntime.PSObject.Properties['root']) {
+    try {
+        $savedIdentitiesOwned = ([IO.Path]::GetFullPath([string]$savedRuntime.root).TrimEnd('\', '/') -eq [IO.Path]::GetFullPath($root).TrimEnd('\', '/'))
+    }
+    catch { $savedIdentitiesOwned = $false }
+}
+if ($savedIdentitiesOwned -and $savedRuntime.PSObject.Properties['processes'] -and $null -ne $savedRuntime.processes) {
+    foreach ($entry in $savedRuntime.processes.PSObject.Properties) {
+        if ($entry.Name -in @('api', 'web', 'worker') -and $null -ne $entry.Value -and
+            $entry.Value.PSObject.Properties['rootPid'] -and
+            [int]$entry.Value.rootPid -eq [int]$runtimeMetadata[$entry.Name + 'Pid']) {
+            $processIdentities[$entry.Name] = $entry.Value
+        }
+    }
+}
+foreach ($name in @('api', 'web', 'worker')) {
+    $process = @{api=$apiProcess; web=$webProcess; worker=$workerProcess}[$name]
+    if ($null -ne $process) {
+        $processIdentities[$name] = @{
+            rootPid = $process.Id
+            startedAtTicks = [string]$process.StartTime.ToUniversalTime().Ticks
+            jobName = $process.FabJob.JobName
+        }
+    }
+}
+$runtimeMetadata.processes = $processIdentities
+# Retain rollback handles until metadata publication succeeds. Only newly
+# launched roots receive a lifetime handle; adopted services are left alone.
+foreach ($process in @($apiProcess, $webProcess, $workerProcess)) {
+    if ($null -ne $process) { $process.FabJob.Commit() }
+}
+Write-FabRuntimeMetadata -Path $runtimePath -Runtime $runtimeMetadata
+$startupCompleted = $true
+}
+finally {
+    # Pipeline cancellation bypasses catch, but still enters finally. Keep the
+    # launcher-owned job handles until unsuccessful starts have been unwound.
+    if (-not $startupCompleted) {
+        if ($webStartedThisRun) {
+            try { Stop-FabSpawnedProcessTree -Process $webProcess }
+            catch { Write-Warning "Could not stop the newly started dashboard. Inspect this checkout with Stop-FAB.cmd." -WarningAction Continue }
+        }
+        if ($workerStartedThisRun) {
+            try { Stop-FabSpawnedProcessTree -Process $workerProcess }
+            catch { Write-Warning "Could not stop the newly started worker. Inspect this checkout with Stop-FAB.cmd." -WarningAction Continue }
+        }
+        if ($apiStartedThisRun) {
+            try { Stop-FabSpawnedProcessTree -Process $apiProcess }
+            catch { Write-Warning "Could not stop the newly started API. Inspect this checkout with Stop-FAB.cmd." -WarningAction Continue }
+        }
+    }
+    foreach ($process in @($apiProcess, $webProcess, $workerProcess)) {
+        if ($null -ne $process) {
+            $process.FabJob.Dispose()
+            if ($process -is [System.Diagnostics.Process]) { $process.Dispose() }
+        }
+    }
+}
 
 Write-Host ""
 if ($requestedMaintenanceMode) {
@@ -1087,3 +1296,5 @@ else {
 if (-not $NoBrowser) {
     Start-Process $dashboardUrl
 }
+}
+finally { Exit-FabLifecycleLock -Lock $lifecycleLock }

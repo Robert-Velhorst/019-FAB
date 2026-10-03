@@ -1,6 +1,7 @@
 import type { Request } from "express";
 import { ENV } from "./_core/env";
 import { isLoopbackRequest } from "./lib/loopback";
+import { authenticateFabManagedRequest, isFabManagedAuthEnabled } from "./fabManagedAuth";
 
 type AuthenticatedOperator = {
   id?: number | string;
@@ -31,6 +32,12 @@ export async function resolveFabOperatorAccess(
   req: Request,
   options: FabOperatorAccessOptions = {},
 ): Promise<FabOperatorAccess> {
+  if (isFabManagedAuthEnabled()) {
+    const user = await authenticateFabManagedRequest(req);
+    return user
+      ? { actor: `fab_dashboard:admin:${operatorActor(user.openId)}`, allowed: true, mode: "admin" }
+      : { actor: null, allowed: false, mode: null };
+  }
   const localOperatorMode = options.localOperatorMode ?? ENV.fabOperatorLocalMode;
   const localOperator = localOperatorMode && isLoopbackRequest(
     req,

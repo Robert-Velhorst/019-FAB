@@ -1,5 +1,8 @@
+import { TRPCError } from "@trpc/server";
+import type { TRPC_ERROR_CODE_KEY } from "@trpc/server/rpc";
 import { ENV } from "./_core/env";
 import { sanitizeExternalMessage } from "./lib/errorSanitizer";
+import { readBoundedFabResponseBody } from "./lib/fabResponseBody";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -123,6 +126,18 @@ export type FabControlCenter = {
 const DEFAULT_FAB_LOCAL_API_URL = "http://127.0.0.1:5001";
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 const MAX_CONCURRENT_READS = 8;
+const FAB_HTTP_ERROR_CODES: Partial<Record<number, TRPC_ERROR_CODE_KEY>> = {
+  400: "BAD_REQUEST",
+  401: "UNAUTHORIZED",
+  403: "FORBIDDEN",
+  404: "NOT_FOUND",
+  405: "METHOD_NOT_SUPPORTED",
+  409: "CONFLICT",
+  413: "PAYLOAD_TOO_LARGE",
+  422: "UNPROCESSABLE_CONTENT",
+  429: "TOO_MANY_REQUESTS",
+  503: "SERVICE_UNAVAILABLE",
+};
 // Start the costliest independent reads first so the bounded worker pool does
 // not leave a long-running request at the end of the dashboard refresh.
 const READ_PATHS = {
@@ -248,34 +263,62 @@ export async function fabLocalRequest(
   if (target.origin !== baseUrl.origin) {
     throw new Error("FAB local API path escaped the configured origin");
   }
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 8_000);
   const token = options.token ?? ENV.fabLocalApiToken;
   const headers = new Headers(init.headers);
   headers.set("accept", "application/json");
   if (init.body) headers.set("content-type", "application/json");
   if (token) headers.set("authorization", `Bearer ${token}`);
 
+  const timeoutMs = options.timeoutMs ?? 8_000;
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 120_000) {
+    throw new Error("Invalid FAB local API request timeout");
+  }
+  if (init.signal?.aborted) throw new Error("FAB local API request cancelled");
+  const controller = new AbortController();
+  const cancel = () => controller.abort();
+  init.signal?.addEventListener("abort", cancel, { once: true });
+  let timedOut = false;
+  const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
+  const method = String(init.method || "GET").toUpperCase();
+  const isMutation = method !== "GET" && method !== "HEAD";
+
   try {
-    const response = await fetch(target, { ...init, headers, signal: controller.signal });
-    const body = await response.json().catch(() => ({})) as JsonRecord;
-    if (!response.ok) {
-      throw new Error(sanitizeExternalMessage(
-        stringValue(body.error) || `FAB local API returned ${response.status}`,
-      ));
+    // A failed readback does not prove that a submitted mutation did not run.
+    if (isMutation) invalidateFabControlCenterSnapshot();
+    const response = await fetch(target, { ...init, headers, signal: controller.signal, redirect: "manual" });
+    if (response.status >= 300 && response.status < 400) {
+      throw new Error("FAB local API redirects are not permitted");
     }
-    const method = String(init.method || "GET").toUpperCase();
-    if (method !== "GET" && method !== "HEAD") {
-      invalidateFabControlCenterSnapshot();
+    const bytes = await readBoundedFabResponseBody(response, 8 * 1024 * 1024);
+    let body: JsonRecord;
+    try {
+      const parsed: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
+      body = parsed as JsonRecord;
+    } catch {
+      throw new Error(response.ok
+        ? "FAB local API did not return a valid JSON object"
+        : `FAB local API returned ${response.status}`);
+    }
+    if (!response.ok) {
+      const message = sanitizeExternalMessage(
+        stringValue(body.error) || `FAB local API returned ${response.status}`,
+      );
+      const code = FAB_HTTP_ERROR_CODES[response.status];
+      if (code) throw new TRPCError({ code, message });
+      throw new Error(message);
     }
     return body;
   } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") {
-      throw new Error("FAB local API request timed out");
+    if (controller.signal.aborted) {
+      throw new Error(timedOut ? "FAB local API request timed out" : "FAB local API request cancelled");
     }
     throw error;
   } finally {
+    if (isMutation) invalidateFabControlCenterSnapshot();
     clearTimeout(timeout);
+    init.signal?.removeEventListener("abort", cancel);
+    controller.abort();
   }
 }
 
@@ -345,7 +388,15 @@ async function settleFabReads(
     ? parseFabBatchResults(batchOutcome.value, batchEntries)
     : null;
   if (!batchResults) {
-    batchResults = await settleIndividualFabReads(batchEntries);
+    const unsupportedBatch = batchOutcome.status === "rejected"
+      && batchOutcome.reason instanceof TRPCError
+      && ["NOT_FOUND", "METHOD_NOT_SUPPORTED"].includes(batchOutcome.reason.code);
+    if (batchOutcome.status === "rejected" && !unsupportedBatch) {
+      // Authentication, throttling and transport failures are not evidence of a legacy API.
+      batchResults = batchEntries.map(() => ({ status: "rejected", reason: batchOutcome.reason }));
+    } else {
+      batchResults = await settleIndividualFabReads(batchEntries);
+    }
   }
 
   const byResource = new Map<FabResourceKey, PromiseSettledResult<JsonRecord>>();
@@ -365,7 +416,7 @@ export async function getFabControlCenter(): Promise<FabControlCenter> {
   if (controlCenterInFlight) return controlCenterInFlight;
 
   const generation = controlCenterCacheGeneration;
-  const request = buildFabControlCenter();
+  const request = buildFabControlCenter(generation);
   controlCenterInFlight = request;
   try {
     const value = await request;
@@ -386,7 +437,7 @@ export async function refreshFabControlCenter(): Promise<FabControlCenter> {
   return getFabControlCenter();
 }
 
-async function buildFabControlCenter(): Promise<FabControlCenter> {
+async function buildFabControlCenter(generation: number): Promise<FabControlCenter> {
   const checkedAt = new Date().toISOString();
   const startedAt = Date.now();
   let endpoint = DEFAULT_FAB_LOCAL_API_URL;
@@ -411,6 +462,9 @@ async function buildFabControlCenter(): Promise<FabControlCenter> {
 
   const entries = Object.entries(READ_PATHS) as Array<[FabResourceKey, string]>;
   const settled = await settleFabReads(entries);
+  if (generation !== controlCenterCacheGeneration) {
+    throw new TRPCError({ code: "CONFLICT", message: "FAB dashboard changed while loading; refresh to read current data." });
+  }
   const resources: Partial<Record<FabResourceKey, JsonRecord>> = {};
   const resourceStates = {} as Record<FabResourceKey, FabResourceState>;
   const partialErrors: FabControlCenter["partialErrors"] = [];

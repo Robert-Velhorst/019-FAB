@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Optional
 
 from src.config_loader import ConfigLoader
+from src.operations.deployment_preflight import require_deployment_ready
 from src.worker.scheduler import FabWorker
 from src.worker.runtime import WorkerAlreadyRunningError, managed_worker_runtime
 
@@ -17,8 +18,9 @@ def run_worker(
     previous_directory = Path.cwd()
     os.chdir(root)
     try:
+        config = ConfigLoader(config_file="config/config.ini").get_all_config()
+        require_deployment_ready(config)
         with managed_worker_runtime(root):
-            config = ConfigLoader(config_file="config/config.ini").get_all_config()
             if run_once is not None:
                 config = {**config, "worker_run_once": bool(run_once)}
             FabWorker(config).run()

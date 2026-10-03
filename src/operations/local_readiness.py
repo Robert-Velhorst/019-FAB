@@ -22,6 +22,7 @@ from src.utils.tesseract_runtime import (
 )
 from src.utils.runtime_identity import local_instance_id
 from src.security.google_oauth_store import GoogleOAuthTokenStore
+from src.operations.deployment_preflight import deployment_preflight
 
 
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
@@ -150,9 +151,12 @@ class LocalReadinessService:
         security = self._security()
         local_access = self._local_access(security)
         issues = self._issues(dependencies, paths, credentials, sources, security)
+        deployment = deployment_preflight(self.config)
+        issues.extend(deployment["issues"])
         status = _overall_status(issues)
         return {
             "status": status,
+            "deployment": deployment,
             "security": security,
             "localAccess": local_access,
             "paths": paths,

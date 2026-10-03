@@ -1,5 +1,7 @@
 import re
-from typing import Any, Dict
+import math
+from time import monotonic
+from typing import Any, Dict, Iterator
 
 try:
     import pytesseract
@@ -15,9 +17,11 @@ except ImportError:
     ImageOps = None
 
 try:
-    from pdf2image import convert_from_path
+    from pdf2image import pdfinfo_from_path
 except ImportError:
-    convert_from_path = None
+    pdfinfo_from_path = None
+
+from src.document_processors.poppler_renderer import render_pdf_page as convert_from_path
 
 from src.document_processors.base import BaseProcessor
 from src.utils.tesseract_runtime import (
@@ -26,6 +30,18 @@ from src.utils.tesseract_runtime import (
     resolve_tesseract_command,
     tesseract_cli_config,
 )
+
+PDF_RENDER_MAX_EDGE = 3000
+PDF_CONVERSION_TIMEOUT_SECONDS = 30
+OCR_TIMEOUT_SECONDS = 30
+DOCUMENT_TIMEOUT_SECONDS = 300
+
+
+def _remaining_timeout(deadline, stage_limit=30):
+    remaining = deadline - monotonic()
+    if remaining <= 0:
+        raise TimeoutError("Document OCR deadline exceeded; no partial result accepted.")
+    return min(remaining, stage_limit)
 
 
 class TesseractProcessor(BaseProcessor):
@@ -55,17 +71,22 @@ class TesseractProcessor(BaseProcessor):
                 "error": "Tesseract executable is not available.",
             }
 
-        pages = []
+        pages = None
         fallback_pages = 0
         fallback_recovered_pages = 0
         try:
-            pages = self._load_pages(document_path)
+            duration = float(self.config.get("tesseract_document_timeout_seconds", DOCUMENT_TIMEOUT_SECONDS))
+            if not math.isfinite(duration) or not 0 < duration <= DOCUMENT_TIMEOUT_SECONDS:
+                raise ValueError("Document OCR timeout must be greater than zero and at most 300 seconds.")
+            deadline = monotonic() + duration
+            pages = self._load_pages(document_path, deadline=deadline)
             page_texts = []
             for page in pages:
                 text = pytesseract.image_to_string(
                     page,
                     lang=self.ocr_lang,
                     config=self.ocr_config,
+                    timeout=_remaining_timeout(deadline, OCR_TIMEOUT_SECONDS),
                 ).strip()
                 if not text:
                     fallback_pages += 1
@@ -75,11 +96,13 @@ class TesseractProcessor(BaseProcessor):
                             prepared,
                             lang=self.ocr_lang,
                             config=self._fallback_ocr_config(),
+                            timeout=_remaining_timeout(deadline, OCR_TIMEOUT_SECONDS),
                         ).strip()
                     finally:
                         if prepared is not page:
                             prepared.close()
                     fallback_recovered_pages += int(bool(text))
+                _remaining_timeout(deadline)
                 page_texts.append(text)
             full_text = "\n\n".join(page_texts).strip()
             return {
@@ -98,28 +121,60 @@ class TesseractProcessor(BaseProcessor):
                 "error": str(exc),
             }
         finally:
-            for page in pages:
-                close = getattr(page, "close", None)
+            if pages is not None:
+                close = getattr(pages, "close", None)
                 if callable(close):
                     close()
+                elif isinstance(pages, (list, tuple)):
+                    for page in pages:
+                        close_page = getattr(page, "close", None)
+                        if callable(close_page):
+                            close_page()
 
-    def _load_pages(self, document_path: str) -> list:
+    def _load_pages(self, document_path: str, *, deadline=None) -> Iterator[Any]:
+        deadline = deadline if deadline is not None else monotonic() + DOCUMENT_TIMEOUT_SECONDS
         if not str(document_path).lower().endswith(".pdf"):
-            return [Image.open(document_path)]
-        if convert_from_path is None:
+            page = Image.open(document_path)
+            try:
+                yield page
+            finally:
+                page.close()
+            return
+        if convert_from_path is None or pdfinfo_from_path is None:
             raise RuntimeError("pdf2image is required for PDF OCR.")
         try:
             max_pages = max(1, min(int(self.config.get("tesseract_pdf_max_pages", 20)), 100))
             dpi = max(100, min(int(self.config.get("tesseract_pdf_dpi", 220)), 400))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             max_pages, dpi = 20, 220
-        return convert_from_path(
-            document_path,
-            dpi=dpi,
-            first_page=1,
-            last_page=max_pages,
-            poppler_path=resolve_poppler_path(self.config),
-        )
+        poppler_path = resolve_poppler_path(self.config)
+        page_count = pdfinfo_from_path(
+            document_path, poppler_path=poppler_path,
+            timeout=_remaining_timeout(deadline, PDF_CONVERSION_TIMEOUT_SECONDS),
+        ).get("Pages")
+        if type(page_count) is not int or page_count < 1:
+            raise ValueError("PDF page count is missing or invalid.")
+        if page_count > max_pages:
+            raise ValueError(f"PDF exceeds the OCR page limit ({max_pages}); no pages processed.")
+        for number in range(1, page_count + 1):
+            # Bound raster size before allocation, and release it before the next render.
+            pages = convert_from_path(
+                document_path,
+                dpi=dpi,
+                first_page=number,
+                last_page=number,
+                poppler_path=poppler_path,
+                size=PDF_RENDER_MAX_EDGE,
+                timeout=_remaining_timeout(deadline, PDF_CONVERSION_TIMEOUT_SECONDS),
+                thread_count=1,
+            )
+            try:
+                if len(pages) != 1:
+                    raise ValueError("PDF conversion did not return exactly one page.")
+                yield pages[0]
+            finally:
+                for page in pages:
+                    page.close()
 
     def _fallback_ocr_config(self) -> str:
         try:

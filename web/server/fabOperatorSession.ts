@@ -2,6 +2,7 @@ import { createHmac, randomBytes } from "crypto";
 import type { Application, RequestHandler, Response } from "express";
 import { ENV } from "./_core/env";
 import { getFabBrowserApiBaseUrl } from "./fabLocalGateway";
+import { FAB_MANAGED_LOGIN_PATH, getFabManagedSessionBinding, isFabManagedAuthEnabled, isFabManagedRequestSafe } from "./fabManagedAuth";
 import {
   resolveFabOperatorAccess,
   type FabOperatorAccessOptions,
@@ -25,7 +26,8 @@ type FabOperatorSessionPayload = {
   iat: number;
   nonce: string;
   next: string;
-  v: 1;
+  v: 1 | 2;
+  parent?: { id: string; exp: number };
 };
 
 function sessionError(res: Response, status: number, error: string) {
@@ -93,6 +95,12 @@ export function registerFabOperatorSessionRoutes(
   handlers.push(async (req, res) => {
     const access = await resolveFabOperatorAccess(req, options);
     if (!access.allowed || !access.actor) {
+      if (isFabManagedAuthEnabled() && isFabManagedRequestSafe(req) && req.headers.accept?.includes("text/html")) {
+        res.setHeader("cache-control", "no-store");
+        res.setHeader("referrer-policy", "no-referrer");
+        res.redirect(303, FAB_MANAGED_LOGIN_PATH);
+        return;
+      }
       sessionError(res, 403, "FAB operator access is required");
       return;
     }
@@ -118,14 +126,18 @@ export function registerFabOperatorSessionRoutes(
     }
 
     const issuedAt = Math.floor((options.now?.() ?? Date.now()) / 1_000);
+    const managed = isFabManagedAuthEnabled();
+    const parent = managed ? await getFabManagedSessionBinding(req) : null;
+    if (managed && !parent) { sessionError(res, 403, "FAB operator access is required"); return; }
     const ticket = createFabOperatorSessionTicket({
       actor: access.actor,
       aud: FAB_OPERATOR_SESSION_AUDIENCE,
-      exp: issuedAt + FAB_OPERATOR_SESSION_TTL_SECONDS,
+      exp: Math.min(issuedAt + FAB_OPERATOR_SESSION_TTL_SECONDS, parent?.exp ?? Infinity),
       iat: issuedAt,
       nonce: options.nonce?.() ?? randomBytes(18).toString("base64url"),
       next,
-      v: 1,
+      v: parent ? 2 : 1,
+      ...(parent ? { parent } : {}),
     }, token);
     const destination = new URL("/operator/session/bootstrap", publicBaseUrl);
     destination.searchParams.set("ticket", ticket);

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import uuid
@@ -370,15 +371,16 @@ class DriveWaveDeliveryService:
             ),
         )
         expected_fields = _expected_wave_fields(document, record)
+        required_field_matches = _required_wave_fields(document, record)
         missing_expected_fields = [
-            field for field in REQUIRED_FIELD_MATCHES
-            if expected_fields.get(field) in (None, "")
+            field for field in required_field_matches
+            if _canonical_wave_field(field, expected_fields.get(field)) in (None, "")
         ]
-        required_field_matches = list(REQUIRED_FIELD_MATCHES)
-        if expected_fields.get("invoiceNumber") not in (None, ""):
-            required_field_matches.append("invoiceNumber")
-        if expected_fields.get("taxAmount") is not None:
-            required_field_matches.append("taxAmount")
+        expected_fields = {
+            field: value if _canonical_wave_field(field, value) not in (None, "") else None
+            for field, value in expected_fields.items()
+        }
+        line_items, invalid_line_item_fields = _delivery_line_items(record)
 
         open_reviews = [
             item
@@ -399,6 +401,7 @@ class DriveWaveDeliveryService:
             unrelated_reviews=unrelated_reviews,
             evidence_max_age_seconds=self._evidence_max_age_seconds(),
             missing_expected_fields=missing_expected_fields,
+            invalid_line_item_fields=invalid_line_item_fields,
             upload_reasons=upload_reasons,
         )
         source_sha256 = _source_sha256(document)
@@ -527,7 +530,8 @@ class DriveWaveDeliveryService:
                 "externalTransactionId": external_transaction_id or None,
                 "expectedFields": expected_fields,
                 "missingExpectedFields": missing_expected_fields,
-                "lineItems": list((record or {}).get("line_items") or []),
+                "lineItems": line_items,
+                "invalidLineItemFields": invalid_line_item_fields,
                 "latestExportAttempt": _export_reference(latest_export),
             },
             "reviews": {
@@ -638,11 +642,9 @@ class DriveWaveDeliveryService:
         normalized["readbackOrigin"] = (
             "wave_browser_download" if readback_bytes_verified else "metadata_attestation"
         )
-        required_fields = _required_wave_fields(document)
-        expected_fields = _expected_wave_fields(
-            document,
-            self.ledger.get_bookkeeping_record_by_document(int(document_id)),
-        )
+        record = self.ledger.get_bookkeeping_record_by_document(int(document_id))
+        required_fields = _required_wave_fields(document, record)
+        expected_fields = _expected_wave_fields(document, record)
         observed_fields = _normalize_observed_fields(normalized.get("observedFields"))
         normalized["observedFields"] = observed_fields
         normalized["fieldMatches"] = {
@@ -1099,6 +1101,7 @@ class DriveWaveDeliveryService:
         if not record:
             reasons.append("bookkeeping_record_missing")
         else:
+            reasons.extend(_line_item_reasons(record))
             if bool(record.get("review_required")):
                 reasons.append("bookkeeping_record_review_required")
             if str(record.get("target_system") or "").strip() != "waveapps_business":
@@ -1145,6 +1148,8 @@ class DriveWaveDeliveryService:
             reasons.append("wave_attachment_hash_mismatch")
         attachment_size = _optional_int(evidence.get("attachmentSizeBytes"))
         source_size = _source_size(document)
+        if source_size is None:
+            reasons.append("source_size_missing")
         if attachment_size is None:
             reasons.append("wave_attachment_size_missing")
         elif source_size is not None and attachment_size != source_size:
@@ -1200,11 +1205,10 @@ class DriveWaveDeliveryService:
         if document_mime and mime_type != document_mime:
             reasons.append("wave_attachment_mime_mismatch")
 
-        required_fields = _required_wave_fields(document)
-        expected_fields = _expected_wave_fields(
-            document,
-            self.ledger.get_bookkeeping_record_by_document(int(document["id"])),
-        )
+        record = self.ledger.get_bookkeeping_record_by_document(int(document["id"]))
+        reasons.extend(_line_item_reasons(record))
+        required_fields = _required_wave_fields(document, record)
+        expected_fields = _expected_wave_fields(document, record)
         expected_digest = _expected_fields_digest(expected_fields, required_fields)
         if str(evidence.get("expectedFieldsDigest") or "") != expected_digest:
             reasons.append("wave_expected_fields_changed_or_unbound")
@@ -1237,11 +1241,14 @@ class DriveWaveDeliveryService:
         current_md5 = str(current.get("md5Checksum") or "")
         if expected_md5 and current_md5 and expected_md5 != current_md5:
             raise RuntimeError("Drive provider checksum changed after FAB intake.")
-        expected_size = provider.get("size") or metadata.get("sizeBytes")
-        current_size = current.get("size")
-        if expected_size not in (None, "") and current_size not in (None, ""):
-            if int(expected_size) != int(current_size):
-                raise RuntimeError("Drive provider size changed after FAB intake.")
+        expected_size = _source_size(document)
+        current_size = _optional_int(current.get("size"))
+        if expected_size is None:
+            raise RuntimeError("Source byte-size metadata is missing, invalid, or inconsistent.")
+        if current_size is None or current_size <= 0:
+            raise RuntimeError("Drive provider byte size is missing or invalid.")
+        if expected_size != current_size:
+            raise RuntimeError("Drive provider size changed after FAB intake.")
         if current.get("trashed"):
             raise RuntimeError("Drive source file is in trash.")
 
@@ -1411,13 +1418,14 @@ def _provider_metadata(document: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _source_size(document: Dict[str, Any]) -> Optional[int]:
-    metadata = document.get("metadata") or {}
+    metadata = document.get("metadata") if isinstance(document.get("metadata"), dict) else {}
     provider = metadata.get("providerMetadata") if isinstance(metadata.get("providerMetadata"), dict) else {}
-    value = provider.get("size") or metadata.get("sizeBytes")
-    try:
-        return int(value) if value not in (None, "") else None
-    except (TypeError, ValueError):
+    declared = [value for value in (provider.get("size"), metadata.get("sizeBytes"))
+                if value is not None and not (isinstance(value, str) and value == "")]
+    sizes = [_optional_int(value) for value in declared]
+    if not sizes or any(size is None or size <= 0 for size in sizes):
         return None
+    return sizes[0] if all(size == sizes[0] for size in sizes) else None
 
 
 def _bounded_candidate_limit(value: Any) -> int:
@@ -1471,7 +1479,9 @@ def _expected_wave_fields(
     }
 
 
-def _required_wave_fields(document: Dict[str, Any]) -> list[str]:
+def _required_wave_fields(
+    document: Dict[str, Any], record: Optional[Dict[str, Any]] = None,
+) -> list[str]:
     required_fields = list(REQUIRED_FIELD_MATCHES)
     extracted = document.get("extracted_data") if isinstance(document.get("extracted_data"), dict) else {}
     if any(
@@ -1479,7 +1489,7 @@ def _required_wave_fields(document: Dict[str, Any]) -> list[str]:
         for key in ("invoice_number", "invoiceNumber", "document_number")
     ):
         required_fields.append("invoiceNumber")
-    if document.get("vat_amount") is not None:
+    if document.get("vat_amount") is not None or (record or {}).get("vat_amount") is not None:
         required_fields.append("taxAmount")
     return required_fields
 
@@ -1499,17 +1509,75 @@ def _expected_fields_digest(expected_fields: Dict[str, Any], required_fields: li
 
 
 def _wave_field_matches(field: str, expected: Any, observed: Any) -> bool:
-    if expected in (None, "") or observed in (None, ""):
-        return False
-    return _canonical_wave_field(field, expected) == _canonical_wave_field(field, observed)
+    expected_value = _canonical_wave_field(field, expected)
+    observed_value = _canonical_wave_field(field, observed)
+    return (
+        expected_value not in (None, "")
+        and observed_value not in (None, "")
+        and expected_value == observed_value
+    )
+
+
+def _finite_number(value: Any) -> Optional[Decimal]:
+    if isinstance(value, bool) or not isinstance(value, (str, int, float, Decimal)):
+        return None
+    try:
+        number = Decimal(str(value))
+        return number if number.is_finite() else None
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+
+
+def _delivery_line_items(record: Optional[Dict[str, Any]]) -> tuple[list[Any], list[str]]:
+    # Copy the persisted JSON tree; never repair ledger values during handoff.
+    source = list((record or {}).get("line_items") or [])
+    projected: list[Any] = []
+    invalid: list[str] = []
+    pending = [(source, projected, "lineItems")]
+    while pending:
+        original, target, path = pending.pop()
+        entries = original.items() if isinstance(original, dict) else enumerate(original)
+        for key, value in entries:
+            child_path = f"{path}.{key}" if isinstance(original, dict) else f"{path}[{key}]"
+            if isinstance(value, (dict, list)):
+                copy = {} if isinstance(value, dict) else []
+                pending.append((value, copy, child_path))
+            elif isinstance(value, float) and not math.isfinite(value):
+                copy = None
+                invalid.append(child_path)
+            else:
+                copy = value
+            if isinstance(target, dict):
+                target[key] = copy
+            else:
+                target.append(copy)
+    for index, item in enumerate(projected):
+        if not isinstance(item, dict):
+            invalid.append(f"lineItems[{index}]")
+            continue
+        for field in ("quantity", "unit_price", "amount", "tax_amount", "tax_rate", "confidence_score"):
+            value = item.get(field)
+            if value is not None and _finite_number(value) is None:
+                item[field] = None
+                invalid.append(f"lineItems[{index}].{field}")
+    return projected, sorted(set(invalid))
+
+
+def _line_item_reasons(record: Optional[Dict[str, Any]]) -> list[str]:
+    return [f"bookkeeping_line_item_invalid:{path}" for path in _delivery_line_items(record)[1]]
 
 
 def _canonical_wave_field(field: str, value: Any) -> Any:
     if field in {"amount", "taxAmount"}:
+        number = _finite_number(value)
+        if number is None:
+            return None
         try:
-            return str(Decimal(str(value)).quantize(Decimal("0.01")))
+            return str(number.quantize(Decimal("0.01")))
         except (InvalidOperation, TypeError, ValueError):
             return None
+    if not isinstance(value, str):
+        return None
     if field == "date":
         return _canonical_date(value)
     text = re.sub(r"\s+", " ", str(value or "")).strip()
@@ -1564,6 +1632,7 @@ def _work_order_stage(
     unrelated_reviews: list[Dict[str, Any]],
     evidence_max_age_seconds: int,
     missing_expected_fields: list[str],
+    invalid_line_item_fields: list[str],
     upload_reasons: list[str],
 ) -> str:
     metadata = document.get("metadata") if isinstance(document.get("metadata"), dict) else {}
@@ -1580,7 +1649,7 @@ def _work_order_stage(
         return "source_incompatible"
     if unrelated_reviews or (record and bool(record.get("review_required"))):
         return "blocked_by_review"
-    if not record or missing_expected_fields or str(document.get("processing_status") or "").lower() in {
+    if not record or missing_expected_fields or invalid_line_item_fields or str(document.get("processing_status") or "").lower() in {
         "registered", "imported", "processing", "failed", "needs_review"
     }:
         return "needs_processing"
@@ -1602,7 +1671,7 @@ def _work_order_stage(
 def _stage_action(stage: str) -> str:
     return {
         "source_file_unavailable": "Restore or re-download the exact retained source before Wave upload.",
-        "source_incompatible": "Convert or split the source into a Wave-supported receipt file without changing the retained original.",
+        "source_incompatible": "Check source size, type, and metadata; convert or split only if needed without changing the retained original.",
         "needs_processing": "Finish OCR, validation, categorization, and review in FAB.",
         "blocked_by_review": "Resolve the blocking FAB review before downstream execution.",
         "locate_or_create_transaction": "Find an exact Wave transaction or create the approved Wave draft, then upload the source file.",
@@ -1620,7 +1689,9 @@ def _count_stage(work_orders: list[Dict[str, Any]], stage: str) -> int:
 def _wave_upload_reasons(document: Dict[str, Any]) -> list[str]:
     reasons = []
     size = _source_size(document)
-    if size is not None and size > WAVE_RECEIPT_MAX_BYTES:
+    if size is None:
+        reasons.append("wave_receipt_size_missing_or_invalid")
+    elif size > WAVE_RECEIPT_MAX_BYTES:
         reasons.append("wave_receipt_file_too_large")
     filename = str(document.get("original_filename") or "")
     extension = os.path.splitext(filename)[1].lower()
@@ -1691,12 +1762,13 @@ def _wave_browser_contract(business_id: str, document_id: int) -> Dict[str, Any]
 def _optional_int(value: Any) -> Optional[int]:
     if isinstance(value, bool):
         return None
-    try:
-        if isinstance(value, float) and not value.is_integer():
-            return None
-        return int(value) if value not in (None, "") else None
-    except (TypeError, ValueError):
+    if isinstance(value, int):
+        parsed = value
+    elif isinstance(value, str) and re.fullmatch(r"[0-9]{1,19}", value.strip()):
+        parsed = int(value.strip())
+    else:
         return None
+    return parsed if 0 <= parsed <= 2**63 - 1 else None
 
 
 def _valid_wave_transaction_url(value: Any, business_id: str) -> bool:
