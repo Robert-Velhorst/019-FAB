@@ -59,8 +59,15 @@ def test_real_docker_context_excludes_runtime_data_and_keeps_build_sources(tmp_p
     host = endpoint.stdout.strip()
     if not (host.startswith("npipe:") or host.startswith("unix:")):
         pytest.skip("Build-context fixtures require a local Docker engine")
-    info = subprocess.run(local_docker_command(docker, builder, "info", "--format", "{{.ServerVersion}}"),
-                          capture_output=True, text=True, timeout=120)
+    buildx = subprocess.run(local_docker_command(docker, builder, "buildx", "version"),
+                            capture_output=True, text=True, timeout=30)
+    if buildx.returncode:
+        pytest.skip("Docker Buildx is unavailable")
+    try:
+        info = subprocess.run(local_docker_command(docker, builder, "info", "--format", "{{.ServerVersion}}"),
+                              capture_output=True, text=True, timeout=30)
+    except subprocess.TimeoutExpired:
+        pytest.skip("Local Docker engine did not answer its read-only health query")
     if info.returncode:
         pytest.skip("Local Docker engine unavailable")
     listed = subprocess.run(local_docker_command(docker, builder, "buildx", "inspect", builder),

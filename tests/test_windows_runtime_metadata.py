@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -13,6 +14,8 @@ SHELLS = sorted({shell for name in ("pwsh", "powershell") if (shell := shutil.wh
 @pytest.mark.parametrize("shell", SHELLS or [None])
 @pytest.mark.parametrize("existing,locked", [(False, False), (True, False), (True, True)])
 def test_atomic_metadata_publication_and_failure_preservation(tmp_path, shell, existing, locked):
+    if locked and os.name != "nt":
+        pytest.skip("Windows file-sharing lock semantics")
     if not shell:
         pytest.skip("PowerShell is unavailable")
     path = tmp_path / "runtime.json"

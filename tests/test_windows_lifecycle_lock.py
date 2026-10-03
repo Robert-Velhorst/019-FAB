@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -12,6 +13,8 @@ SHELLS = sorted({path for name in ("pwsh", "powershell") if (path := shutil.whic
 
 @pytest.mark.parametrize("shell", SHELLS or [None])
 def test_lifecycle_exclusion_is_reentrant_but_blocks_other_processes(tmp_path, shell):
+    if os.name != "nt":
+        pytest.skip("Windows process startup semantics")
     if not shell:
         pytest.skip("PowerShell unavailable")
     helper = ROOT / "scripts/Windows-Process.ps1"
@@ -51,6 +54,8 @@ def test_lifecycle_exclusion_is_reentrant_but_blocks_other_processes(tmp_path, s
 @pytest.mark.parametrize("shell", SHELLS or [None])
 @pytest.mark.parametrize("filename", ["Start-FAB.ps1", "Stop-FAB.ps1"])
 def test_complete_launcher_refuses_concurrent_lifecycle_work(tmp_path, shell, filename):
+    if os.name != "nt":
+        pytest.skip("Windows process startup semantics")
     if not shell:
         pytest.skip("PowerShell unavailable")
     installation = tmp_path / "installation"

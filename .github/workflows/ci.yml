@@ -62,6 +62,9 @@ jobs:
           cache-dependency-path: requirements.txt
       - name: Install Python dependencies
         run: python -m pip install --disable-pip-version-check -r requirements.txt pytest
+      - name: Create checkout-local Python runtime
+        if: matrix.shard == 1 || matrix.shard == 3
+        run: python -m venv .venv
       - name: Run backend shard
         shell: pwsh
         env:

@@ -7497,6 +7497,8 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             payload = {}
         if not isinstance(payload, dict):
             return jsonify({"error": "Reconciliation request must be a JSON object"}), 400
+        if _json_depth_exceeds(payload, 32):
+            return jsonify({"error": "Reconciliation request exceeds the permitted JSON depth"}), 400
         if "bankTransactions" in payload:
             bank_transactions = payload["bankTransactions"]
         else:
@@ -8362,6 +8364,19 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         )
 
     return app
+
+
+def _json_depth_exceeds(value: Any, maximum: int) -> bool:
+    pending = [(value, 0)]
+    while pending:
+        current, depth = pending.pop()
+        if depth > maximum:
+            return True
+        if isinstance(current, dict):
+            pending.extend((child, depth + 1) for child in current.values())
+        elif isinstance(current, list):
+            pending.extend((child, depth + 1) for child in current)
+    return False
 
 
 def _read_internal_json_resource(

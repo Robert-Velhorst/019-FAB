@@ -79,7 +79,7 @@ def test_confirmation_leaves_another_accounts_exception_open(arriving_receipt):
     bank.import_transactions([{"id": "synthetic-arrival", "date": "2026-09-30", "amount": -99}],
                              account_identifier="synthetic-other-account")
     other = next(row for row in bank.transactions_for_reconciliation() if row["account_identifier"] == "synthetic-other-account")
-    other_id = service.run([other], document_ids=[999999])["results"][0]["reconciliationMatchId"]
+    other_id = service.run([other], document_ids=[])["results"][0]["reconciliationMatchId"]
     other_review = next(row["id"] for row in ledger.list_missing_receipt_review_items()
                         if row["corrected_data"]["reconciliationMatchId"] == other_id)
     assert service.resolve_match(candidate_id, "approved")["success"]
