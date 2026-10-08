@@ -564,6 +564,10 @@ class LocalExportAttemptService:
                 "confirmationPhrase": EXPORT_APPROVAL_PHRASE,
                 "message": "Type the exact approval phrase before marking this export as approved.",
             }
+        if attempt.get("status") in APPROVABLE_EXPORT_STATUSES | {"approved"}:
+            source_block = self._source_processing_block(attempt, "approval", actor)
+            if source_block:
+                return source_block
         if attempt.get("status") == "approved":
             return {"success": True, "status": "already_approved", "exportAttempt": attempt}
         if attempt.get("status") not in APPROVABLE_EXPORT_STATUSES:
@@ -911,6 +915,9 @@ class LocalExportAttemptService:
                     "exportAttempt": current,
                 }
             attempt = claim["attempt"]
+            source_block = self._source_processing_block(attempt, "execution", actor)
+            if source_block:
+                return source_block
             metadata = dict(attempt.get("metadata") or {})
             master_ledger_checksum = _master_ledger_checksum(metadata)
             stale = self._master_ledger_staleness(attempt, "execution", actor)
@@ -1423,6 +1430,56 @@ class LocalExportAttemptService:
             )
             resolved.append(int(review["id"]))
         return resolved
+
+    def _source_processing_block(
+        self,
+        attempt: Dict[str, Any],
+        stage: str,
+        actor: str,
+    ) -> Optional[Dict[str, Any]]:
+        document_id = attempt.get("document_id")
+        if not document_id and attempt.get("bookkeeping_record_id"):
+            record = self.ledger.get_bookkeeping_record(int(attempt["bookkeeping_record_id"]))
+            document_id = (record or {}).get("document_id")
+        if not document_id:
+            return None
+        document = self.ledger.get_document(int(document_id))
+        if not document:
+            status = "blocked_source_missing"
+        elif document.get("duplicate_of_document_id") or document.get("processing_status") == "duplicate":
+            status = "blocked_duplicate"
+        else:
+            status = {
+                "failed": "blocked_processing",
+                "needs_review": "blocked_by_review",
+            }.get(document.get("processing_status"))
+        if not status:
+            return None
+
+        message = "Source document is no longer eligible. Resolve the source issue and review the draft before approving it again."
+        # Remove it from the worker's claimable queue without discarding the approved payload.
+        self.ledger.update_export_attempt(int(attempt["id"]), {
+            "status": "attention_required",
+            "approvalRequired": True,
+            "externalSubmission": "not_executed",
+            "message": message,
+        })
+        if document:
+            LocalBookkeepingRecordService(self.ledger, self.config).upsert_from_document(int(document_id))
+        self.ledger.record_audit_event({
+            "action": "local_export_attempt.source_processing_blocked",
+            "entityType": "export_attempt",
+            "entityId": str(attempt["id"]),
+            "details": {
+                "actor": actor, "stage": stage, "documentId": document_id,
+                "reason": status, "externalSubmission": "not_executed",
+            },
+        })
+        return {
+            "success": False, "status": status, "message": message,
+            "externalSubmission": "not_executed",
+            "exportAttempt": self.ledger.get_export_attempt(int(attempt["id"])),
+        }
 
     def _master_ledger_staleness(
         self,

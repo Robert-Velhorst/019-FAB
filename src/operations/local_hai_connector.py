@@ -1,3 +1,4 @@
+import json
 import re
 import secrets
 from dataclasses import dataclass
@@ -9,6 +10,10 @@ from src.operations.local_ledger import LocalOperationsLedger
 
 HAI_CONNECTOR_VERSION = "fab-hai-connector-v1"
 HAI_REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+MAX_HAI_DOCUMENT_ID = 2**63 - 1
+MAX_HAI_PAYLOAD_BYTES = 1024 * 1024
+MAX_HAI_PAYLOAD_DEPTH = 32
+MAX_HAI_PAYLOAD_VALUES = 10_000
 DEFAULT_HAI_COMMAND_IDS = (
     "rescan_intake",
     "process_imported",
@@ -184,7 +189,7 @@ HAI_COMMANDS = (
             "additionalProperties": False,
             "required": ["documentId", "evidence"],
             "properties": {
-                "documentId": {"type": "integer", "minimum": 1},
+                "documentId": {"type": "integer", "minimum": 1, "maximum": MAX_HAI_DOCUMENT_ID},
                 "evidence": {"type": "object"},
             },
         },
@@ -426,7 +431,7 @@ class LocalHaiConnector:
         payload: Optional[Dict[str, Any]] = None,
         actor: str = "hai",
     ) -> Dict[str, Any]:
-        request_id = str(request_id or "").strip()
+        request_id = request_id.strip() if isinstance(request_id, str) else ""
         actor = str(actor or "hai").strip()[:200] or "hai"
         if not HAI_REQUEST_ID_PATTERN.fullmatch(request_id):
             return self._execution_error(
@@ -524,7 +529,7 @@ class LocalHaiConnector:
                 },
             })
             try:
-                result = self.executors[command_id](normalized_payload, actor)
+                result = self.executors[command_id](_capture_hai_payload(normalized_payload), actor)
             except Exception as exc:
                 audit_event_id = self.ledger.record_audit_event({
                     "action": "hai.command.failed",
@@ -714,6 +719,7 @@ def _audit_contract_conflicts(
 def _normalize_payload(command_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("payload must be an object.")
+    payload = _capture_hai_payload(payload)
     allowed_fields = {
         "rescan_intake": set(),
         "process_imported": {"limit"},
@@ -733,13 +739,16 @@ def _normalize_payload(command_id: str, payload: Dict[str, Any]) -> Dict[str, An
     unexpected = sorted(set(payload) - allowed_fields)
     if unexpected:
         raise ValueError(f"Unsupported payload field(s): {', '.join(unexpected)}")
+    if command_id == "record_wave_attachment_verification":
+        missing = sorted({"documentId", "evidence"} - payload.keys())
+        if missing:
+            raise ValueError(f"Missing required payload field(s): {', '.join(missing)}")
 
     normalized: Dict[str, Any] = {}
     if "limit" in payload:
         maximum = 500 if command_id == "run_reconciliation" else 50 if command_id == "run_due_recovery" else 100
-        try:
-            limit = int(payload["limit"])
-        except (TypeError, ValueError):
+        limit = payload["limit"]
+        if not isinstance(limit, int) or isinstance(limit, bool):
             raise ValueError("limit must be an integer.")
         if limit < 1 or limit > maximum:
             raise ValueError(f"limit must be between 1 and {maximum}.")
@@ -749,12 +758,11 @@ def _normalize_payload(command_id: str, payload: Dict[str, Any]) -> Dict[str, An
             raise ValueError("dryRun must be a boolean.")
         normalized["dryRun"] = payload["dryRun"]
     if "documentId" in payload:
-        try:
-            document_id = int(payload["documentId"])
-        except (TypeError, ValueError):
+        document_id = payload["documentId"]
+        if not isinstance(document_id, int) or isinstance(document_id, bool):
             raise ValueError("documentId must be a positive integer.")
-        if document_id < 1:
-            raise ValueError("documentId must be a positive integer.")
+        if not 1 <= document_id <= MAX_HAI_DOCUMENT_ID:
+            raise ValueError(f"documentId must be between 1 and {MAX_HAI_DOCUMENT_ID}.")
         normalized["documentId"] = document_id
     if "evidence" in payload:
         evidence = payload["evidence"]
@@ -811,3 +819,45 @@ def _normalize_payload(command_id: str, payload: Dict[str, Any]) -> Dict[str, An
         if reason:
             normalized["reason"] = reason
     return normalized
+
+
+def _capture_hai_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    def validate_tree(root):
+        pending = [(root, 0)]
+        seen = 0
+        while pending:
+            value, depth = pending.pop()
+            seen += 1
+            if depth > MAX_HAI_PAYLOAD_DEPTH or seen > MAX_HAI_PAYLOAD_VALUES:
+                raise ValueError("payload exceeds the permitted JSON depth or value count.")
+            if isinstance(value, (dict, list)):
+                if seen + len(pending) + len(value) > MAX_HAI_PAYLOAD_VALUES:
+                    raise ValueError("payload exceeds the permitted JSON value count.")
+                if isinstance(value, dict):
+                    if any(not isinstance(key, str) or len(key) > MAX_HAI_PAYLOAD_BYTES for key in value):
+                        raise ValueError("payload must contain bounded string JSON keys.")
+                    children = value.values()
+                else:
+                    children = value
+                pending.extend((child, depth + 1) for child in children)
+            elif isinstance(value, str):
+                if len(value) > MAX_HAI_PAYLOAD_BYTES:
+                    raise ValueError("payload exceeds the 1 MiB JSON size limit.")
+            elif value is not None and not isinstance(value, (bool, int, float)):
+                raise ValueError("payload must contain only JSON-compatible values.")
+
+    try:
+        validate_tree(payload)
+        chunks = []
+        size = 0
+        encoder = json.JSONEncoder(ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":"))
+        for chunk in encoder.iterencode(payload):
+            size += len(chunk.encode("utf-8"))
+            if size > MAX_HAI_PAYLOAD_BYTES:
+                raise ValueError("payload exceeds the 1 MiB JSON size limit.")
+            chunks.append(chunk)
+        captured = json.loads("".join(chunks))
+        validate_tree(captured)
+        return captured
+    except (TypeError, ValueError, RuntimeError) as exc:
+        raise ValueError("payload must be bounded, finite JSON metadata.") from exc

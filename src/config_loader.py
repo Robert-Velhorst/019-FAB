@@ -2,6 +2,7 @@ import configparser
 import json
 import os
 from typing import Any, Dict
+from src.security.deployment_secrets import SECRET_ENV_NAMES, read_secret
 
 from src.security.local_secret_store import (
     apply_local_wave_settings,
@@ -69,6 +70,15 @@ class ConfigLoader:
                     # Example: FAB_LOCAL_LEDGER_PATH -> fab_local_ledger_path
                     config_data[key.lower()] = parsed_value
 
+        for name in SECRET_ENV_NAMES:
+            if not os.environ.get(name) and not os.environ.get(name + "_FILE"):
+                continue
+            secret = read_secret(name)
+            if name.startswith("FAB_WAVEAPPS_"):
+                section = "waveapps_business" if "_BUSINESS_" in name else "waveapps_personal"
+                self._set_section_env_alias(config_data, section, "access_token", secret)
+            else:
+                config_data[name.lower()] = secret
         self._add_flat_aliases(config_data)
         return config_data
 

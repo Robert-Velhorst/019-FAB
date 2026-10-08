@@ -1,0 +1,117 @@
+# Standalone single-business VM profile. Do not combine with docker-compose.yml.
+name: fab-vm
+
+x-runtime: &runtime
+  restart: unless-stopped
+  init: true
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: ["ALL"]
+  pids_limit: 256
+  stop_grace_period: 45s
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+x-python: &python
+  <<: *runtime
+  build:
+    context: .
+    dockerfile: Dockerfile
+  cpus: 2.0
+  mem_limit: 2g
+  environment: &python-env
+    FAB_DEPLOYMENT_PROFILE: vm
+    FAB_INSTANCE_ROOT: /app
+    FAB_LOCAL_API_HOST: 0.0.0.0
+    FAB_LOCAL_API_PORT: 5001
+    FAB_LOCAL_API_TOKEN_FILE: /run/secrets/api_token
+    FAB_LOCAL_API_BASE_URL: ${FAB_LEDGER_PUBLIC_ORIGIN:?Set the ledger HTTPS origin}
+    FAB_OPERATOR_DASHBOARD_URL: ${FAB_OPERATOR_PUBLIC_ORIGIN:?Set the dashboard HTTPS origin}/admin/operations
+    FAB_OPERATOR_SESSION_VALIDATION_URL: http://web:3000/api/fab/operator-session/status
+    FAB_LOCAL_LEDGER_PATH: /app/data/fab_operations.sqlite3
+    FAB_LOCAL_BACKUP_DIR: /app/backups
+    FAB_LOCAL_INTAKE_PATHS: /app/downloads/sort-out
+    FAB_SUPPORT_BUNDLE_DIR: /app/output/support
+    FAB_STORAGE_ENCRYPTION_CONFIRMED: ${FAB_STORAGE_ENCRYPTION_CONFIRMED:-false}
+  secrets: [api_token]
+  volumes:
+    - fab-data:/app/data
+    - fab-backups:/app/backups
+    - fab-output:/app/output
+    - fab-credentials:/app/credentials
+    - fab-tokens:/app/tokens
+    - ${FAB_INTAKE_DIR:?Set the absolute intake directory}:/app/downloads/sort-out:ro
+
+services:
+  api:
+    <<: *python
+    command: ["python", "-m", "src.operations.local_api"]
+    ports: ["127.0.0.1:${FAB_API_HOST_PORT:-5001}:5001"]
+    healthcheck:
+      test: ["CMD", "python", "-m", "src.run_health_probe", "api"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
+  worker:
+    <<: *python
+    command: ["python", "-m", "src.run_worker"]
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-m", "src.run_health_probe", "worker"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+
+  web:
+    <<: *runtime
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    cpus: 1.0
+    mem_limit: 512m
+    read_only: true
+    tmpfs: ["/tmp:size=32m,noexec,nosuid"]
+    environment:
+      NODE_ENV: production
+      FAB_DEPLOYMENT_PROFILE: vm
+      PORT: 3000
+      FAB_WEB_HOST: 0.0.0.0
+      FAB_OPERATOR_LOCAL_MODE: "false"
+      FAB_OPERATOR_TRUST_DOCKER_GATEWAY: "false"
+      FAB_OPERATOR_TRUSTED_PROXY_ADDRESSES: ${FAB_TRUSTED_PROXY_ADDRESSES:?Set the observed proxy peer IP addresses}
+      FAB_OPERATOR_PUBLIC_ORIGIN: ${FAB_OPERATOR_PUBLIC_ORIGIN:?Set the dashboard HTTPS origin}
+      FAB_LOCAL_API_URL: http://api:5001
+      FAB_LOCAL_API_PUBLIC_URL: ${FAB_LEDGER_PUBLIC_ORIGIN:?Set the ledger HTTPS origin}
+      FAB_LOCAL_API_INSECURE_HOSTS: api
+      FAB_LOCAL_API_TOKEN_FILE: /run/secrets/api_token
+      FAB_OPERATIONS_SERVICE_TOKEN_FILE: /run/secrets/api_token
+      JWT_SECRET_FILE: /run/secrets/session_secret
+      FAB_OPERATOR_ACCESS_TOKEN_FILE: /run/secrets/operator_token
+      FAB_INSTANCE_ROOT: /app
+    secrets: [api_token, session_secret, operator_token]
+    ports: ["127.0.0.1:${FAB_WEB_HOST_PORT:-3000}:3000"]
+    depends_on:
+      api:
+        condition: service_healthy
+
+secrets:
+  api_token:
+    file: ${FAB_API_TOKEN_FILE:?Set the absolute API token file path}
+  session_secret:
+    file: ${FAB_SESSION_SECRET_FILE:?Set the absolute session secret file path}
+  operator_token:
+    file: ${FAB_OPERATOR_TOKEN_FILE:?Set the absolute operator token file path}
+
+volumes:
+  fab-data:
+  fab-backups:
+  fab-output:
+  fab-credentials:
+  fab-tokens:

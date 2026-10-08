@@ -49,6 +49,10 @@ class LocalBookkeepingRecordService:
         )
 
     def upsert_from_document(self, document_id: int, status: Optional[str] = None) -> Dict[str, Any]:
+        with self.ledger.write_transaction():
+            return self._upsert_from_document(document_id, status=status)
+
+    def _upsert_from_document(self, document_id: int, status: Optional[str] = None) -> Dict[str, Any]:
         document = self.ledger.get_document(document_id)
         if not document:
             return {"success": False, "status": "not_found", "error": "Document not found"}
@@ -97,6 +101,17 @@ class LocalBookkeepingRecordService:
         }
 
     def upsert_from_bank_transaction(
+        self,
+        bank_transaction_id: int,
+        status: Optional[str] = None,
+        reconciliation_status: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        with self.ledger.write_transaction():
+            return self._upsert_from_bank_transaction(
+                bank_transaction_id, status=status, reconciliation_status=reconciliation_status,
+            )
+
+    def _upsert_from_bank_transaction(
         self,
         bank_transaction_id: int,
         status: Optional[str] = None,
@@ -191,6 +206,19 @@ class LocalBookkeepingRecordService:
         return summary
 
     def resolve_record(
+        self,
+        record_id: int,
+        status: str = "resolved",
+        resolution: Optional[str] = None,
+        corrections: Optional[Dict[str, Any]] = None,
+        actor: str = "fab_local_api",
+    ) -> Dict[str, Any]:
+        with self.ledger.write_transaction():
+            return self._resolve_record(
+                record_id, status=status, resolution=resolution, corrections=corrections, actor=actor,
+            )
+
+    def _resolve_record(
         self,
         record_id: int,
         status: str = "resolved",
@@ -496,6 +524,8 @@ class LocalBookkeepingRecordService:
             if non_posting
             else _line_item_export_readiness(line_items, vat_amount)
         )
+        if review_required or export_status.startswith("blocked"):
+            export_readiness["readyForWaveDraft"] = False
         return {
             "documentId": document.get("id"),
             "sourceType": "document",
@@ -677,6 +707,14 @@ def _export_status_for_document(
     latest_routing: Optional[Dict[str, Any]],
     review_required: bool,
 ) -> str:
+    # Current source failures override historical draft preparation, not its evidence.
+    processing_status = str(document.get("processing_status") or "")
+    if processing_status == "duplicate" or document.get("duplicate_of_document_id"):
+        return "blocked_duplicate"
+    if processing_status == "failed":
+        return "blocked_processing"
+    if review_required:
+        return "blocked_by_review"
     if latest_routing:
         routing_status = str(latest_routing.get("status") or "")
         if routing_status in EXPORT_PREPARED_STATUSES:
@@ -685,15 +723,8 @@ def _export_status_for_document(
             return routing_status
         if routing_status == "needs_review":
             return "blocked_by_review"
-    processing_status = str(document.get("processing_status") or "")
     if processing_status == "export_draft_prepared":
         return "draft_prepared"
-    if processing_status == "duplicate":
-        return "blocked_duplicate"
-    if processing_status == "failed":
-        return "blocked_processing"
-    if review_required:
-        return "blocked_by_review"
     if processing_status in READY_DOCUMENT_STATUSES:
         return "ready"
     return "not_started"

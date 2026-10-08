@@ -38,6 +38,21 @@ The managed launcher exposes only the authenticated FAB API. The operator dashbo
 .\Start-FAB-Ngrok.cmd
 ```
 
+Run the ngrok launcher and verifier with the same configuration/environment used
+to start FAB. Both resolve the configured operator and separate HAI credentials,
+including `FAB_LOCAL_API_TOKEN_FILE` and `FAB_HAI_API_TOKEN_FILE`. Configured values
+take precedence over encrypted stored credentials. When configuration omits a
+credential, they can read the existing encrypted local store, but never create or
+rotate a credential. Missing, invalid or identical operator/HAI credentials block
+the tunnel before any public endpoint is started. The `local` profile retains the
+main launcher's stored-credential fallback for short legacy configured values;
+an explicit weak `windows` credential is rejected instead.
+
+If configuration changed since FAB started, these scripts cannot recover the
+running process's former credentials. Restore its startup configuration or perform
+an explicit owned stop/start with the intended settings. Do not replace tokens or
+disable authentication simply to make a tunnel check pass.
+
 When another ngrok endpoint is already online, FAB refuses to stop or pool it. Reserve a separate HTTPS endpoint for FAB and pass its clean origin explicitly:
 
 ```powershell

@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createServer } from "node:http";
+import { once } from "node:events";
+import type { AddressInfo } from "node:net";
 import {
   createFabBackup,
   createFabSupportBundle,
@@ -28,6 +31,160 @@ afterEach(() => {
 });
 
 describe("FAB local API gateway", () => {
+  it.each([
+    [400, "BAD_REQUEST"], [401, "UNAUTHORIZED"], [403, "FORBIDDEN"],
+    [404, "NOT_FOUND"], [405, "METHOD_NOT_SUPPORTED"], [409, "CONFLICT"], [413, "PAYLOAD_TOO_LARGE"],
+    [422, "UNPROCESSABLE_CONTENT"], [429, "TOO_MANY_REQUESTS"], [503, "SERVICE_UNAVAILABLE"],
+  ])("preserves backend rejection %s as %s without retrying", async (status, code) => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: "Synthetic rejection" }), { status: Number(status) }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fabLocalRequest("/api/test", { method: "POST", body: "{}" }))
+      .rejects.toMatchObject({ code, message: "Synthetic rejection" });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("preserves a rejected review as a conflict without replaying it", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      success: false, status: "stale_evidence", error: "Reconciliation evidence changed; refresh before approval.",
+    }), { status: 409 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(resolveFabReviewItem({ reviewItemId: 1, status: "approved", resolution: "Synthetic approval" }))
+      .rejects.toMatchObject({ code: "CONFLICT", message: "Reconciliation evidence changed; refresh before approval." });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("sanitizes classified errors and uses HTTP status rather than a body-supplied code", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      code: "UNAUTHORIZED", error: "token=synthetic-private-token " + "x".repeat(700),
+    }), { status: 400 })));
+    try {
+      await fabLocalRequest("/api/test");
+      throw new Error("Expected rejection");
+    } catch (error) {
+      expect(error).toMatchObject({ code: "BAD_REQUEST" });
+      const message = (error as Error).message;
+      expect(message).not.toContain("synthetic-private-token");
+      expect(message).toContain("[REDACTED]");
+      expect(message.length).toBeLessThanOrEqual(500);
+    }
+  });
+
+  it("preserves rejection classification over real HTTP without replaying a mutation", async () => {
+    let submissions = 0;
+    const server = createServer((req, res) => {
+      submissions += 1;
+      req.resume();
+      res.writeHead(413, { "content-type": "application/json" });
+      res.end('{"error":"Synthetic upload exceeds the limit"}');
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    try {
+      await expect(fabLocalRequest("/api/test", { method: "POST", body: "{}" }, {
+        baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+      })).rejects.toMatchObject({ code: "PAYLOAD_TOO_LARGE", message: "Synthetic upload exceeds the limit" });
+      expect(submissions).toBe(1);
+    } finally {
+      await new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); });
+    }
+  });
+
+  it("does not submit a pre-cancelled request", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fabLocalRequest("/api/test", { signal: AbortSignal.abort() })).rejects.toThrow("cancelled");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([0, -1, NaN, 120_001])("rejects invalid timeout %s before submission", async timeoutMs => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fabLocalRequest("/api/test", {}, { timeoutMs })).rejects.toThrow("Invalid");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("propagates caller cancellation during a body read", async () => {
+    const caller = new AbortController();
+    vi.stubGlobal("fetch", vi.fn(async (_url, init) => {
+      const body = new ReadableStream({ start(controller) {
+        init.signal.addEventListener("abort", () => controller.error(new DOMException("Aborted", "AbortError")));
+      } });
+      queueMicrotask(() => caller.abort());
+      return new Response(body);
+    }));
+    await expect(fabLocalRequest("/api/test", { signal: caller.signal })).rejects.toThrow("cancelled");
+  });
+
+  it("rejects oversized JSON and invalid UTF-8 instead of returning success", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", {
+      headers: { "content-length": String(8 * 1024 * 1024 + 1) },
+    })));
+    await expect(fabLocalRequest("/api/test")).rejects.toThrow("size limit");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array([123, 34, 120, 34, 58, 34, 255, 34, 125]))));
+    await expect(fabLocalRequest("/api/test")).rejects.toThrow("JSON object");
+  });
+
+  it("does not replay a mutation or credentials through a real redirect", async () => {
+    const forwarded: string[] = [];
+    const server = createServer((req, res) => {
+      if (req.url === "/start") {
+        res.writeHead(307, { location: "/destination" });
+        res.end();
+      } else {
+        forwarded.push(req.headers.authorization || "");
+        req.resume();
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end('{"success":true}');
+      }
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    try {
+      await expect(fabLocalRequest("/start", { method: "POST", body: '{"synthetic":true}', redirect: "follow" }, {
+        baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, token: "synthetic-token",
+      })).rejects.toThrow(/redirect/i);
+      expect(forwarded).toEqual([]);
+    } finally {
+      await new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); });
+    }
+  });
+
+  it.each(["not-json", "null", "[]", '"text"'])("rejects malformed successful payload %j", async body => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(body, { status: 200 })));
+    await expect(fabLocalRequest("/api/test")).rejects.toThrow(/JSON object/i);
+  });
+
+  it("does not swallow a timeout while reading the response", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (_url, init) => ({
+      ok: true, status: 200, headers: new Headers(),
+      json: async () => { throw new DOMException("Aborted", "AbortError"); },
+      body: new ReadableStream({ start(controller) {
+        init.signal.addEventListener("abort", () => controller.error(new DOMException("Aborted", "AbortError")));
+      } }),
+    })));
+    await expect(fabLocalRequest("/api/test", {}, { timeoutMs: 10 })).rejects.toThrow("timed out");
+  });
+
+  it("times out a real HTTP body that never finishes", async () => {
+    let bodyStarted = false;
+    const server = createServer((_req, res) => {
+      bodyStarted = true;
+      res.writeHead(200, { "content-type": "application/json" });
+      res.write('{"unfinished":');
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    try {
+      await expect(fabLocalRequest("/api/test", {}, {
+        baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+        timeoutMs: 250,
+      })).rejects.toThrow("timed out");
+      expect(bodyStarted).toBe(true);
+    } finally {
+      await new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); });
+    }
+  });
+
   it("rejects insecure non-loopback endpoints", () => {
     expect(() => getFabLocalApiBaseUrl("http://accounting.example.test"))
       .toThrow("must use https");
@@ -835,6 +992,66 @@ describe("FAB local API gateway", () => {
     expect(result.resourceStates.exceptions.state).toBe("error");
   });
 
+  it.each([401, 403, 429, 503, "offline"])("does not amplify a failed batch %s into individual reads", async status => {
+    const paths: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      paths.push(new URL(String(input)).pathname);
+      if (status === "offline") throw new Error("Synthetic backend offline");
+      return new Response(JSON.stringify({ error: "Synthetic batch rejected" }), { status: Number(status) });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await getFabControlCenter();
+    expect(paths.sort()).toEqual(["/api/backups", "/api/cloud/status", "/api/control-center/resources"].sort());
+    expect(result.connection.connected).toBe(false);
+    expect(result.metrics.documents).toBeNull();
+    expect(result.resourceStates.metrics).toMatchObject({ state: "error", updatedAt: null });
+    expect(result.resourceStates.liveness.state).toBe("error");
+  });
+
+  it.each([404, 405])("retains bounded individual compatibility reads for unsupported batch %s", async status => {
+    const paths: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(String(input)).pathname;
+      paths.push(path);
+      return new Response(JSON.stringify(path === "/api/control-center/resources"
+        ? { error: "Synthetic unsupported batch" } : { status: "ok" }),
+      { status: path === "/api/control-center/resources" ? status : 200 });
+    }));
+    const result = await getFabControlCenter();
+    expect(result.connection.connected).toBe(true);
+    expect(paths).toContain("/api/live");
+    expect(paths.filter(path => path === "/api/control-center/resources")).toHaveLength(1);
+    expect(paths.length).toBe(30);
+  });
+
+  it("does not fan out after a real HTTP service-unavailable response", async () => {
+    const paths: string[] = [];
+    const nativeFetch = globalThis.fetch;
+    const server = createServer((req, res) => {
+      paths.push(new URL(req.url || "/", "http://127.0.0.1").pathname);
+      req.resume();
+      res.writeHead(503, { "content-type": "application/json" });
+      res.end('{"error":"Synthetic service unavailable"}');
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    try {
+      const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+      vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
+        const target = new URL(String(input));
+        return nativeFetch(new URL(target.pathname + target.search, base), {
+          ...init, headers: { accept: "application/json" },
+        });
+      });
+      const result = await getFabControlCenter();
+      expect(paths.sort()).toEqual(["/api/backups", "/api/cloud/status", "/api/control-center/resources"].sort());
+      expect(result.connection.connected).toBe(false);
+      expect(result.metrics.documents).toBeNull();
+    } finally {
+      await new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); });
+    }
+  });
+
   it("bounds control-center reads so the local ledger is not flooded", async () => {
     let activeRequests = 0;
     let maximumActiveRequests = 0;
@@ -932,6 +1149,127 @@ describe("FAB local API gateway", () => {
     expect(fetchMock).toHaveBeenCalledTimes(firstSnapshotCalls + 1);
     await getFabControlCenter();
     expect(fetchMock.mock.calls.length).toBeGreaterThan(firstSnapshotCalls + 20);
+  });
+
+  it("invalidates a snapshot after an uncertain mutation without retrying it", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "POST") return new Response("not-json");
+      return new Response(JSON.stringify({ status: "ok" }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const first = await getFabControlCenter();
+    const firstCalls = fetchMock.mock.calls.length;
+    await expect(fabLocalRequest("/api/test", { method: "POST", body: "{}" })).rejects.toThrow("JSON object");
+    const refreshed = await getFabControlCenter();
+    expect(refreshed).not.toBe(first);
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(firstCalls + 20);
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  });
+
+  it("rejects an obsolete refresh without overwriting newer stale-fallback evidence", async () => {
+    let phase = 1;
+    let release!: (response: Response) => void;
+    let started!: () => void;
+    const oldMetrics = new Promise<Response>(resolve => { release = resolve; });
+    const metricsStarted = new Promise<void>(resolve => { started = resolve; });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/api/dashboard" && phase === 1) { started(); return oldMetrics; }
+      if (phase === 3) return new Response('{"error":"Synthetic unavailable"}', { status: 503 });
+      return new Response(JSON.stringify(path === "/api/dashboard" ? { documents: 22 } : {}));
+    }));
+    const obsolete = getFabControlCenter().then(value => value, error => error);
+    try {
+      await metricsStarted;
+      phase = 2;
+      const fresh = await refreshFabControlCenter();
+      expect(fresh.metrics.documents).toBe(22);
+      release(new Response('{"documents":11}'));
+      expect(await obsolete).toMatchObject({ code: "CONFLICT" });
+      phase = 3;
+      const stale = await refreshFabControlCenter();
+      expect(stale.metrics.documents).toBe(22);
+      expect(stale.resourceStates.metrics.state).toBe("stale");
+    } finally {
+      release(new Response('{"documents":11}'));
+      await obsolete;
+    }
+  });
+
+  it.each(["{}", "not-json"])("invalidates reads cached during mutation completion %s", async body => {
+    let documents = 11;
+    let release!: (response: Response) => void;
+    let started!: () => void;
+    const pendingMutation = new Promise<Response>(resolve => { release = resolve; });
+    const mutationStarted = new Promise<void>(resolve => { started = resolve; });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "POST") { started(); return pendingMutation; }
+      return new Response(JSON.stringify(new URL(String(input)).pathname === "/api/dashboard" ? { documents } : {}));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const mutation = fabLocalRequest("/api/test", { method: "POST", body: "{}" }).then(value => value, error => error);
+    try {
+      await mutationStarted;
+      const during = await getFabControlCenter();
+      expect(during.metrics.documents).toBe(11);
+      documents = 22;
+      release(new Response(body));
+      const outcome = await mutation;
+      if (body === "not-json") expect(outcome).toBeInstanceOf(Error);
+      else expect(outcome).toEqual({});
+      const after = await getFabControlCenter();
+      expect(after.metrics.documents).toBe(22);
+      expect(after).not.toBe(during);
+      expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+    } finally {
+      release(new Response(body));
+      await mutation;
+    }
+  });
+
+  it("refreshes a snapshot created during a pending real HTTP mutation", async () => {
+    let documents = 11;
+    let submissions = 0;
+    let finishMutation = () => {};
+    let started!: () => void;
+    const mutationStarted = new Promise<void>(resolve => { started = resolve; });
+    const nativeFetch = globalThis.fetch;
+    const server = createServer((req, res) => {
+      req.resume();
+      res.writeHead(200, { "content-type": "application/json" });
+      if (req.method === "POST") {
+        submissions += 1;
+        finishMutation = () => {
+          if (!res.writableEnded) { documents = 22; res.end("{}"); }
+        };
+        started();
+      } else {
+        res.end(JSON.stringify(new URL(req.url || "/", "http://127.0.0.1").pathname === "/api/dashboard" ? { documents } : {}));
+      }
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    let mutation: Promise<unknown> | undefined;
+    try {
+      const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+      vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
+        const target = new URL(String(input));
+        return nativeFetch(new URL(target.pathname + target.search, base), {
+          ...init, headers: { accept: "application/json" },
+        });
+      });
+      mutation = fabLocalRequest("/api/test", { method: "POST", body: "{}" });
+      await mutationStarted;
+      expect((await getFabControlCenter()).metrics.documents).toBe(11);
+      finishMutation();
+      await mutation;
+      expect((await getFabControlCenter()).metrics.documents).toBe(22);
+      expect(submissions).toBe(1);
+    } finally {
+      finishMutation();
+      await mutation?.catch(() => {});
+      await new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); });
+    }
   });
 
   it("keeps automatic polling cached while explicit refresh reloads every resource", async () => {
@@ -1135,6 +1473,9 @@ describe("FAB local API gateway", () => {
         rowsSeen: 3,
         rowsImported: 2,
         duplicates: 1,
+        identityConflicts: 1,
+        identityConflictRows: [{ row: 3, transactionId: "bank-3", bankTransactionId: 3 }],
+        identityConflictsTruncated: false,
         skipped: 0,
         bankTransactionIds: [1, 2, 3],
         internalMetadata: "must-not-cross-the-web-boundary",
@@ -1160,6 +1501,9 @@ describe("FAB local API gateway", () => {
       rowsSeen: 3,
       rowsImported: 2,
       duplicates: 1,
+      identityConflicts: 1,
+      identityConflictRows: [{ row: 3, transactionId: "bank-3", bankTransactionId: 3 }],
+      identityConflictsTruncated: false,
       externalSubmission: "not_executed",
     });
     expect(result).not.toHaveProperty("bankTransactionIds");

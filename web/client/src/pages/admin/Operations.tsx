@@ -199,11 +199,19 @@ export default function AdminOperations() {
   const finishBankImport = useCallback(async (result: FabRecord) => {
     const imported = count(result.rowsImported);
     const duplicates = count(result.duplicates);
+    const identityConflicts = count(result.identityConflicts);
     const skipped = count(result.skipped);
-    toast.success(copy(
-      `Bank statement recorded: ${imported} new, ${duplicates} already present, ${skipped} skipped.`,
-      `Bankafschrift vastgelegd: ${imported} nieuw, ${duplicates} reeds aanwezig, ${skipped} overgeslagen.`,
-    ));
+    const message = identityConflicts > 0
+      ? copy(
+        `Import needs review: ${identityConflicts} changed transaction identity conflict(s). Existing ledger rows were preserved.`,
+        `Import vereist controle: ${identityConflicts} transacties met gewijzigde identiteitsgegevens. Bestaande grootboekregels zijn behouden.`,
+      )
+      : copy(
+        `Bank statement recorded: ${imported} new, ${duplicates} already present, ${skipped} skipped.`,
+        `Bankafschrift vastgelegd: ${imported} nieuw, ${duplicates} reeds aanwezig, ${skipped} overgeslagen.`,
+      );
+    if (identityConflicts > 0) toast.warning(message);
+    else toast.success(message);
     await controlCenter.refetch();
     if (imported > 0) executeCommand("run_reconciliation");
   }, [controlCenter, copy, executeCommand]);
@@ -326,6 +334,7 @@ export default function AdminOperations() {
       connectionStatus={authLoading ? copy("Checking access", "Toegang controleren") : text(data?.connection.status, copy("Local API offline", "Lokale API offline"))}
       organization="FAB Local Ledger"
       operatorLabel={operatorLabel}
+      managedOperator={user?.loginMethod === "fab-operator-secret"}
       search={search}
       onSearchChange={setSearch}
       onRefresh={() => { void refresh(); }}
@@ -338,6 +347,7 @@ export default function AdminOperations() {
           <LockKeyhole aria-hidden="true" />
           <h1>{copy("Operator access required", "Operatortoegang vereist")}</h1>
           <p>{copy("Sign in with an administrator account to operate the authoritative FAB ledger.", "Log in met een beheerdersaccount om het gezaghebbende FAB-grootboek te bedienen.")}</p>
+          <a className="fab-primary-button" href="/operator/login">{copy("Sign in", "Inloggen")}</a>
         </div>
       ) : controlCenter.isLoading || authLoading || operatorAccess.isLoading ? (
         <FabLoadingState />

@@ -2,7 +2,6 @@ import "dotenv/config";
 import express from "express";
 import compression from "compression";
 import { createServer } from "http";
-import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { appRouter } from "../routers";
@@ -12,44 +11,29 @@ import { webhookLimiter, relaxedLimiter } from "../lib/rateLimiter";
 import { createLogger } from "../lib/logger";
 import { registerFabOperationsRoutes } from "../fabOperations";
 import { registerFabRuntimeRoute } from "../fabRuntime";
+import { registerFabManagedAuthRoutes } from "../fabManagedAuth";
 import { registerFabSourcePreviewRoutes } from "../fabSourcePreview";
 import { registerFabOperatorSessionRoutes } from "../fabOperatorSession";
 import { ENV } from "./env";
 import { createFabSecurityMiddleware } from "./security";
+import { configureFabProxyTrust } from "./deployment";
+import { createFabServerLifecycle, listenFabServer } from "./lifecycle";
 
 const log = createLogger("Server");
-
-function isPortAvailable(port: number): Promise<boolean> {
-  return new Promise(resolve => {
-    const server = net.createServer();
-    server.listen(port, () => {
-      server.close(() => resolve(true));
-    });
-    server.on("error", () => resolve(false));
-  });
-}
-
-async function findAvailablePort(startPort: number = 3000): Promise<number> {
-  for (let port = startPort; port < startPort + 20; port++) {
-    if (await isPortAvailable(port)) {
-      return port;
-    }
-  }
-  throw new Error(`No available port found starting from ${startPort}`);
-}
 
 async function startServer() {
   const app = express();
   const server = createServer(app);
+  const lifecycle = createFabServerLifecycle(server);
 
-  // Trust first proxy (required for rate limiting and IP detection behind reverse proxy)
-  app.set("trust proxy", 1);
+  configureFabProxyTrust(app, ENV.fabOperatorTrustedProxyAddresses);
 
   app.use(...createFabSecurityMiddleware(ENV.isProduction));
 
   // Compress JSON and static responses for remote/ngrok clients. Small
   // responses stay uncompressed to avoid spending CPU for negligible savings.
   app.use(compression({ threshold: 1_024 }));
+  registerFabManagedAuthRoutes(app);
 
   // ── Stripe webhook — BEFORE express.json() for raw body ───────
   app.post(
@@ -91,30 +75,13 @@ async function startServer() {
   );
 
   // ── Static / Vite ─────────────────────────────────────────────
-  if (process.env.NODE_ENV === "development") {
+  if (process.env.NODE_ENV === "development" && ENV.fabDeploymentProfile === "local") {
     const developmentServer = "./vite";
     const { setupVite } = await import(developmentServer);
     await setupVite(app, server);
   } else {
     serveStatic(app);
   }
-
-  // ── Graceful shutdown ─────────────────────────────────────────
-  const shutdown = (signal: string) => {
-    log.info(`${signal} received, shutting down gracefully...`);
-    server.close(() => {
-      log.info("Server closed");
-      process.exit(0);
-    });
-    // Force exit after 10s if connections don't close
-    setTimeout(() => {
-      log.warn("Forcing shutdown after timeout");
-      process.exit(1);
-    }, 10_000);
-  };
-
-  process.on("SIGTERM", () => shutdown("SIGTERM"));
-  process.on("SIGINT", () => shutdown("SIGINT"));
 
   // ── Unhandled rejection / exception safety net ────────────────
   process.on("unhandledRejection", (reason) => {
@@ -129,17 +96,20 @@ async function startServer() {
   });
 
   // ── Start listening ───────────────────────────────────────────
-  const preferredPort = parseInt(process.env.PORT || "3000");
-  const port = await findAvailablePort(preferredPort);
+  const preferredPort = ENV.fabWebPort;
+  const port = await listenFabServer(server, {
+    host: ENV.fabWebHost,
+    port: preferredPort,
+    allowPortFallback: ENV.fabAllowPortFallback,
+  });
+  lifecycle.installSignalHandlers();
 
   if (port !== preferredPort) {
     log.info(`Port ${preferredPort} is busy, using port ${port} instead`);
   }
 
-  server.listen(port, ENV.fabWebHost, () => {
-    const displayHost = ENV.fabWebHost === "0.0.0.0" ? "localhost" : ENV.fabWebHost;
-    log.info(`Server running on http://${displayHost}:${port}/`);
-  });
+  const displayHost = ENV.fabWebHost === "0.0.0.0" ? "localhost" : ENV.fabWebHost;
+  log.info(`Server running on http://${displayHost}:${port}/`);
 }
 
 startServer().catch((err) => {

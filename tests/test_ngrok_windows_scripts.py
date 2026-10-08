@@ -15,8 +15,8 @@ class TestNgrokWindowsScripts(unittest.TestCase):
         self.assertIn('"--name", "fab-managed"', script)
         self.assertIn("/api/live", script)
         self.assertIn("/api/hai/manifest", script)
-        self.assertIn("get_or_create_runtime_secret('operator_api_token')", script)
-        self.assertIn("get_or_create_runtime_secret('hai_api_token')", script)
+        self.assertIn("-m src.security.windows_runtime_credentials", script)
+        self.assertNotIn("get_or_create_runtime_secret", script)
         self.assertIn('$haiHeaders = @{ Authorization = "Bearer $haiApiToken" }', script)
         self.assertIn('$publicUrl/api/health', script)
         self.assertIn('HAI credential escaped its route scope', script)
@@ -45,9 +45,12 @@ class TestNgrokWindowsScripts(unittest.TestCase):
             'Stop-FabProcessTree -ProcessId $ownedApiPid -CommandMarker "src.operations.local_api"'
         )
         self.assertLess(ngrok_stop, api_stop)
+        self.assertLess(ngrok_stop, script.index("Stop-FabRecordedProcess -Identity $entry.Value"))
         self.assertIn(".venv\\Scripts\\python.exe", script)
-        self.assertIn("name_prefix='hai_command:'", script)
-        self.assertIn("owned_hai_api_stopped", script)
+        cleanup = script.index("force_release_stopped_runtime_leases(actor='Stop-FAB.ps1')")
+        self.assertLess(api_stop, cleanup)
+        self.assertIn("with managed_worker_maintenance(Path.cwd()):", script)
+        self.assertNotIn("list_runtime_leases", script)
         self.assertNotIn("Get-Command python -ErrorAction Stop", script)
 
     def test_cmd_launchers_forward_operator_arguments(self):
@@ -67,8 +70,8 @@ class TestNgrokWindowsScripts(unittest.TestCase):
         self.assertIn("localLive.maintenanceMode", managed)
         self.assertIn("disabled during maintenance", verification)
         self.assertIn("localLive.maintenanceMode", verification)
-        self.assertIn("get_or_create_runtime_secret('operator_api_token')", verification)
-        self.assertIn("get_or_create_runtime_secret('hai_api_token')", verification)
+        self.assertIn("-m src.security.windows_runtime_credentials", verification)
+        self.assertNotIn("get_or_create_runtime_secret", verification)
         self.assertIn('Authorization = "Bearer $haiApiToken"', verification)
 
 

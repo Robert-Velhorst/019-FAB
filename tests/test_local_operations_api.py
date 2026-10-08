@@ -10,19 +10,33 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from flask import request
+
 from src.operations.local_backup import (
     FULL_RESTORE_CONFIRMATION_PHRASE,
     LocalBackupService,
     RESTORE_CONFIRMATION_PHRASE,
     RESTORE_MODE_FULL,
 )
-from src.operations.local_api import create_app
+from src.operations.local_api import (
+    MAX_LOCAL_BANK_IMPORT_REQUEST_BYTES,
+    MAX_LOCAL_INTAKE_REQUEST_BYTES,
+    DEFAULT_LOCAL_JSON_MUTATION_REQUEST_BYTES,
+    MAX_LOCAL_DRIVE_RELAY_REQUEST_BYTES,
+    MAX_LOCAL_OAUTH_CREDENTIAL_REQUEST_BYTES,
+    MAX_LOCAL_WAVE_READBACK_REQUEST_BYTES,
+    MAX_LOCAL_WAVE_REPORT_RESULT_REQUEST_BYTES,
+    MAX_LOCAL_WAVE_REPORT_RESULT_REQUEST_BYTES,
+    MAX_RECONCILIATION_REQUEST_BYTES,
+    create_app,
+)
 from src.operations.local_autonomy import LocalAutonomousService
 from src.operations.local_bookkeeping_records import LocalBookkeepingRecordService
 from src.operations.local_exports import EXPORT_APPROVAL_PHRASE, EXPORT_REJECTION_PHRASE, EXPORT_RESULT_CONFIRMATION_PHRASE
 from src.operations.local_gmail_auth import LocalGmailAuthorizationCoordinator
 from src.operations.local_google_drive_auth import LocalGoogleDriveAuthorizationCoordinator
 from src.operations.local_health import LocalOperationsHealth
+from src.operations.local_intake import LocalFolderIntake
 from src.operations.local_ledger import LocalOperationsLedger
 from src.operations.local_master_ledger import LocalMasterLedgerService
 from src.operations.local_wave_setup import LocalWaveSetupService
@@ -31,6 +45,154 @@ from src.utils.runtime_identity import local_instance_id
 
 
 class TestLocalOperationsApi(unittest.TestCase):
+    def test_bounded_upload_routes_set_request_caps_before_route_execution(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = create_app({
+                "fab_local_ledger_path": os.path.join(temp_dir, "fab.sqlite3"),
+                "fab_local_intake_paths": os.path.join(temp_dir, "intake"),
+            })
+            observed = {}
+            expected = {
+                "upload_intake_document": MAX_LOCAL_INTAKE_REQUEST_BYTES,
+                "import_bank_transactions": MAX_LOCAL_BANK_IMPORT_REQUEST_BYTES,
+                "import_bank_transactions_form": MAX_LOCAL_BANK_IMPORT_REQUEST_BYTES,
+                "install_gmail_credentials_api": MAX_LOCAL_OAUTH_CREDENTIAL_REQUEST_BYTES,
+                "install_google_drive_credentials_api": MAX_LOCAL_OAUTH_CREDENTIAL_REQUEST_BYTES,
+                "drive_wave_attachment_readback_api": MAX_LOCAL_WAVE_READBACK_REQUEST_BYTES,
+                "record_wave_report_result": MAX_LOCAL_WAVE_REPORT_RESULT_REQUEST_BYTES,
+                "record_wave_report_result": MAX_LOCAL_WAVE_REPORT_RESULT_REQUEST_BYTES,
+                "google_drive_relay_intake_api": MAX_LOCAL_DRIVE_RELAY_REQUEST_BYTES,
+                "run_autonomy": MAX_RECONCILIATION_REQUEST_BYTES,
+                "refresh_notifications_api": DEFAULT_LOCAL_JSON_MUTATION_REQUEST_BYTES,
+                "save_wave_setup": DEFAULT_LOCAL_JSON_MUTATION_REQUEST_BYTES,
+            }
+
+            @app.before_request
+            def observe_bound_request():
+                endpoint = request.endpoint
+                if endpoint in expected:
+                    observed[endpoint] = request.max_content_length
+                    return "", 204
+                return None
+
+            client = app.test_client()
+            paths = {
+                "upload_intake_document": "/api/intake/upload",
+                "import_bank_transactions": "/api/bank-transactions/import",
+                "import_bank_transactions_form": "/bank-transactions/import",
+                "install_gmail_credentials_api": "/api/connectors/gmail/credentials",
+                "install_google_drive_credentials_api": "/api/connectors/google-drive/credentials",
+                "drive_wave_attachment_readback_api": "/api/drive-wave/documents/1/attachment-readback",
+                "record_wave_report_result": "/api/wave/report-results",
+                "record_wave_report_result": "/api/wave/report-results",
+                "google_drive_relay_intake_api": "/api/connectors/google-drive/relay",
+                "run_autonomy": "/api/autonomy/run",
+                "refresh_notifications_api": "/api/notifications/refresh",
+            }
+            for endpoint, path in paths.items():
+                response = client.post(path, json={})
+                self.assertEqual(response.status_code, 204, endpoint)
+                self.assertEqual(observed[endpoint], expected[endpoint], endpoint)
+
+            response = client.put("/api/wave/setup", json={})
+            self.assertEqual(response.status_code, 204, "save_wave_setup")
+            self.assertEqual(
+                observed["save_wave_setup"],
+                DEFAULT_LOCAL_JSON_MUTATION_REQUEST_BYTES,
+            )
+
+    def test_lower_global_request_limit_caps_route_specific_budget(self):
+        global_limit = 128 * 1024
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = create_app({
+                "fab_local_ledger_path": os.path.join(temp_dir, "fab.sqlite3"),
+                "fab_local_api_max_request_bytes": global_limit,
+            })
+            observed = {}
+
+            @app.before_request
+            def observe_bound_request():
+                if request.endpoint == "upload_intake_document":
+                    observed["limit"] = request.max_content_length
+                    return "", 204
+                return None
+
+            response = app.test_client().post("/api/intake/upload", json={})
+
+            self.assertEqual(response.status_code, 204)
+            self.assertEqual(observed["limit"], global_limit)
+
+    def test_oauth_credential_body_limit_rejects_before_json_decode(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = create_app({
+                "fab_local_ledger_path": os.path.join(temp_dir, "fab.sqlite3"),
+            })
+            oversized_body = b"x" * (MAX_LOCAL_OAUTH_CREDENTIAL_REQUEST_BYTES + 1)
+            response = app.test_client().post(
+                "/api/connectors/gmail/credentials",
+                data=oversized_body,
+                content_type="application/json",
+            )
+
+            self.assertEqual(response.status_code, 413)
+            self.assertEqual(response.get_json()["errorCode"], "payload_too_large")
+
+    def test_default_api_mutation_limit_rejects_before_json_decode(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = create_app({
+                "fab_local_ledger_path": os.path.join(temp_dir, "fab.sqlite3"),
+            })
+            oversized_body = b"x" * (DEFAULT_LOCAL_JSON_MUTATION_REQUEST_BYTES + 1)
+            response = app.test_client().post(
+                "/api/notifications/refresh",
+                data=oversized_body,
+                content_type="application/json",
+            )
+
+            self.assertEqual(response.status_code, 413)
+            self.assertEqual(response.get_json()["errorCode"], "payload_too_large")
+
+    def test_api_exposes_failed_source_block_without_provider_dispatch(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reset_all_limiters()
+            self.addCleanup(reset_all_limiters)
+            ledger_path = os.path.join(temp_dir, "fab.sqlite3")
+            ledger = LocalOperationsLedger(ledger_path)
+            document_id = ledger.register_document({
+                "source": "scanner", "sourceDocumentId": "failed-export-api",
+                "originalFilename": "receipt.txt", "documentType": "receipt",
+                "processingStatus": "reviewed", "vendorName": "Office Shop",
+                "category": "Office Supplies", "transactionDate": "2026-06-28",
+                "totalAmount": 42.5,
+            })
+            client = create_app({"fab_local_ledger_path": ledger_path}).test_client()
+            route = client.post(f"/api/documents/{document_id}/route", json={}).get_json()
+            prepared = client.post(f"/api/routing/{route['routingAttemptId']}/export-attempt", json={})
+            self.assertEqual(prepared.status_code, 200)
+            attempt_id = prepared.get_json()["exportAttemptId"]
+            approved = client.post(f"/api/export-attempts/{attempt_id}/approve", json={
+                "confirmation": EXPORT_APPROVAL_PHRASE,
+            })
+            self.assertEqual(approved.status_code, 200)
+            ledger.update_document(document_id, {"processingStatus": "failed"})
+
+            with patch("src.data_entry.waveapps_api_executor.WaveappsApiExecutor.execute") as dispatch:
+                response = client.post(f"/api/export-attempts/{attempt_id}/execute", json={})
+                retry_approval = client.post(f"/api/export-attempts/{attempt_id}/approve", json={
+                    "confirmation": EXPORT_APPROVAL_PHRASE,
+                })
+
+            dispatch.assert_not_called()
+            for result in (response, retry_approval):
+                self.assertEqual(result.status_code, 400)
+                self.assertEqual(result.get_json()["status"], "blocked_processing")
+                self.assertEqual(result.get_json()["externalSubmission"], "not_executed")
+            attempt = client.get(f"/api/export-attempts/{attempt_id}").get_json()
+            self.assertEqual(attempt["status"], "attention_required")
+            records = client.get("/api/bookkeeping-records").get_json()["bookkeepingRecords"]
+            self.assertEqual(records[0]["export_status"], "blocked_processing")
+            self.assertFalse(records[0]["metadata"]["exportReadiness"]["readyForWaveDraft"])
+
     def test_control_center_batch_reads_fixed_resources_in_one_snapshot(self):
         expected_resources = {
             "autonomy",
@@ -193,6 +355,53 @@ class TestLocalOperationsApi(unittest.TestCase):
             self.assertNotIn("nonce", str(audit).lower())
             self.assertNotIn("ticket", str(audit).lower())
             self.assertNotIn(token, str(audit))
+
+    def test_managed_handoff_stops_working_when_parent_is_revoked(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            token = "D7pH8sAk3C5nZ9wL2tB6eQ0rV1mF4yUj"
+            now = int(time.time())
+            app = create_app({
+                "fab_local_ledger_path": os.path.join(temp_dir, "fab.sqlite3"),
+                "fab_local_api_token": token,
+                "fab_operator_session_validation_url": "http://127.0.0.1:3000/api/fab/operator-session/status",
+            })
+            client = app.test_client()
+            ticket = self._operator_session_ticket(token, {
+                "actor": "fab_dashboard:admin:test", "aud": "fab-local-operator-session",
+                "exp": now + 45, "iat": now, "nonce": "parent_session_nonce_1234",
+                "next": "/api/live", "v": 2,
+                "parent": {"id": "a" * 32, "exp": now + 600},
+            })
+            with patch("src.operations.local_api.parent_session_active", return_value=True) as validation:
+                response = client.get(f"/operator/session/bootstrap?ticket={ticket}")
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(client.get("/api/live").status_code, 200)
+                self.assertEqual(validation.call_count, 2)
+            with patch("src.operations.local_api.parent_session_active", return_value=False):
+                self.assertEqual(client.get("/api/live").status_code, 401)
+                self.assertEqual(client.get("/api/live", headers={"Authorization": f"Bearer {token}"}).status_code, 200)
+
+    def test_managed_validation_rejects_legacy_cookie_and_unbound_handoff(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            token = "D7pH8sAk3C5nZ9wL2tB6eQ0rV1mF4yUj"
+            app = create_app({
+                "fab_local_ledger_path": os.path.join(temp_dir, "fab.sqlite3"),
+                "fab_local_api_token": token,
+                "fab_operator_session_validation_url": "http://127.0.0.1:3000/api/fab/operator-session/status",
+            })
+            client = app.test_client()
+            with client.session_transaction() as browser_session:
+                browser_session["fab_local_api_authenticated"] = True
+            self.assertEqual(client.get("/api/live").status_code, 401)
+            now = int(time.time())
+            ticket = self._operator_session_ticket(token, {
+                "actor": "fab_dashboard:admin:test", "aud": "fab-local-operator-session",
+                "exp": now + 45, "iat": now, "nonce": "unbound_parent_nonce_1234",
+                "next": "/api/live", "v": 1,
+            })
+            self.assertEqual(client.get(f"/operator/session/bootstrap?ticket={ticket}").status_code, 401)
+            self.assertEqual(client.post("/login", data={"token": token}).status_code, 302)
+            self.assertEqual(client.get("/api/live").status_code, 200)
 
     def test_operator_session_handoff_rejects_expired_tampered_and_unsafe_tickets(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2766,6 +2975,24 @@ class TestLocalOperationsApi(unittest.TestCase):
             refreshed = client.get("/api/bank-transactions?accountIdentifier=wave-checking").get_json()["bankTransactions"][0]
             self.assertEqual(refreshed["reconciliation_status"], "candidate")
 
+            changed_identity = client.post("/api/bank-transactions/import", json={
+                "accountIdentifier": "wave-checking",
+                "bankTransactions": [{
+                    "id": "tx-bank-api-1",
+                    "date": "2026-06-28",
+                    "amount": -99.0,
+                    "description": "Office Shop",
+                }],
+            })
+            after_conflict = client.get("/api/bank-transactions?accountIdentifier=wave-checking").get_json()["bankTransactions"][0]
+
+            self.assertEqual(changed_identity.status_code, 200)
+            self.assertEqual(changed_identity.get_json()["status"], "needs_review")
+            self.assertEqual(changed_identity.get_json()["identityConflicts"], 1)
+            self.assertEqual(changed_identity.get_json()["identityConflictRows"][0]["row"], 1)
+            self.assertEqual(after_conflict["amount"], -42.5)
+            self.assertEqual(after_conflict["reconciliation_status"], "candidate")
+
     def test_api_imports_bounded_bank_statement_file_with_actor_and_format_validation(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             ledger_path = os.path.join(temp_dir, "fab.sqlite3")
@@ -2985,6 +3212,53 @@ class TestLocalOperationsApi(unittest.TestCase):
                 for backup in manifest_only["backups"]
             ))
 
+    def test_hai_backup_status_is_redacted_and_always_manifest_only(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger_path = os.path.join(temp_dir, "fab.sqlite3")
+            backup_dir = os.path.join(temp_dir, "backups")
+            config = {
+                "fab_local_ledger_path": ledger_path,
+                "fab_local_backup_dir": backup_dir,
+                "fab_local_api_token": "synthetic-operator-token",
+                "fab_hai_api_token": "synthetic-hai-token",
+            }
+            ledger = LocalOperationsLedger(ledger_path)
+            LocalBackupService(ledger, config).create_backup(note="HAI projection test")
+            client = create_app(config).test_client()
+
+            with patch.object(
+                LocalBackupService,
+                "inspect_backup",
+                side_effect=AssertionError("HAI backup status must not deep-verify"),
+            ):
+                hai_response = client.get(
+                    "/api/backups?verify=true",
+                    headers={"Authorization": "Bearer synthetic-hai-token"},
+                )
+
+            self.assertEqual(hai_response.status_code, 200)
+            hai_payload = hai_response.get_json()
+            serialized_hai_payload = json.dumps(hai_payload)
+            self.assertEqual(hai_payload["verificationMode"], "manifest_only")
+            self.assertEqual(hai_payload["backupCount"], 1)
+            self.assertIn("restorePolicy", hai_payload)
+            self.assertIn("schedule", hai_payload)
+            self.assertNotIn("backupDir", hai_payload)
+            self.assertNotIn("restoreConfirmationPhrase", hai_payload)
+            self.assertNotIn("fullRestoreConfirmationPhrase", hai_payload)
+            for sensitive_value in (temp_dir, "backupPath", "backupFilename"):
+                self.assertNotIn(sensitive_value, serialized_hai_payload)
+
+            operator_response = client.get(
+                "/api/backups",
+                headers={"Authorization": "Bearer synthetic-operator-token"},
+            )
+            self.assertEqual(operator_response.status_code, 200)
+            operator_payload = operator_response.get_json()
+            self.assertEqual(operator_payload["verificationMode"], "deep")
+            self.assertIn("backupDir", operator_payload)
+            self.assertIn("restoreConfirmationPhrase", operator_payload)
+
     def test_dashboard_backup_form_shows_backup_summary(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             ledger_path = os.path.join(temp_dir, "fab.sqlite3")
@@ -3188,6 +3462,91 @@ class TestLocalOperationsApi(unittest.TestCase):
             documents = client.get("/api/documents").get_json()["documents"]
             self.assertEqual(len(documents), 1)
             self.assertEqual(documents[0]["processing_status"], "imported")
+
+    def test_api_upload_retries_reuse_the_existing_file_and_ledger_document(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            intake_dir = os.path.join(temp_dir, "sort-out")
+            client = create_app({
+                "fab_local_ledger_path": os.path.join(temp_dir, "fab.sqlite3"),
+                "fab_local_intake_paths": intake_dir,
+                "fab_local_intake_extensions": "pdf",
+            }).test_client()
+            payload = {
+                "filename": "receipt.pdf",
+                "contentBase64": base64.b64encode(b"same receipt bytes").decode("ascii"),
+            }
+
+            first = client.post("/api/intake/upload", json=payload)
+            retry = client.post("/api/intake/upload", json=payload)
+
+            self.assertEqual(first.status_code, 201)
+            self.assertEqual(retry.status_code, 200)
+            self.assertTrue(retry.get_json()["idempotentReplay"])
+            self.assertEqual(
+                retry.get_json()["document"]["id"],
+                first.get_json()["document"]["id"],
+            )
+            self.assertEqual(os.listdir(intake_dir), ["receipt.pdf"])
+            self.assertEqual(len(client.get("/api/documents").get_json()["documents"]), 1)
+
+            changed = {
+                **payload,
+                "contentBase64": base64.b64encode(b"updated receipt bytes").decode("ascii"),
+            }
+            second_document = client.post("/api/intake/upload", json=changed)
+            second_retry = client.post("/api/intake/upload", json=changed)
+            source = client.get("/api/sources").get_json()["sources"][0]
+            changed_filename = (
+                "receipt-"
+                + hashlib.sha256(b"updated receipt bytes").hexdigest()[:12]
+                + ".pdf"
+            )
+
+            self.assertEqual(second_document.status_code, 201)
+            self.assertEqual(second_retry.status_code, 200)
+            self.assertTrue(second_retry.get_json()["idempotentReplay"])
+            self.assertEqual(sorted(os.listdir(intake_dir)), sorted(["receipt.pdf", changed_filename]))
+            self.assertEqual(len(client.get("/api/documents").get_json()["documents"]), 2)
+            self.assertEqual(source["documents_seen"], 2)
+            self.assertEqual(source["documents_imported"], 2)
+            self.assertIsNone(source["last_scan_at"])
+
+    def test_api_upload_registers_one_file_without_rescanning_intake_folder(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            intake_dir = os.path.join(temp_dir, "sort-out")
+            app = create_app({
+                "fab_local_ledger_path": os.path.join(temp_dir, "fab.sqlite3"),
+                "fab_local_intake_paths": intake_dir,
+                "fab_local_intake_extensions": "pdf",
+            })
+            client = app.test_client()
+            with patch.object(LocalFolderIntake, "rescan", side_effect=AssertionError("full folder scan")):
+                response = client.post("/api/intake/upload", json={
+                    "filename": "receipt.pdf",
+                    "contentBase64": base64.b64encode(b"receipt bytes").decode("ascii"),
+                })
+
+            self.assertEqual(response.status_code, 201)
+            self.assertEqual(response.get_json()["document"]["status"], "imported")
+
+    def test_api_upload_does_not_claim_success_without_confirmed_ledger_document(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            intake_dir = os.path.join(temp_dir, "sort-out")
+            app = create_app({
+                "fab_local_ledger_path": os.path.join(temp_dir, "fab.sqlite3"),
+                "fab_local_intake_paths": intake_dir,
+                "fab_local_intake_extensions": "pdf",
+            })
+            with patch.object(LocalFolderIntake, "register_local_file", return_value={"status": "skipped"}):
+                response = app.test_client().post("/api/intake/upload", json={
+                    "filename": "receipt.pdf",
+                    "contentBase64": base64.b64encode(b"receipt bytes").decode("ascii"),
+                })
+
+            self.assertEqual(response.status_code, 503)
+            self.assertFalse(response.get_json()["success"])
+            self.assertEqual(response.get_json()["status"], "stored_not_registered")
+            self.assertTrue(os.path.isfile(os.path.join(intake_dir, "receipt.pdf")))
 
     def test_api_rejects_invalid_or_oversized_local_intake_uploads(self):
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -7,6 +7,30 @@ from src.runtime_fingerprint import runtime_fingerprint
 
 
 class TestRuntimeFingerprint(unittest.TestCase):
+    def test_web_startup_and_build_scripts_invalidate_the_runtime(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("production-env.mjs", "verify-production-build.mjs"):
+                with self.subTest(name=name):
+                    helper = root / "web" / "scripts" / name
+                    helper.parent.mkdir(parents=True, exist_ok=True)
+                    helper.write_text("before", encoding="utf-8")
+                    initial = runtime_fingerprint(root)
+                    helper.write_text("after", encoding="utf-8")
+                    self.assertNotEqual(runtime_fingerprint(root), initial)
+
+    def test_windows_helpers_invalidate_the_runtime(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("Windows-Profile.ps1", "Windows-Job.ps1", "Windows-Job.cs", "Windows-Process.ps1"):
+                with self.subTest(name=name):
+                    helper = root / "scripts" / name
+                    helper.parent.mkdir(exist_ok=True)
+                    helper.write_text("before", encoding="utf-8")
+                    initial = runtime_fingerprint(root)
+                    helper.write_text("after", encoding="utf-8")
+                    self.assertNotEqual(runtime_fingerprint(root), initial)
+
     def test_is_deterministic_and_changes_with_runtime_source(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

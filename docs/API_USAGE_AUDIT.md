@@ -8,6 +8,7 @@ The Flask API is the source of operational truth. Major endpoint groups are:
 | --- | --- | --- |
 | Liveness/health/readiness | `/api/live`, `/api/health`, `/api/settings`, `/api/doctor` | `/api/live` is constant-time; deeper reports are read-only and secret-redacted. Health detail is prioritized and bounded while exact totals remain available. |
 | Intake/documents | `/api/intake/upload`, `/api/intake/rescan`, `/api/documents/*` | Local evidence writes only. |
+| Bank transactions | `/api/bank-transactions/import`, `/api/wave/report-results` | Each transaction import, import status and audit event commit atomically; exact identities are no-op duplicates, while changed facts under an existing identity are preserved and surfaced as `needs_review`. |
 | Reviews/categories | `/api/review`, `/api/review/<id>/resolve`, `/api/categories/*` | Operator decisions are audited. |
 | Autonomy/workflows | `/api/autonomy/plan`, `/api/autonomy/run`, `/api/workflows/*` | Lease, safety, recovery, and emergency-stop gated. |
 | Emergency control | `/api/autonomy/emergency-stop` | Any operator/HAI may stop; only operator DELETE with exact phrase may resume. |
@@ -39,6 +40,20 @@ Operator-facing links into the protected Flask ledger use `GET /api/fab/operator
 - Wave GraphQL coverage is capability-based. Receipt attachment work can require a supervised executor when the API cannot provide the necessary action/readback.
 - MijnGeldzaken is an artifact export with supervised completion tracking.
 - Direct PSD2 and SVB mutation APIs are absent and are not advertised as live.
+
+## Request body limits
+
+The API applies a 2 MiB default request-stream limit to mutating API requests,
+after authentication and before JSON or multipart parsing. Larger legitimate
+contracts have explicit limits: document intake, bank imports, OAuth credentials,
+Wave attachment readback, Drive relay, autonomy bank-transaction input,
+Wave report-result capture, reconciliation, and HAI. Wave report results allow
+up to 16 MiB of source data and 10,000 rows; optional reconciliation remains
+limited to its existing 500-row batch size and rejects oversized combined
+imports before writing transactions. Upload budgets include bounded encoding/metadata
+overhead and retain the existing decoded-byte checks. Every route limit is
+reduced by a smaller configured global request limit, so the 101 MiB global
+ceiling is no longer the default memory budget for ordinary commands.
 
 ## Error contract
 

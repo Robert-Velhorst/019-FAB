@@ -16,7 +16,7 @@ import {
   validateBankStatementFile,
   type FabBankStatementFormat,
 } from "./fabBankStatement";
-import { count, exactDateTime, statusTone, text, type FabRecord } from "./fabView";
+import { count, exactDateTime, records, statusTone, text, type FabRecord } from "./fabView";
 
 const ACCEPTED_STATEMENTS = ".csv,.json,.xml,.camt,.sta,.mt940";
 
@@ -57,6 +57,7 @@ export function FabBankImportDrawer({
   const validation = selectedFile
     ? validateBankStatementFile(selectedFile)
     : { format: null, error: null };
+  const conflictRows = records(lastResult?.identityConflictRows);
 
   useEffect(() => {
     busyRef.current = busy;
@@ -211,14 +212,25 @@ export function FabBankImportDrawer({
 
           {lastResult && (
             <div className={`fab-bank-import-result tone-${statusTone(lastResult.status)}`} role="status">
-              <CheckCircle2 aria-hidden="true" />
+              {count(lastResult.identityConflicts) > 0
+                ? <AlertCircle aria-hidden="true" />
+                : <CheckCircle2 aria-hidden="true" />}
               <div>
-                <strong>{copy("Import recorded", "Import vastgelegd")}</strong>
+                <strong>{count(lastResult.identityConflicts) > 0
+                  ? copy("Transaction identity conflicts need review", "Identiteitsconflicten in transacties vereisen controle")
+                  : copy("Import recorded", "Import vastgelegd")}</strong>
                 <span>
                   {count(lastResult.rowsImported)} {copy("new", "nieuw")}
                   {" / "}{count(lastResult.duplicates)} {copy("already present", "reeds aanwezig")}
+                  {" / "}{count(lastResult.identityConflicts)} {copy("identity conflicts", "identiteitsconflicten")}
                   {" / "}{count(lastResult.skipped)} {copy("skipped", "overgeslagen")}
                 </span>
+                {count(lastResult.identityConflicts) > 0 && (
+                  <small>
+                    {copy("Earlier ledger rows were left unchanged. Conflicting statement rows:", "Bestaande grootboekregels zijn ongewijzigd gebleven. Conflicterende afschriftregels:")} {conflictRows.map((row) => text(row.row)).join(", ")}
+                    {lastResult.identityConflictsTruncated === true ? " ..." : ""}
+                  </small>
+                )}
                 <small>{copy("External submission", "Externe indiening")}: {status(lastResult.externalSubmission)}</small>
               </div>
             </div>
@@ -271,6 +283,7 @@ export function FabBankImportDrawer({
                 </div>
                 <div>
                   <span className={`fab-status-chip tone-${statusTone(item.status)}`}>{status(item.status)}</span>
+                  {count(item.identity_conflicts) > 0 && <small>{count(item.identity_conflicts)} {copy("identity conflicts", "identiteitsconflicten")}</small>}
                   <small>{exactDateTime(item.updated_at || item.created_at, dateLocale)}</small>
                 </div>
               </div>

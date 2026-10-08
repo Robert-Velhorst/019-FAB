@@ -13,6 +13,23 @@ from src.worker.scheduler import FabWorker
 
 
 class TestOperationsExportWorker(unittest.TestCase):
+    def test_failed_source_leaves_worker_queue_without_preparing_provider_artifact(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self._config(temp_dir)
+            ledger = LocalOperationsLedger(config["fab_local_ledger_path"])
+            document_id, attempt_id = self._prepare_approved_mijngeldzaken_export(ledger, config)
+            ledger.update_document(document_id, {"processingStatus": "failed"})
+            service = LocalExportAttemptService(ledger, config)
+
+            first = service.process_approved_attempts(create_backup=False)
+            second = service.process_approved_attempts(create_backup=False)
+
+            self.assertFalse(first["success"])
+            self.assertEqual(first["processed"][0]["status"], "blocked_processing")
+            self.assertEqual(second["count"], 0)
+            self.assertEqual(ledger.get_export_attempt(attempt_id)["status"], "attention_required")
+            self.assertFalse(os.path.exists(config["mijngeldzaken_export_dir"]))
+
     def _config(self, temp_dir):
         return {
             "fab_local_ledger_enabled": True,

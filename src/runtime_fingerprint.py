@@ -10,11 +10,16 @@ _SOURCE_DIRECTORIES = (
     "web/client",
     "web/server",
     "web/shared",
+    "web/scripts",
 )
 _SOURCE_FILES = (
     "src/main.py",
     "Start-FAB.ps1",
     "Stop-FAB.ps1",
+    "scripts/Windows-Profile.ps1",
+    "scripts/Windows-Job.ps1",
+    "scripts/Windows-Job.cs",
+    "scripts/Windows-Process.ps1",
     "requirements.txt",
     "requirements-local.txt",
     "config/config_template.ini",

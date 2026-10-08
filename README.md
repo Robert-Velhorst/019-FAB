@@ -19,6 +19,138 @@ readback evidence, and recoverable audit trails.
 
 ## Current Status
 
+Latest full-suite snapshot (retained-bank identity stage, 2026-10-01): Python
+passed **1,483 tests and 83 subtests**, with one Windows directory-symlink test
+skipped for unavailable privilege. Dashboard verification passed **379 tests
+across 32 files**, its type check and its production build/size budgets. Both
+**59-check** rebuilt dashboard/backend rehearsals passed on Node 24/25 using
+synthetic data. These results are not live-provider or deployment certification;
+[verification notes](docs/production-verification.md) record the scope and gates.
+
+This full-suite snapshot includes the direct-input guards, account/external-
+reference isolation, prepared matching and retained-bank reference fixes.
+Earlier per-phase results remain in the notes as historical evidence.
+
+Subsequent request-boundary hardening passed 350 focused Python tests and both
+61-check real-HTTP rehearsals on Node 24/25. The full-suite snapshot above predates
+this change; it is not a fresh full-suite result for the request-boundary stage.
+Reconciliation POST bodies are now capped at 5 MiB before JSON/form decoding,
+after authentication, while retaining stricter configured limits. Excessively
+nested JSON returns a client error rather than a server error. Valid 4 MiB bank
+files retain their separate upload allowance. This application-level bound does
+not prove limits on upstream server/proxy buffering or whole-process memory.
+
+Document-selection hardening subsequently passed 381 focused Python
+tests and both 65-check real-HTTP rehearsals. Explicit `documentIds: []` selects
+no documents instead of silently searching the ledger. Selections are captured
+before matching, accept at most 500 positive integer references, reject booleans
+and fractions before database lookups, and process duplicate IDs only once.
+Missing selected documents reject the entire run instead of producing misleading
+missing-receipt results, including references beyond the candidate-count limit.
+Omitted/null selection retains automatic candidate discovery. The existing
+candidate-count limit still applies independently; no provider posting occurs.
+
+Document eligibility is also enforced for explicit selections: imported,
+review-blocked, failed, duplicate and unknown-status documents cannot bypass
+their processing gates. Automatic discovery excludes linked duplicates before
+the candidate limit, preserving valid candidates behind them. Completed/ignored
+documents remain excluded. This stage passed 407 distinct focused tests and both
+67-check real-HTTP rehearsals; these are synthetic local checks, not live
+provider or deployment acceptance.
+
+The dashboard gateway preserves structured backend rejection codes for
+validation, authentication/permission, missing records, conflicts, oversized
+uploads, unprocessable input, rate limiting and service unavailability instead
+of reporting them all as internal failures. Messages remain sanitized and
+bounded; the gateway does not retry mutations. This stage passed **390 web
+tests across 32 files**, type checking, production build/size budgets and both
+**68-check** rebuilt real-HTTP rehearsals on Node 24/25. The existing Python
+full-suite snapshot remains historical; these checks are not deployment or
+rendered-browser acceptance.
+
+Failed batch reads no longer fan out into individual resource requests on
+authentication, rate-limit, service or transport errors. Five synthetic failure
+scenarios reduced requests per refresh from 30 to 3 (90% fewer requests for those
+scenarios, not 90% less whole-app CPU/RAM). A real loopback HTTP 503 check also
+observed only three requests. Structured 404/405 unsupported-batch responses
+retain bounded legacy fallback; successful incompatible batch schemas retain
+the existing fallback. This stage passed **399 web tests**, type checking,
+production build/size budgets and both **68-check** rebuilt HTTP rehearsals.
+
+Overlapping refreshes now reject superseded dashboard reads before they can
+overwrite newer cached resource history. Mutations invalidate snapshots both
+before submission and when the request finishes, including unreadable/uncertain
+responses, so a snapshot loaded during a pending change is not reused afterward.
+Normal cached polling and visibly stale fallback data remain supported. This
+stage passed **403 web tests**, type checking, production build/size budgets and
+both **68-check** rebuilt HTTP rehearsals; no whole-app performance or deployment
+claim follows from these checks.
+
+HAI command inputs are validated before executor calls, leases or command audit
+writes. Limits/document IDs require integer values without coercing booleans,
+floats (including whole-valued floats) or numeric strings. Local document IDs
+are bounded to 1 through 2^63-1, and replay keys must be strings matching the
+existing request-ID pattern. Attachment attestation requires both `documentId`
+and `evidence`; accepting that envelope does not establish attachment integrity
+or authorize archival. That stage passed **193 focused Python tests** and both
+**70-check** local HTTP rehearsals.
+
+HAI now captures an independent JSON snapshot of command metadata and gives
+executors a separate copy. Changes to caller/executor dictionaries cannot alter
+the recorded request or its replay identity. Metadata must be finite JSON,
+at most 1 MiB in canonical UTF-8, with depth at most 32 and 10,000 values.
+Authenticated plan/execute HTTP envelopes are capped at 2 MiB before decoding;
+stricter configured limits still apply, and receipt/bank upload limits are
+unchanged. The latest stage passed **209 focused Python tests** and both
+**71-check** local HTTP rehearsals on Node 24/25. Earlier full-suite results
+remain historical; these checks do not establish live-provider, deployment,
+rendered-browser or whole-process resource acceptance.
+
+HTTP HAI command audit attribution now comes from the server-verified credential
+class, not a caller-supplied actor label. This stage passed **220 focused Python
+tests** and both **73-check** local HTTP rehearsals. These results supersede the
+previous focused snapshot, not the historical full-suite/deployment evidence.
+
+Wave evidence validation and work-order gating were subsequently tightened to
+reject equally invalid fields and require VAT readback from normalized records
+as well as source documents. This separate scope passed **240 Python tests and
+14 subtests across eight modules**, plus both existing **73-check** local HTTP
+rehearsals. Neither result is a fresh full-suite or live-provider certification.
+
+Subsequent byte-size hardening passed **298 Python tests and 20 subtests across
+nine modules**, plus both existing **73-check** local HTTP rehearsals. Invalid
+or conflicting source sizes now block receipt work orders/readback, and current
+Drive size must match before and after an archive move. These are isolated
+checks, not evidence of live provider recovery or whole-app resource savings.
+
+Delivery JSON and line-item hardening subsequently passed **356 Python tests
+and 32 subtests across ten modules**, plus both existing **73-check** Node 24/25
+HTTP rehearsals. Malformed expected values and line-item numbers no longer leak
+non-finite numbers through the delivery handoff; explicit field diagnostics hold
+affected records for processing and block readback approval/archival, even after
+earlier verification. Original ledger values, source files and prior audits are
+retained. These focused checks do not establish tax arithmetic correctness,
+app-wide JSON safety, live-provider acceptance or production deployment.
+
+Direct reconciliation keeps identical bank references from different accounts
+separate, rejects duplicate references within one account's batch before saving,
+and refuses conflicting account aliases. Account identifiers remain exact: FAB
+does not guess which account an unscoped legacy record belongs to.
+Explicit `id`/`transaction_id` references must be non-empty strings or integers,
+and both aliases must identify the same reference. Invalid explicit references
+are rejected rather than silently replaced with an inferred reference.
+Stored bank-reference aliases that are null, malformed, conflicting, or disagree
+with the selected bank record stop reconciliation without overwriting history.
+These guards do not automatically repair ambiguous legacy ownership.
+
+Matching prepares amounts, dates and vendor text once per run and avoids fuzzy
+comparison for identical normalized vendors. Two synthetic 500-bank/100-document
+workloads measured approximately 2.6-8x faster matching with identical results.
+The prepared features add about 28-29 KB to the measured Python allocation peak;
+this is not a whole-app speed or RAM claim. Reproduce with
+`python scripts/benchmark_reconciliation.py`; detailed measurements are in
+[the benchmark record](.ecc/benchmarks/reconciliation-2026-10-01.json).
+
 The repository contains a working local application, not only a prototype:
 
 - Python 3.13 bookkeeping engine, local operations API, recurring worker, OCR
@@ -51,6 +183,54 @@ Important live-provider limits are intentional and must not be hidden:
 
 See [docs/GOAL_COMPLETION_MATRIX.md](docs/GOAL_COMPLETION_MATRIX.md) for the
 full implemented/partial/blocked matrix.
+
+Reconciliation lookup indexes reduce database work for missing-receipt review
+links and imported bank-row history. A synthetic 2,001-review lookup used 53
+SQLite instructions instead of 28,054, returning identical results. This is not
+a whole-application speed or memory guarantee. The indexes are rebuildable,
+preserve ledger rows, and require additional storage and initial creation work.
+See [production verification](docs/production-verification.md) for test scope
+and remaining acceptance gates.
+
+Completed imported-bank confirmations can be retried with the same status when
+their original approval hashes, current financial facts and final owner links
+still agree. The original decision is preserved. Existing dashboard review
+actions can also repair exactly linked orphaned review tasks; ambiguous links,
+changed facts and corrections to already-confirmed evidence remain blocked.
+This does not authorize external posting or source archival.
+
+Bank evidence checks compare both amounts as decimals so ordinary cent values
+such as EUR 4.28 are not falsely rejected as changed. Bank import, receipt
+validation and ledger numeric writes reject non-finite, boolean and overflowing
+amounts. Present invalid VAT and invalid confidence scores block validation;
+an invalid primary amount is not replaced silently by an alternate field.
+These controls preserve historical rows and do not claim a complete currency,
+exchange-rate or fixed-point ledger migration.
+
+Direct reconciliation accepts at most 500 rows per batch and bounds its captured
+bank JSON to 4 MiB, 32 nesting levels and 50,000 values. Invalid requests are
+rejected as a whole, without truncating transactions or creating partial review
+records. Larger workloads should use bank import and bounded processing batches.
+
+### Production Deployment Profiles
+
+The explicit `windows` and `vm` profiles add startup checks for strong credentials,
+storage, backups, and network settings. The default `local` profile preserves the
+existing desktop workflow; it is not a production certification.
+
+- [Windows setup](docs/windows-production.md): single-account launcher, external
+  ledger/backup paths, shared service credentials, and safe start/stop requirements.
+- [Docker/VM setup](docs/vm-production.md): single-business stack, persistent
+  storage, mounted secrets, HTTPS proxy, and a separate administrator login.
+- [Error catalogue](docs/ERROR_CATALOG.md): blocked configuration and recovery steps.
+- [Verification and acceptance](docs/production-verification.md): checks actually
+  performed and remaining deployment, provider, and security gates.
+
+Run `python -m src.run_deployment_preflight` to check effective configuration
+without opening a ledger. Run `python -m src.run_recovery_rehearsal` to exercise
+backup and full restore with disposable synthetic evidence only. Neither command
+authorizes changing real financial records. Actual host encryption, off-host
+recovery, provider consent/readback, and operator acceptance remain separate.
 
 ## Who This Is For
 
@@ -175,6 +355,26 @@ the decision source:
   the public Wave API cannot provide the required receipt workflow.
 - Require binary readback evidence before Drive archival.
 
+Wave field comparison requires valid values on both sides. Invalid dates,
+non-finite/unparseable amounts, blank normalized text and non-string text values
+cannot match merely because both sides normalize identically. Otherwise-ready
+work orders with missing or invalid required fields stay at `needs_processing`.
+VAT from either
+the source document or normalized bookkeeping record requires matching tax
+readback. Valid cent precision, supported date formats and text case/spacing
+normalization remain unchanged; exact attachment bytes and all other archive
+gates still apply independently.
+
+Source receipt sizes must be positive whole-byte counts: native integers or
+trimmed strings of 1-19 ASCII digits, bounded to 2^63-1. If both intake and
+provider sizes are recorded, they must agree; an invalid declared size cannot
+be hidden by a fallback. Existing Wave file-size limits still apply. Missing or
+invalid sizes block upload work orders and full readback verification. Drive
+archival requires a valid, matching current provider size before and after the
+move; a failed post-move check follows the existing rollback path. Earlier audit
+records and source bytes are preserved, but old verification cannot override
+freshly invalid source metadata.
+
 The Drive-to-Wave contract is documented in
 [docs/drive_wave_delivery.md](docs/drive_wave_delivery.md).
 
@@ -205,7 +405,42 @@ returns, submit to authorities, or replace professional advice.
 
 - SQLite operations ledger with WAL, migrations, integrity checks, and
   migration snapshots.
+- Manual review decisions (including exact-vendor propagation) and normalized
+  record creation/resolution each commit their local changes as one transaction.
+  Failures roll back the financial changes; the API can still record a separate
+  redacted error event. A timed-out client request is not proof of rollback.
+- Reconciliation result persistence and match resolution also use local
+  transactions. Document-linked reviews close only for their recorded match;
+  `needs_review` preserves or reopens the document review gate. Normalized records refresh after
+  the review decision, and older reviews are checked through bounded pages.
+- Missing-receipt-only decisions close or reopen their own review gate, but
+  cannot confirm a bank match without a linked document. Matching rechecks
+  selected document and stored-bank facts before persistence and rejects stale
+  or conflicting references. Completed documents stay out of later automatic
+  candidate pools; the filter runs before the batch limit.
+- Final reconciliation approval rechecks source/financial document hashes and
+  stored bank facts while holding the same local transaction as the decision.
+  Changed or incomplete evidence returns a conflict; rejected nested decisions
+  roll back review edits and learning. A document cannot confirm a second bank
+  candidate once reconciled. Older candidates without approval hashes must be
+  refreshed through matching, not silently approved or deleted. Financial
+  corrections must be saved separately and rematched before confirmation.
+- Ignoring/rejecting/resolving a stored-bank exception also rechecks its bank
+  facts and decision ownership. An older match cannot downgrade another completed
+  document match or take over a newer bank candidate. Missing-receipt refreshes
+  preserve review IDs and show the refreshed bank facts. Matching lookups separate
+  imported bank-row identities across accounts; open bank rows are filtered in
+  SQL before the batch limit, so completed rows cannot hide older open work.
+- Confirming a receipt against its imported bank row resolves that row's open
+  missing-receipt exceptions and linked reviews in the same transaction. Original
+  snapshots remain available with a link to the confirming local match; closed
+  human decisions and other accounts are preserved. Unconfirmed candidates do
+  not close exceptions. This local update is not provider attachment verification
+  and never grants permission to archive source files.
 - Source-complete recovery packages with manifest-bound SHA-256 checksums.
+- Lightweight dashboard checks read archive metadata only. Deep inspection and
+  restore still verify receipt/ledger bytes and database integrity; a
+  `manifest_valid` result is not proof that the saved financial bytes are intact.
 - Local maintenance mode for restore operations. The worker, normal mutations,
   ngrok, and HAI command execution are locked during maintenance.
 - Pre-restore package creation, source-byte verification, immutable source
@@ -214,10 +449,24 @@ returns, submit to authorities, or replace professional advice.
   filenames, local paths, and amounts.
 - Audit events with sensitive fields redacted before persistence.
 
+Recovery inspection rejects manifests above 8 MiB, JSON nesting beyond 32
+container levels, and non-finite numbers. Existing limits remain 10,000 archive
+members, 250 MiB per evidence file and 20 GiB total declared uncompressed bytes;
+size checks run before member decompression. Existing rejected packages are not
+deleted. Preserve them and investigate rather than bypassing validation.
+
 ### HAI Connector
 
 The HAI connector exposes bounded discovery, status, resources, and governed
 commands under `/api/hai/*`.
+
+For HTTP command execution, FAB ignores the caller's `actor` label and records
+the server-verified credential class as `fab_hai_api:hai` or
+`fab_hai_api:operator`. Token-free loopback mode records `fab_hai_api:loopback`;
+that label is not an authenticated personal identity. These labels identify
+credential classes, not individual humans. Trusted in-process calls retain
+their existing actor attribution. Other API routes are not changed by this
+command-specific policy.
 
 HAI can help inspect status and trigger low-risk local work such as intake,
 processing, reconciliation, due reports, compliance assessment, notification
@@ -470,15 +719,35 @@ pnpm.cmd --dir web audit --audit-level=high
 pnpm.cmd --dir web peers check
 ```
 
-GitHub Actions runs:
+After building the web bundles, exercise the dashboard, API and SQLite together:
+
+```powershell
+python scripts/run_stack_rehearsal.py
+```
+
+This rehearsal creates a fresh temporary ledger and synthetic receipt, launches
+the production dashboard and real API only on loopback, checks authentication,
+review correction, bank-statement import, reconciliation approval, source
+checksums, missing-receipt disposition/reopening, later-run preservation,
+signed session handoff, logout revocation
+and HAI route permissions, then stops its child processes and removes its data.
+It does not use your configured accounts or ledger. HTTPS proxy headers are
+simulated; passing this check does not prove real TLS, ngrok, provider posting,
+Drive archival or rendered-browser acceptance. `--node` can select an explicit
+Node.js executable. Missing builds or failed checks produce a nonzero exit.
+
+The GitHub Actions workflow is configured for:
 
 - backend on Linux;
 - backend on Windows across four shards;
 - web frozen install, high-severity audit, peer check, TypeScript check, Vitest,
-  and production build.
+  and production build;
+- synthetic dashboard/API/ledger rehearsal on Linux and one Windows shard.
 
-The latest verification evidence is kept in
-[docs/FINAL_VERIFICATION_REPORT.md](docs/FINAL_VERIFICATION_REPORT.md).
+Current hardening evidence and unresolved acceptance gates are kept in
+[docs/production-verification.md](docs/production-verification.md). The earlier
+[final verification report](docs/FINAL_VERIFICATION_REPORT.md) remains available
+as a historical snapshot. Local workflow edits do not establish a hosted CI pass.
 
 ## Docker Compose
 

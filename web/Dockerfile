@@ -17,6 +17,7 @@ WORKDIR /app
 
 COPY --from=build --chown=node:node /app/package.json ./package.json
 COPY --from=build --chown=node:node /app/dist ./dist
+COPY --from=build --chown=node:node /app/scripts/production-env.mjs ./scripts/production-env.mjs
 
 USER node
 EXPOSE 3000
