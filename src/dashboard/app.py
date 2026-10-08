@@ -1,3 +1,4 @@
+import hashlib
 import html
 import hmac
 import json
@@ -39,6 +40,19 @@ def create_app(config: Dict[str, Any] = None) -> Flask:
     reporting_service = ReportingService(config)
     posting_approval = PostingApprovalService(config)
     dashboard_token = config.get("dashboard_access_token")
+    token_fingerprint = (
+        hmac.new(app.secret_key.encode("utf-8"), dashboard_token.encode("utf-8"), hashlib.sha256).hexdigest()
+        if isinstance(dashboard_token, str) and dashboard_token
+        else ""
+    )
+
+    def has_authenticated_session() -> bool:
+        stored_fingerprint = session.get("dashboard_token_fingerprint", "")
+        return bool(
+            token_fingerprint
+            and isinstance(stored_fingerprint, str)
+            and hmac.compare_digest(stored_fingerprint, token_fingerprint)
+        )
 
     @app.before_request
     def reject_query_string_credentials():
@@ -61,7 +75,7 @@ def create_app(config: Dict[str, Any] = None) -> Flask:
             header_authenticated = bool(
                 dashboard_token and hmac.compare_digest(provided, dashboard_token)
             )
-            session_authenticated = session.get("dashboard_authenticated") is True
+            session_authenticated = has_authenticated_session()
             if not header_authenticated and not session_authenticated:
                 abort(401, description="Invalid or missing FAB dashboard token.")
             if request.method not in {"GET", "HEAD", "OPTIONS"} and not header_authenticated:
@@ -80,7 +94,7 @@ def create_app(config: Dict[str, Any] = None) -> Flask:
     def operator_ui():
         if not dashboard_token:
             abort(503, description="Dashboard token is not configured.")
-        if session.get("dashboard_authenticated") is not True:
+        if not has_authenticated_session():
             return """<!doctype html>
             <html><head><meta charset="utf-8"><title>FAB sign in</title></head>
             <body><main><h1>FAB Operator Dashboard</h1>
@@ -130,7 +144,7 @@ def create_app(config: Dict[str, Any] = None) -> Flask:
             abort(401, description="Invalid dashboard access token.")
         session.clear()
         session.permanent = True
-        session["dashboard_authenticated"] = True
+        session["dashboard_token_fingerprint"] = token_fingerprint
         session["dashboard_csrf_token"] = secrets.token_urlsafe(32)
         return redirect("/ui", code=303)
 
@@ -138,7 +152,7 @@ def create_app(config: Dict[str, Any] = None) -> Flask:
     def logout():
         expected_csrf = session.get("dashboard_csrf_token", "")
         provided_csrf = request.form.get("csrf_token", "")
-        if session.get("dashboard_authenticated") is not True:
+        if not has_authenticated_session():
             abort(401, description="Not signed in.")
         if not expected_csrf or not provided_csrf or not hmac.compare_digest(provided_csrf, expected_csrf):
             abort(403, description="A valid CSRF token is required to sign out.")

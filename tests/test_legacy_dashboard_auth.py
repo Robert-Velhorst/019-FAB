@@ -1,11 +1,11 @@
 from src.dashboard.app import create_app
 
 
-def _client(tmp_path):
+def _client(tmp_path, token="test-dashboard-token", session_secret="test-session-secret-that-is-long-enough"):
     app = create_app({
         "database_path": str(tmp_path / "dashboard.sqlite3"),
-        "dashboard_access_token": "test-dashboard-token",
-        "dashboard_session_secret": "test-session-secret-that-is-long-enough",
+        "dashboard_access_token": token,
+        "dashboard_session_secret": session_secret,
     })
     app.config.update(TESTING=True)
     return app.test_client()
@@ -79,3 +79,20 @@ def test_secure_cookie_setting_parses_boolean_config_strings(tmp_path):
     })
 
     assert app.config["SESSION_COOKIE_SECURE"] is True
+
+
+def test_rotating_dashboard_token_revokes_existing_browser_sessions(tmp_path):
+    secret = "stable-session-secret-for-token-rotation"
+    client = _client(tmp_path, session_secret=secret)
+    client.post("/login", data={"token": "test-dashboard-token"})
+    session_cookie = client.get_cookie("session")
+    assert session_cookie is not None
+
+    rotated_client = _client(
+        tmp_path,
+        token="rotated-dashboard-token",
+        session_secret=secret,
+    )
+    rotated_client.set_cookie("session", session_cookie.value)
+
+    assert rotated_client.get("/documents").status_code == 401

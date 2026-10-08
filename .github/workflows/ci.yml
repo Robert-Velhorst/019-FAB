@@ -60,11 +60,10 @@ jobs:
           python-version: "3.13"
           cache: pip
           cache-dependency-path: requirements.txt
-      - name: Install Python dependencies
-        run: python -m pip install --disable-pip-version-check -r requirements.txt pytest
       - name: Create checkout-local Python runtime
-        if: matrix.shard == 1 || matrix.shard == 3
         run: python -m venv .venv
+      - name: Install Python dependencies in checkout-local runtime
+        run: .venv\Scripts\python.exe -m pip install --disable-pip-version-check -r requirements.txt pytest
       - name: Run backend shard
         shell: pwsh
         env:
@@ -79,7 +78,7 @@ jobs:
             }
           }
           Write-Host "Running shard $env:FAB_TEST_SHARD/$env:FAB_TEST_SHARDS with $($selected.Count) test files."
-          & python -m pytest -q -p no:cacheprovider -p no:stepwise $selected
+          & .venv\Scripts\python.exe -m pytest -q -p no:cacheprovider -p no:stepwise $selected
           exit $LASTEXITCODE
       - name: Set up pnpm for Windows stack rehearsal
         if: matrix.shard == 1
