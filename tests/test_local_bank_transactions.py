@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from src.operations.local_bank_transactions import (
     MAX_BANK_STATEMENT_BYTES,
@@ -174,6 +175,31 @@ class TestLocalBankTransactionImportService(unittest.TestCase):
                 ledger.list_audit_events(limit=10)[-1]["details"]["actor"],
                 "fab_dashboard:4",
             )
+
+    def test_unexpected_row_failure_rolls_back_entire_import_batch(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            service = LocalBankTransactionImportService(ledger, {})
+            original_upsert = ledger.upsert_bank_transaction
+            calls = 0
+
+            def fail_on_second_row(payload):
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    raise RuntimeError("simulated database write failure")
+                return original_upsert(payload)
+
+            with patch.object(ledger, "upsert_bank_transaction", side_effect=fail_on_second_row):
+                with self.assertRaisesRegex(RuntimeError, "simulated database write failure"):
+                    service.import_transactions([
+                        {"id": "tx-1", "date": "2026-06-28", "amount": -10},
+                        {"id": "tx-2", "date": "2026-06-29", "amount": -20},
+                    ], account_identifier="checking")
+
+            self.assertEqual(ledger.list_bank_transactions(account_identifier="checking"), [])
+            self.assertEqual(ledger.list_bank_statement_imports(account_identifier="checking"), [])
+            self.assertEqual(ledger.list_audit_events(), [])
 
     def test_statement_bytes_support_windows_bank_exports_and_reject_binary_or_oversized_data(self):
         with tempfile.TemporaryDirectory() as temp_dir:

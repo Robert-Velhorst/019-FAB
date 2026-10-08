@@ -8,6 +8,7 @@ The Flask API is the source of operational truth. Major endpoint groups are:
 | --- | --- | --- |
 | Liveness/health/readiness | `/api/live`, `/api/health`, `/api/settings`, `/api/doctor` | `/api/live` is constant-time; deeper reports are read-only and secret-redacted. Health detail is prioritized and bounded while exact totals remain available. |
 | Intake/documents | `/api/intake/upload`, `/api/intake/rescan`, `/api/documents/*` | Local evidence writes only. |
+| Bank transactions | `/api/bank-transactions/import`, `/api/wave/report-results` | Each transaction import, import status and audit event commit atomically; unexpected failures roll back the complete batch. |
 | Reviews/categories | `/api/review`, `/api/review/<id>/resolve`, `/api/categories/*` | Operator decisions are audited. |
 | Autonomy/workflows | `/api/autonomy/plan`, `/api/autonomy/run`, `/api/workflows/*` | Lease, safety, recovery, and emergency-stop gated. |
 | Emergency control | `/api/autonomy/emergency-stop` | Any operator/HAI may stop; only operator DELETE with exact phrase may resume. |

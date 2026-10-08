@@ -153,6 +153,25 @@ class LocalBankTransactionImportService:
         source = str(source or "manual_json").strip()[:120] or "manual_json"
         filename = str(filename or "").strip()[:255] or None
         actor = str(actor or "local_bank_import").strip()[:200] or "local_bank_import"
+        with self.ledger.write_transaction():
+            return self._record_transaction_import(
+                transactions,
+                account_identifier=account_identifier,
+                source=source,
+                filename=filename,
+                format=format,
+                actor=actor,
+            )
+
+    def _record_transaction_import(
+        self,
+        transactions: List[Dict[str, Any]],
+        account_identifier: str,
+        source: str,
+        filename: Optional[str],
+        format: str,
+        actor: str,
+    ) -> Dict[str, Any]:
         import_id = self.ledger.create_bank_statement_import({
             "source": source,
             "accountIdentifier": account_identifier,

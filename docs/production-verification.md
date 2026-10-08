@@ -2134,3 +2134,20 @@ request boundaries, HAI contracts and Windows tunnel scripts. Python
 compilation and `git diff --check` passed. These are focused local regressions;
 no live Wave report, large production export, provider write, deployment or
 disaster-recovery behavior was exercised.
+
+## Atomic Bank Transaction Imports (2026-10-09)
+
+Bank transaction import previously committed its import record, individual
+transactions, completion state and audit event through separate SQLite
+connections. An unexpected failure could leave a partial batch and a stale
+`running` import. The importer now wraps that complete local operation in the
+ledger's existing write transaction; row-level validation skips remain
+reported normally, while unexpected failures roll back all batch writes.
+This also reuses one SQLite transaction/connection instead of committing each
+row separately.
+
+A failure-injection test forces the second row write to fail and verifies that
+no transaction, import record or completion audit event remains. This verifies
+local SQLite atomicity only; power-loss/filesystem fault testing and concurrent
+production load are not claimed. The affected bank-import, local API and Wave
+control suites passed **130 tests**; Python compilation and diff checks passed.
