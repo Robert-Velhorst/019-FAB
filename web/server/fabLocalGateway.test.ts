@@ -1473,6 +1473,9 @@ describe("FAB local API gateway", () => {
         rowsSeen: 3,
         rowsImported: 2,
         duplicates: 1,
+        identityConflicts: 1,
+        identityConflictRows: [{ row: 3, transactionId: "bank-3", bankTransactionId: 3 }],
+        identityConflictsTruncated: false,
         skipped: 0,
         bankTransactionIds: [1, 2, 3],
         internalMetadata: "must-not-cross-the-web-boundary",
@@ -1498,6 +1501,9 @@ describe("FAB local API gateway", () => {
       rowsSeen: 3,
       rowsImported: 2,
       duplicates: 1,
+      identityConflicts: 1,
+      identityConflictRows: [{ row: 3, transactionId: "bank-3", bankTransactionId: 3 }],
+      identityConflictsTruncated: false,
       externalSubmission: "not_executed",
     });
     expect(result).not.toHaveProperty("bankTransactionIds");

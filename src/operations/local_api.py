@@ -2684,6 +2684,7 @@ DASHBOARD_TEMPLATE = """
         <div class="summary-item"><span>Rows seen</span><strong>{{ bank_import_summary.rowsSeen }}</strong></div>
         <div class="summary-item"><span>Imported</span><strong>{{ bank_import_summary.rowsImported }}</strong></div>
         <div class="summary-item"><span>Duplicates</span><strong>{{ bank_import_summary.duplicates }}</strong></div>
+        <div class="summary-item"><span>Identity conflicts</span><strong>{{ bank_import_summary.identityConflicts }}</strong></div>
         <div class="summary-item"><span>Skipped</span><strong>{{ bank_import_summary.skipped }}</strong></div>
       </div>
       <details open>
@@ -2708,6 +2709,7 @@ DASHBOARD_TEMPLATE = """
               <th>Status</th>
               <th>Rows</th>
               <th>Duplicates</th>
+              <th>Identity conflicts</th>
               <th>Updated</th>
             </tr>
           </thead>
@@ -2720,6 +2722,7 @@ DASHBOARD_TEMPLATE = """
               <td><span class="badge {{ import_row.status }}">{{ import_row.status }}</span></td>
               <td>{{ import_row.rows_imported }} / {{ import_row.rows_seen }}</td>
               <td>{{ import_row.duplicates }}</td>
+              <td>{{ (import_row.metadata or {}).get('identityConflicts', 0) }}</td>
               <td class="mono">{{ import_row.updated_at }}</td>
             </tr>
           {% endfor %}

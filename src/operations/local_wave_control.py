@@ -555,9 +555,13 @@ class LocalWaveControlService:
                 )
             metadata["resultCapture"]["bankTransactionImport"] = {
                 "bankStatementImportId": bank_import_summary.get("bankStatementImportId"),
+                "status": bank_import_summary.get("status"),
                 "rowsSeen": bank_import_summary.get("rowsSeen"),
                 "rowsImported": bank_import_summary.get("rowsImported"),
                 "duplicates": bank_import_summary.get("duplicates"),
+                "identityConflicts": bank_import_summary.get("identityConflicts"),
+                "identityConflictRows": bank_import_summary.get("identityConflictRows"),
+                "identityConflictsTruncated": bank_import_summary.get("identityConflictsTruncated"),
                 "skipped": bank_import_summary.get("skipped"),
                 "accountIdentifier": bank_import_summary.get("accountIdentifier"),
                 "externalSubmission": bank_import_summary.get("externalSubmission"),

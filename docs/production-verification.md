@@ -2151,3 +2151,27 @@ no transaction, import record or completion audit event remains. This verifies
 local SQLite atomicity only; power-loss/filesystem fault testing and concurrent
 production load are not claimed. The affected bank-import, local API and Wave
 control suites passed **130 tests**; Python compilation and diff checks passed.
+
+## Stable Bank Identity Reimport Protection (2026-10-09)
+
+Audit found that a repeated external transaction ID flowed through an upsert
+even when its amount or other facts had changed. That could silently replace a
+prior financial row and reset a final reconciliation status. Exact same-fact
+reimports are now no-op duplicates; changed date, amount, currency, description
+or counterparty under the same account/transaction ID is preserved as an
+identity conflict, recorded with bounded row references, and marks the import
+`needs_review`. The API gateway and both operator dashboards expose the count
+and affected statement row numbers. The previous ledger row and its reconciliation
+status remain unchanged; no automatic correction is attempted.
+
+Regression tests cover a reconciled row surviving an exact retry and a changed
+amount being quarantined without overwriting the approved/reconciled ledger
+entry. Provider-side transaction corrections, legacy ambiguous identities and
+live account behavior remain separate acceptance gates. Verification on this
+change: the affected Python suites passed **133 tests**, Python compilation and
+`git diff --check` passed; the bank-import gateway suites passed **65 tests**,
+TypeScript type-check passed, and the production client build completed. The
+build was written to a temporary directory. `pnpm exec` could not update the
+existing dependency map due to Windows `EPERM`, so the already-installed test,
+type-check and build binaries were invoked directly; no dependency directory
+was cleaned or replaced.

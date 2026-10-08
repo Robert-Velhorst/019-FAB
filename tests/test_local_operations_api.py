@@ -2975,6 +2975,24 @@ class TestLocalOperationsApi(unittest.TestCase):
             refreshed = client.get("/api/bank-transactions?accountIdentifier=wave-checking").get_json()["bankTransactions"][0]
             self.assertEqual(refreshed["reconciliation_status"], "candidate")
 
+            changed_identity = client.post("/api/bank-transactions/import", json={
+                "accountIdentifier": "wave-checking",
+                "bankTransactions": [{
+                    "id": "tx-bank-api-1",
+                    "date": "2026-06-28",
+                    "amount": -99.0,
+                    "description": "Office Shop",
+                }],
+            })
+            after_conflict = client.get("/api/bank-transactions?accountIdentifier=wave-checking").get_json()["bankTransactions"][0]
+
+            self.assertEqual(changed_identity.status_code, 200)
+            self.assertEqual(changed_identity.get_json()["status"], "needs_review")
+            self.assertEqual(changed_identity.get_json()["identityConflicts"], 1)
+            self.assertEqual(changed_identity.get_json()["identityConflictRows"][0]["row"], 1)
+            self.assertEqual(after_conflict["amount"], -42.5)
+            self.assertEqual(after_conflict["reconciliation_status"], "candidate")
+
     def test_api_imports_bounded_bank_statement_file_with_actor_and_format_validation(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             ledger_path = os.path.join(temp_dir, "fab.sqlite3")

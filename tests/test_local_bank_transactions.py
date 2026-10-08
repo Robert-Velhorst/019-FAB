@@ -71,6 +71,80 @@ class TestLocalBankTransactionImportService(unittest.TestCase):
             self.assertEqual(by_id["csv-1"]["amount"], -42.5)
             self.assertEqual(by_id["csv-2"]["amount"], 100.0)
 
+    def test_exact_reimport_preserves_final_reconciliation_and_original_provenance(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            service = LocalBankTransactionImportService(ledger, {})
+            row = {
+                "id": "stable-bank-id",
+                "date": "2026-06-28",
+                "amount": "-42.50",
+                "currency": "EUR",
+                "description": "Office supplies",
+                "counterparty": "Office Shop",
+            }
+            first = service.import_transactions([row], account_identifier="checking")
+            transaction = ledger.list_bank_transactions(account_identifier="checking")[0]
+            ledger.update_bank_transaction(transaction["id"], {
+                "status": "approved",
+                "reconciliationStatus": "reconciled",
+            })
+
+            second = service.import_transactions([row], account_identifier="checking")
+            preserved = ledger.get_bank_transaction(transaction["id"])
+
+            self.assertEqual(second["duplicates"], 1)
+            self.assertEqual(second["rowsImported"], 0)
+            self.assertEqual(preserved["status"], "approved")
+            self.assertEqual(preserved["reconciliation_status"], "reconciled")
+            self.assertEqual(preserved["import_id"], first["bankStatementImportId"])
+
+    def test_changed_facts_under_existing_bank_identity_are_quarantined(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            service = LocalBankTransactionImportService(ledger, {})
+            service.import_transactions([{
+                "id": "stable-bank-id",
+                "date": "2026-06-28",
+                "amount": "-42.50",
+                "currency": "EUR",
+                "description": "Office supplies",
+                "counterparty": "Office Shop",
+            }], account_identifier="checking")
+            existing = ledger.list_bank_transactions(account_identifier="checking")[0]
+            ledger.update_bank_transaction(existing["id"], {
+                "status": "approved",
+                "reconciliationStatus": "reconciled",
+            })
+
+            result = service.import_transactions([{
+                "id": "stable-bank-id",
+                "date": "2026-06-28",
+                "amount": "-99.00",
+                "currency": "EUR",
+                "description": "Office supplies",
+                "counterparty": "Office Shop",
+            }], account_identifier="checking")
+            preserved = ledger.get_bank_transaction(existing["id"])
+            import_record = ledger.list_bank_statement_imports(account_identifier="checking")[0]
+
+            self.assertEqual(result["status"], "needs_review")
+            self.assertEqual(result["identityConflicts"], 1)
+            self.assertEqual(result["skipped"], 1)
+            self.assertEqual(result["identityConflictRows"], [{
+                "row": 1,
+                "transactionId": "stable-bank-id",
+                "bankTransactionId": existing["id"],
+            }])
+            self.assertEqual(preserved["amount"], -42.5)
+            self.assertEqual(preserved["status"], "approved")
+            self.assertEqual(preserved["reconciliation_status"], "reconciled")
+            self.assertEqual(import_record["status"], "needs_review")
+            self.assertEqual(
+                ledger.list_audit_events(limit=1)[0]["action"],
+                "local_bank_transactions.import_needs_review",
+            )
+
     def test_import_camt_statement_normalizes_debit_entry(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))

@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from src.operations.local_ledger import LocalOperationsLedger
+from src.operations.local_bank_transactions import LocalBankTransactionImportService
 from src.operations.local_wave_control import LocalWaveControlService
 
 
@@ -298,6 +299,46 @@ class TestLocalWaveControlService(unittest.TestCase):
                 capture["waveReportSnapshot"]["metadata"]["resultCapture"]["reconciliation"]["missingReceipts"],
                 2,
             )
+
+    def test_wave_report_import_surfaces_identity_conflicts_without_overwriting_ledger_row(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            service = LocalWaveControlService()
+            workflow = service.plan_workflow({
+                "workflowId": "daily_reconciliation_run",
+                "fromDate": "2026-06-28",
+                "toDate": "2026-06-28",
+            })
+            service.record_workflow_report_snapshots(ledger, workflow)
+            LocalBankTransactionImportService(ledger).import_transactions([{
+                "id": "wave-stable-transaction",
+                "date": "2026-06-28",
+                "amount": -42.5,
+                "description": "Office Shop",
+            }], account_identifier="wave-checking")
+            existing = ledger.list_bank_transactions(account_identifier="wave-checking")[0]
+
+            capture = service.record_report_result(ledger, {
+                "workflowId": "daily_reconciliation_run",
+                "reportType": "account-transactions",
+                "actionId": "report_table_read",
+                "accountIdentifier": "wave-checking",
+                "importTransactions": True,
+                "rows": [{
+                    "id": "wave-stable-transaction",
+                    "date": "2026-06-28",
+                    "amount": -99.0,
+                    "description": "Office Shop",
+                }],
+            })
+            preserved = ledger.get_bank_transaction(existing["id"])
+            import_evidence = capture["waveReportSnapshot"]["metadata"]["resultCapture"]["bankTransactionImport"]
+
+            self.assertTrue(capture["success"])
+            self.assertEqual(import_evidence["status"], "needs_review")
+            self.assertEqual(import_evidence["identityConflicts"], 1)
+            self.assertEqual(import_evidence["identityConflictRows"][0]["transactionId"], "wave-stable-transaction")
+            self.assertEqual(preserved["amount"], -42.5)
 
     def test_report_result_rejects_oversized_row_sets_before_processing(self):
         with tempfile.TemporaryDirectory() as temp_dir:
