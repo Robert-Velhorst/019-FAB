@@ -3212,6 +3212,53 @@ class TestLocalOperationsApi(unittest.TestCase):
                 for backup in manifest_only["backups"]
             ))
 
+    def test_hai_backup_status_is_redacted_and_always_manifest_only(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger_path = os.path.join(temp_dir, "fab.sqlite3")
+            backup_dir = os.path.join(temp_dir, "backups")
+            config = {
+                "fab_local_ledger_path": ledger_path,
+                "fab_local_backup_dir": backup_dir,
+                "fab_local_api_token": "synthetic-operator-token",
+                "fab_hai_api_token": "synthetic-hai-token",
+            }
+            ledger = LocalOperationsLedger(ledger_path)
+            LocalBackupService(ledger, config).create_backup(note="HAI projection test")
+            client = create_app(config).test_client()
+
+            with patch.object(
+                LocalBackupService,
+                "inspect_backup",
+                side_effect=AssertionError("HAI backup status must not deep-verify"),
+            ):
+                hai_response = client.get(
+                    "/api/backups?verify=true",
+                    headers={"Authorization": "Bearer synthetic-hai-token"},
+                )
+
+            self.assertEqual(hai_response.status_code, 200)
+            hai_payload = hai_response.get_json()
+            serialized_hai_payload = json.dumps(hai_payload)
+            self.assertEqual(hai_payload["verificationMode"], "manifest_only")
+            self.assertEqual(hai_payload["backupCount"], 1)
+            self.assertIn("restorePolicy", hai_payload)
+            self.assertIn("schedule", hai_payload)
+            self.assertNotIn("backupDir", hai_payload)
+            self.assertNotIn("restoreConfirmationPhrase", hai_payload)
+            self.assertNotIn("fullRestoreConfirmationPhrase", hai_payload)
+            for sensitive_value in (temp_dir, "backupPath", "backupFilename"):
+                self.assertNotIn(sensitive_value, serialized_hai_payload)
+
+            operator_response = client.get(
+                "/api/backups",
+                headers={"Authorization": "Bearer synthetic-operator-token"},
+            )
+            self.assertEqual(operator_response.status_code, 200)
+            operator_payload = operator_response.get_json()
+            self.assertEqual(operator_payload["verificationMode"], "deep")
+            self.assertIn("backupDir", operator_payload)
+            self.assertIn("restoreConfirmationPhrase", operator_payload)
+
     def test_dashboard_backup_form_shows_backup_summary(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             ledger_path = os.path.join(temp_dir, "fab.sqlite3")

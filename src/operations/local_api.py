@@ -210,6 +210,68 @@ def _hai_request_allowed(method: str, path: str) -> bool:
         normalized_method == allowed_method and pattern.fullmatch(normalized_path)
         for allowed_method, pattern in HAI_ROUTE_RULES
     )
+
+
+def _hai_backup_status_projection(payload: Dict[str, Any]) -> Dict[str, Any]:
+    backups = payload.get("backups") if isinstance(payload, dict) else []
+    schedule = payload.get("schedule") if isinstance(payload, dict) else {}
+    restore_policy = payload.get("restorePolicy") if isinstance(payload, dict) else {}
+    backup_fields = (
+        "status",
+        "createdAt",
+        "ledgerBytes",
+        "sizeBytes",
+        "format",
+        "sourceEvidenceStatus",
+        "sourceEvidenceDocuments",
+        "sourceEvidenceFiles",
+        "sourceEvidenceBytes",
+        "sourceEvidenceGaps",
+    )
+    schedule_fields = (
+        "status",
+        "due",
+        "intervalHours",
+        "requireCompleteSourceEvidence",
+        "lastSuccessfulAt",
+        "nextDueAt",
+        "invalidBackupCount",
+        "reason",
+        "sourceEvidenceStatus",
+        "sourceEvidenceDocuments",
+        "sourceEvidenceFiles",
+        "sourceEvidenceBytes",
+        "sourceEvidenceGaps",
+        "integrityVerification",
+    )
+    policy_fields = (
+        "status",
+        "maintenanceMode",
+        "ledgerRestoreSupported",
+        "sourceEvidenceRestoreSupported",
+        "workerMustBeStopped",
+        "externalSubmission",
+    )
+    safe_backups = [
+        {key: backup[key] for key in backup_fields if key in backup}
+        for backup in backups or []
+        if isinstance(backup, dict)
+    ]
+    return {
+        "backups": safe_backups,
+        "backupCount": len(safe_backups),
+        "schedule": {
+            key: schedule[key] for key in schedule_fields
+            if isinstance(schedule, dict) and key in schedule
+        },
+        "restorePolicy": {
+            key: restore_policy[key] for key in policy_fields
+            if isinstance(restore_policy, dict) and key in restore_policy
+        },
+        "verificationMode": "manifest_only",
+    }
+
+
 OPERATOR_SESSION_AUDIENCE = "fab-local-operator-session"
 OPERATOR_SESSION_MAX_TTL_SECONDS = 60
 OPERATOR_SESSION_MAX_TICKET_LENGTH = 8_192
@@ -7644,10 +7706,18 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
 
     @app.get("/api/backups")
     def list_backups():
-        return jsonify(LocalBackupService(ledger, config).list_backups(
+        hai_principal = getattr(g, "fab_api_principal", None) == "hai"
+        result = LocalBackupService(ledger, config).list_backups(
             limit=_limit_arg(),
-            deep_verify=_bool_value(request.args.get("verify"), default=True),
-        ))
+            deep_verify=(
+                False
+                if hai_principal
+                else _bool_value(request.args.get("verify"), default=True)
+            ),
+        )
+        if hai_principal:
+            result = _hai_backup_status_projection(result)
+        return jsonify(result)
 
     @app.post("/api/backups")
     def create_backup():
