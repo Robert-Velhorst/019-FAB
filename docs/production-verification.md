@@ -2117,3 +2117,20 @@ and autonomy inputs, global-limit clamping, and oversized JSON rejection with
 HTTP 413 before decoding. The suite covers route-specific caps but is not a new
 full Python suite, Windows-host acceptance, or live-provider/tunnel run. No
 account, provider, source-file, tunnel, or deployment state was changed.
+
+## Wave Report Result Boundaries (2026-10-09)
+
+The report-result endpoint now has a dedicated 16 MiB source-data budget plus
+bounded JSON metadata overhead, rather than inheriting the 2 MiB ordinary API
+limit. Report parsing accepts up to 10,000 rows. The optional import-and-
+reconcile path rejects inputs above the reconciler's existing 500-row batch
+limit before importing any transactions, avoiding a partial import when
+reconciliation would otherwise fail afterward. These limits also apply in the
+Wave report service to parsed report text and row collections.
+
+Current-source verification passed **121 tests** across the local operations
+API and Wave control suites, and **87 tests** across bank import, reconciliation
+request boundaries, HAI contracts and Windows tunnel scripts. Python
+compilation and `git diff --check` passed. These are focused local regressions;
+no live Wave report, large production export, provider write, deployment or
+disaster-recovery behavior was exercised.

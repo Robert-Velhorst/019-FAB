@@ -46,7 +46,10 @@ The API applies a 2 MiB default request-stream limit to mutating API requests,
 after authentication and before JSON or multipart parsing. Larger legitimate
 contracts have explicit limits: document intake, bank imports, OAuth credentials,
 Wave attachment readback, Drive relay, autonomy bank-transaction input,
-reconciliation, and HAI. Upload budgets include bounded encoding/metadata
+Wave report-result capture, reconciliation, and HAI. Wave report results allow
+up to 16 MiB of source data and 10,000 rows; optional reconciliation remains
+limited to its existing 500-row batch size and rejects oversized combined
+imports before writing transactions. Upload budgets include bounded encoding/metadata
 overhead and retain the existing decoded-byte checks. Every route limit is
 reduced by a smaller configured global request limit, so the 101 MiB global
 ceiling is no longer the default memory budget for ordinary commands.

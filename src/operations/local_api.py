@@ -91,7 +91,7 @@ from src.operations.local_reconciliation import LocalReconciliationService, MAX_
 from src.operations.local_reporting import LocalFinancialReportingService, LocalScheduledReportService
 from src.operations.local_review import LocalReviewService
 from src.operations.local_routing import LocalRoutingService
-from src.operations.local_wave_control import LocalWaveControlService
+from src.operations.local_wave_control import LocalWaveControlService, MAX_WAVE_REPORT_RESULT_BYTES
 from src.operations.local_wave_receipt_executor import LocalWaveReceiptExecutorService
 from src.operations.local_wave_setup import LocalWaveSetupService
 from src.operations.local_workflow_recovery import (
@@ -121,6 +121,9 @@ MAX_LOCAL_OAUTH_CREDENTIAL_REQUEST_BYTES = 90_000 + 16 * 1024
 MAX_LOCAL_WAVE_READBACK_REQUEST_BYTES = (
     WAVE_RECEIPT_MAX_BYTES + LOCAL_MULTIPART_REQUEST_OVERHEAD_BYTES
 )
+MAX_LOCAL_WAVE_REPORT_RESULT_REQUEST_BYTES = (
+    MAX_WAVE_REPORT_RESULT_BYTES + LOCAL_JSON_REQUEST_OVERHEAD_BYTES
+)
 MAX_LOCAL_DRIVE_RELAY_REQUEST_BYTES = (
     MAX_DRIVE_RELAY_MAX_BYTES + LOCAL_MULTIPART_REQUEST_OVERHEAD_BYTES
 )
@@ -131,6 +134,7 @@ LOCAL_API_ROUTE_BODY_LIMITS = {
     "install_gmail_credentials_api": MAX_LOCAL_OAUTH_CREDENTIAL_REQUEST_BYTES,
     "install_google_drive_credentials_api": MAX_LOCAL_OAUTH_CREDENTIAL_REQUEST_BYTES,
     "drive_wave_attachment_readback_api": MAX_LOCAL_WAVE_READBACK_REQUEST_BYTES,
+    "record_wave_report_result": MAX_LOCAL_WAVE_REPORT_RESULT_REQUEST_BYTES,
     "google_drive_relay_intake_api": MAX_LOCAL_DRIVE_RELAY_REQUEST_BYTES,
     "run_autonomy": MAX_RECONCILIATION_REQUEST_BYTES,
     "run_reconciliation": MAX_RECONCILIATION_REQUEST_BYTES,

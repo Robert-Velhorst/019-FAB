@@ -35,6 +35,10 @@ DEFAULT_WORKFLOW_SIGNALS = [
     "bank_feed",
 ]
 
+MAX_WAVE_REPORT_RESULT_BYTES = 16 * 1024 * 1024
+MAX_WAVE_REPORT_RESULT_ROWS = 10_000
+MAX_WAVE_REPORT_RECONCILIATION_ROWS = 500
+
 
 class LocalWaveControlService:
     """Expose Wave as a policy-gated downstream surface for FAB.
@@ -513,6 +517,16 @@ class LocalWaveControlService:
                     "error": "Report rows are required when importTransactions is enabled.",
                     "externalSubmission": "not_executed",
                 }
+            if (
+                _truthy(_coalesce(request_payload, "runReconciliation", "run_reconciliation"))
+                and len(rows) > MAX_WAVE_REPORT_RECONCILIATION_ROWS
+            ):
+                return {
+                    "success": False,
+                    "status": "invalid_payload",
+                    "error": "Report rows exceed the 500-row reconciliation batch limit; import and reconcile in bounded batches.",
+                    "externalSubmission": "not_executed",
+                }
             bank_import_summary = LocalBankTransactionImportService(ledger, self.config).import_transactions(
                 rows,
                 account_identifier=str(
@@ -689,6 +703,14 @@ def _resolve_report_snapshot(ledger: Any, payload: Dict[str, Any]) -> Optional[D
 
 
 def _report_result_payload(request_payload: Dict[str, Any]) -> Dict[str, Any]:
+    result_text = _coalesce(request_payload, "resultText", "result_text", "reportText", "report_text")
+    if result_text is not None:
+        try:
+            result_size = len(str(result_text).encode("utf-8"))
+        except UnicodeEncodeError as exc:
+            raise ValueError("Wave report result must contain valid Unicode text") from exc
+        if result_size > MAX_WAVE_REPORT_RESULT_BYTES:
+            raise ValueError(f"Wave report result exceeds the {MAX_WAVE_REPORT_RESULT_BYTES}-byte processing limit")
     raw_result = request_payload.get("result")
     if isinstance(raw_result, dict):
         result_payload = dict(raw_result)
@@ -700,10 +722,11 @@ def _report_result_payload(request_payload: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(rows, list):
         rows = request_payload.get("rows")
     if not isinstance(rows, list):
-        result_text = _coalesce(request_payload, "resultText", "result_text", "reportText", "report_text")
         if result_text:
             rows = _parse_report_rows(str(result_text), str(_coalesce(request_payload, "format", "exportFormat", "export_format") or "csv"))
     if isinstance(rows, list):
+        if len(rows) > MAX_WAVE_REPORT_RESULT_ROWS:
+            raise ValueError(f"Wave report result exceeds the {MAX_WAVE_REPORT_RESULT_ROWS}-row processing limit")
         summary = _summarize_report_rows(rows)
         for key, value in summary.items():
             result_payload.setdefault(key, value)

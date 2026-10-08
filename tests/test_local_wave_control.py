@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from src.operations.local_ledger import LocalOperationsLedger
 from src.operations.local_wave_control import LocalWaveControlService
@@ -297,6 +298,46 @@ class TestLocalWaveControlService(unittest.TestCase):
                 capture["waveReportSnapshot"]["metadata"]["resultCapture"]["reconciliation"]["missingReceipts"],
                 2,
             )
+
+    def test_report_result_rejects_oversized_row_sets_before_processing(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            service = LocalWaveControlService()
+            workflow = service.plan_workflow({"workflowId": "daily_reconciliation_run"})
+            service.record_workflow_report_snapshots(ledger, workflow)
+
+            capture = service.record_report_result(ledger, {
+                "workflowId": "daily_reconciliation_run",
+                "reportType": "account-transactions",
+                "actionId": "report_table_read",
+                "rows": [{}] * 10_001,
+            })
+
+            self.assertFalse(capture["success"])
+            self.assertEqual(capture["status"], "invalid_payload")
+            self.assertIn("10000-row", capture["error"])
+
+    def test_report_reconciliation_batch_overflow_is_rejected_before_import(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            service = LocalWaveControlService()
+            workflow = service.plan_workflow({"workflowId": "daily_reconciliation_run"})
+            service.record_workflow_report_snapshots(ledger, workflow)
+
+            with patch("src.operations.local_wave_control.LocalBankTransactionImportService.import_transactions") as importer:
+                capture = service.record_report_result(ledger, {
+                    "workflowId": "daily_reconciliation_run",
+                    "reportType": "account-transactions",
+                    "actionId": "report_table_read",
+                    "rows": [{"amount": 1, "date": "2026-06-28"}] * 501,
+                    "importTransactions": True,
+                    "runReconciliation": True,
+                })
+
+            self.assertFalse(capture["success"])
+            self.assertEqual(capture["status"], "invalid_payload")
+            self.assertIn("500-row", capture["error"])
+            importer.assert_not_called()
 
     def test_report_result_capture_requires_matching_snapshot_and_result_payload(self):
         with tempfile.TemporaryDirectory() as temp_dir:
