@@ -23,6 +23,7 @@ from src.operations.local_exports import EXPORT_APPROVAL_PHRASE, EXPORT_REJECTIO
 from src.operations.local_gmail_auth import LocalGmailAuthorizationCoordinator
 from src.operations.local_google_drive_auth import LocalGoogleDriveAuthorizationCoordinator
 from src.operations.local_health import LocalOperationsHealth
+from src.operations.local_intake import LocalFolderIntake
 from src.operations.local_ledger import LocalOperationsLedger
 from src.operations.local_master_ledger import LocalMasterLedgerService
 from src.operations.local_wave_setup import LocalWaveSetupService
@@ -3276,6 +3277,91 @@ class TestLocalOperationsApi(unittest.TestCase):
             documents = client.get("/api/documents").get_json()["documents"]
             self.assertEqual(len(documents), 1)
             self.assertEqual(documents[0]["processing_status"], "imported")
+
+    def test_api_upload_retries_reuse_the_existing_file_and_ledger_document(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            intake_dir = os.path.join(temp_dir, "sort-out")
+            client = create_app({
+                "fab_local_ledger_path": os.path.join(temp_dir, "fab.sqlite3"),
+                "fab_local_intake_paths": intake_dir,
+                "fab_local_intake_extensions": "pdf",
+            }).test_client()
+            payload = {
+                "filename": "receipt.pdf",
+                "contentBase64": base64.b64encode(b"same receipt bytes").decode("ascii"),
+            }
+
+            first = client.post("/api/intake/upload", json=payload)
+            retry = client.post("/api/intake/upload", json=payload)
+
+            self.assertEqual(first.status_code, 201)
+            self.assertEqual(retry.status_code, 200)
+            self.assertTrue(retry.get_json()["idempotentReplay"])
+            self.assertEqual(
+                retry.get_json()["document"]["id"],
+                first.get_json()["document"]["id"],
+            )
+            self.assertEqual(os.listdir(intake_dir), ["receipt.pdf"])
+            self.assertEqual(len(client.get("/api/documents").get_json()["documents"]), 1)
+
+            changed = {
+                **payload,
+                "contentBase64": base64.b64encode(b"updated receipt bytes").decode("ascii"),
+            }
+            second_document = client.post("/api/intake/upload", json=changed)
+            second_retry = client.post("/api/intake/upload", json=changed)
+            source = client.get("/api/sources").get_json()["sources"][0]
+            changed_filename = (
+                "receipt-"
+                + hashlib.sha256(b"updated receipt bytes").hexdigest()[:12]
+                + ".pdf"
+            )
+
+            self.assertEqual(second_document.status_code, 201)
+            self.assertEqual(second_retry.status_code, 200)
+            self.assertTrue(second_retry.get_json()["idempotentReplay"])
+            self.assertEqual(sorted(os.listdir(intake_dir)), sorted(["receipt.pdf", changed_filename]))
+            self.assertEqual(len(client.get("/api/documents").get_json()["documents"]), 2)
+            self.assertEqual(source["documents_seen"], 2)
+            self.assertEqual(source["documents_imported"], 2)
+            self.assertIsNone(source["last_scan_at"])
+
+    def test_api_upload_registers_one_file_without_rescanning_intake_folder(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            intake_dir = os.path.join(temp_dir, "sort-out")
+            app = create_app({
+                "fab_local_ledger_path": os.path.join(temp_dir, "fab.sqlite3"),
+                "fab_local_intake_paths": intake_dir,
+                "fab_local_intake_extensions": "pdf",
+            })
+            client = app.test_client()
+            with patch.object(LocalFolderIntake, "rescan", side_effect=AssertionError("full folder scan")):
+                response = client.post("/api/intake/upload", json={
+                    "filename": "receipt.pdf",
+                    "contentBase64": base64.b64encode(b"receipt bytes").decode("ascii"),
+                })
+
+            self.assertEqual(response.status_code, 201)
+            self.assertEqual(response.get_json()["document"]["status"], "imported")
+
+    def test_api_upload_does_not_claim_success_without_confirmed_ledger_document(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            intake_dir = os.path.join(temp_dir, "sort-out")
+            app = create_app({
+                "fab_local_ledger_path": os.path.join(temp_dir, "fab.sqlite3"),
+                "fab_local_intake_paths": intake_dir,
+                "fab_local_intake_extensions": "pdf",
+            })
+            with patch.object(LocalFolderIntake, "register_local_file", return_value={"status": "skipped"}):
+                response = app.test_client().post("/api/intake/upload", json={
+                    "filename": "receipt.pdf",
+                    "contentBase64": base64.b64encode(b"receipt bytes").decode("ascii"),
+                })
+
+            self.assertEqual(response.status_code, 503)
+            self.assertFalse(response.get_json()["success"])
+            self.assertEqual(response.get_json()["status"], "stored_not_registered")
+            self.assertTrue(os.path.isfile(os.path.join(intake_dir, "receipt.pdf")))
 
     def test_api_rejects_invalid_or_oversized_local_intake_uploads(self):
         with tempfile.TemporaryDirectory() as temp_dir:

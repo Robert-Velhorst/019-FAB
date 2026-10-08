@@ -238,6 +238,30 @@ def _api_error_code(status_code: int) -> str:
     }.get(status_code, "internal_error" if status_code >= 500 else "request_failed")
 
 
+def _file_matches_content(path: str, content: bytes) -> bool:
+    """Compare a bounded upload with an existing regular file without following links."""
+    try:
+        before = os.stat(path, follow_symlinks=False)
+        if not stat.S_ISREG(before.st_mode) or before.st_size != len(content):
+            return False
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(path, flags)
+        with os.fdopen(descriptor, "rb") as handle:
+            opened = os.fstat(handle.fileno())
+            if (
+                not stat.S_ISREG(opened.st_mode)
+                or opened.st_size != len(content)
+                or (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino)
+            ):
+                return False
+            digest = hashlib.sha256()
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return hmac.compare_digest(digest.digest(), hashlib.sha256(content).digest())
+    except OSError:
+        return False
+
+
 DASHBOARD_TEMPLATE = """
 <!doctype html>
 <html lang="en">
@@ -7735,35 +7759,52 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         destination = os.path.abspath(os.path.join(intake_root, filename))
         if os.path.commonpath((intake_root, destination)) != intake_root:
             return jsonify({"error": "Invalid intake filename"}), 400
-        if os.path.exists(destination):
+        content_digest = hashlib.sha256(content).hexdigest()
+        reused_existing = False
+        if os.path.lexists(destination):
+            reused_existing = _file_matches_content(destination, content)
+        if os.path.lexists(destination) and not reused_existing:
             stem, suffix = os.path.splitext(filename)
             destination = os.path.join(
                 intake_root,
-                f"{stem}-{hashlib.sha256(content).hexdigest()[:12]}{suffix}",
+                f"{stem}-{content_digest[:12]}{suffix}",
             )
-        try:
-            with open(destination, "xb") as handle:
-                handle.write(content)
-        except FileExistsError:
-            return jsonify({"error": "An identical intake filename already exists"}), 409
+            if os.path.lexists(destination):
+                reused_existing = _file_matches_content(destination, content)
+                if not reused_existing:
+                    return jsonify({"error": "An intake filename already exists with different content"}), 409
+        if not reused_existing:
+            try:
+                with open(destination, "xb") as handle:
+                    handle.write(content)
+            except FileExistsError:
+                if not _file_matches_content(destination, content):
+                    return jsonify({"error": "An intake filename already exists with different content"}), 409
+                reused_existing = True
 
-        summary = LocalFolderIntake(
+        intake = LocalFolderIntake(
             ledger,
             allowed_extensions=app.config["FAB_LOCAL_INTAKE_EXTENSIONS"],
-        ).rescan([intake_root])
-        normalized_destination = os.path.normcase(os.path.abspath(destination))
-        document = next((
-            item for item in summary.get("documents", [])
-            if os.path.normcase(os.path.abspath(str(item.get("path") or ""))) == normalized_destination
-        ), None)
+        )
+        registration = intake.register_local_file(intake_root, destination)
+        document = registration.get("document") if isinstance(registration, dict) else None
+        if not isinstance(document, dict) or not document.get("id"):
+            return jsonify({
+                "success": False,
+                "status": "stored_not_registered",
+                "error": "The upload was stored but could not be confirmed in the bookkeeping ledger. Run an intake rescan before retrying.",
+                "filename": os.path.basename(destination),
+                "externalSubmission": "not_executed",
+            }), 503
         return jsonify({
             "success": True,
             "status": "registered",
             "filename": os.path.basename(destination),
             "sizeBytes": len(content),
             "document": document,
+            "idempotentReplay": reused_existing,
             "externalSubmission": "not_executed",
-        }), 201
+        }), 200 if reused_existing else 201
 
     @app.get("/api/connectors/google-drive/relay")
     def google_drive_relay_status_api():

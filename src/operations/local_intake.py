@@ -131,6 +131,69 @@ class LocalFolderIntake:
         })
         return summary
 
+    def register_local_file(self, root: str, path: str) -> Dict[str, Any]:
+        """Register one newly uploaded file without rescanning its whole folder."""
+        normalized_root = _normalize_path(root)
+        normalized_path = _normalize_path(path)
+        try:
+            if os.path.commonpath((normalized_root, normalized_path)) != normalized_root:
+                return {"skipped": {"reason": "path_outside_source_root"}}
+        except ValueError:
+            return {"skipped": {"reason": "path_outside_source_root"}}
+        if (
+            not os.path.isdir(normalized_root)
+            or os.path.islink(normalized_path)
+            or not os.path.isfile(normalized_path)
+        ):
+            return {"skipped": {"reason": "local_file_unavailable"}}
+        extension = os.path.splitext(normalized_path)[1].lower()
+        if "*" not in self.allowed_extensions and extension not in self.allowed_extensions:
+            return {"skipped": {"reason": "unsupported_extension"}}
+
+        timestamp = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        source_account_id = self.ledger.upsert_source_account({
+            "sourceType": self.source,
+            "sourceIdentifier": normalized_root,
+            "label": os.path.basename(normalized_root) or normalized_root,
+            "status": "ready",
+            "metadata": {
+                "path": normalized_root,
+                "allowedExtensions": sorted(self.allowed_extensions),
+            },
+        })
+        result = self._register_file(normalized_root, normalized_path, source_account_id)
+        if result.get("skipped"):
+            return result
+
+        status = str(result.get("status") or "")
+        self.ledger.upsert_source_account({
+            "sourceType": self.source,
+            "sourceIdentifier": normalized_root,
+            "label": os.path.basename(normalized_root) or normalized_root,
+            "status": "ready",
+            "lastSeenAt": timestamp,
+            "documentsSeen": int(status != "already_registered"),
+            "documentsImported": int(status != "already_registered"),
+            "duplicatesDetected": int(status == "duplicate"),
+            "metadata": {
+                "path": normalized_root,
+                "allowedExtensions": sorted(self.allowed_extensions),
+                "lastFileRegistrationStatus": status,
+                "lastFileRegistrationAt": timestamp,
+            },
+        })
+        self.ledger.record_audit_event({
+            "action": "local_intake.single_file_registration",
+            "entityType": "bookkeeping_document",
+            "entityId": str(result["document"].get("id") or ""),
+            "details": {
+                "sourceAccountId": source_account_id,
+                "path": normalized_path,
+                "status": status,
+            },
+        })
+        return result
+
     def has_pending_changes(self, folders: Sequence[str]) -> bool:
         """Return true when a scheduled rescan would change durable state."""
         roots = [_normalize_path(folder) for folder in folders if str(folder or "").strip()]
