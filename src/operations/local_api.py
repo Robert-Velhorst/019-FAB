@@ -54,7 +54,10 @@ from src.operations.local_categories import fab_category_intents, fab_category_o
 from src.operations.local_category_suggestions import suggest_category_intent
 from src.operations.local_compliance import LocalComplianceService, OPEN_FINDING_STATUSES
 from src.operations.local_connector_intake import LocalConnectorIntakeService
-from src.operations.drive_relay_intake import DriveRelayIntakeService
+from src.operations.drive_relay_intake import (
+    MAX_DRIVE_RELAY_MAX_BYTES,
+    DriveRelayIntakeService,
+)
 from src.operations.drive_wave_delivery import (
     DriveWaveDeliveryService,
     WAVE_RECEIPT_MAX_BYTES,
@@ -103,6 +106,7 @@ DEFAULT_LOCAL_UPLOAD_MAX_BYTES = 6 * 1024 * 1024
 DEFAULT_LOCAL_API_MAX_REQUEST_BYTES = 101 * 1024 * 1024
 MAX_RECONCILIATION_REQUEST_BYTES = MAX_RECONCILIATION_JSON_BYTES + 1024 * 1024
 MAX_LOCAL_API_MAX_REQUEST_BYTES = 128 * 1024 * 1024
+DEFAULT_LOCAL_JSON_MUTATION_REQUEST_BYTES = 2 * 1024 * 1024
 LOCAL_JSON_REQUEST_OVERHEAD_BYTES = 128 * 1024
 LOCAL_MULTIPART_REQUEST_OVERHEAD_BYTES = 1024 * 1024
 MAX_LOCAL_INTAKE_REQUEST_BYTES = (
@@ -117,6 +121,9 @@ MAX_LOCAL_OAUTH_CREDENTIAL_REQUEST_BYTES = 90_000 + 16 * 1024
 MAX_LOCAL_WAVE_READBACK_REQUEST_BYTES = (
     WAVE_RECEIPT_MAX_BYTES + LOCAL_MULTIPART_REQUEST_OVERHEAD_BYTES
 )
+MAX_LOCAL_DRIVE_RELAY_REQUEST_BYTES = (
+    MAX_DRIVE_RELAY_MAX_BYTES + LOCAL_MULTIPART_REQUEST_OVERHEAD_BYTES
+)
 LOCAL_API_ROUTE_BODY_LIMITS = {
     "upload_intake_document": MAX_LOCAL_INTAKE_REQUEST_BYTES,
     "import_bank_transactions": MAX_LOCAL_BANK_IMPORT_REQUEST_BYTES,
@@ -124,6 +131,8 @@ LOCAL_API_ROUTE_BODY_LIMITS = {
     "install_gmail_credentials_api": MAX_LOCAL_OAUTH_CREDENTIAL_REQUEST_BYTES,
     "install_google_drive_credentials_api": MAX_LOCAL_OAUTH_CREDENTIAL_REQUEST_BYTES,
     "drive_wave_attachment_readback_api": MAX_LOCAL_WAVE_READBACK_REQUEST_BYTES,
+    "google_drive_relay_intake_api": MAX_LOCAL_DRIVE_RELAY_REQUEST_BYTES,
+    "run_autonomy": MAX_RECONCILIATION_REQUEST_BYTES,
     "run_reconciliation": MAX_RECONCILIATION_REQUEST_BYTES,
     "run_reconciliation_form": MAX_RECONCILIATION_REQUEST_BYTES,
     "hai_command_plan_api": MAX_HAI_PAYLOAD_BYTES + 1024 * 1024,
@@ -4234,9 +4243,11 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
 
     @app.before_request
     def bound_local_operation_request():
-        if request.method != "POST":
+        if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
             return None
         maximum = LOCAL_API_ROUTE_BODY_LIMITS.get(request.endpoint or "")
+        if maximum is None and request.path.startswith("/api/"):
+            maximum = DEFAULT_LOCAL_JSON_MUTATION_REQUEST_BYTES
         if maximum is None:
             return None
         # Enforce the stream bound after authentication, before JSON or form decoding.

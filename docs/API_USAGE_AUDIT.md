@@ -42,14 +42,14 @@ Operator-facing links into the protected Flask ledger use `GET /api/fab/operator
 
 ## Request body limits
 
-The API applies route-specific request-stream limits after authentication but
-before JSON or multipart parsing for document intake, bank imports, Google OAuth
-credential uploads, and Wave attachment readback. The budgets include bounded
-encoding/metadata overhead, retain the existing decoded file-size checks, and
-are always reduced by a smaller configured global request limit. This prevents
-the broad recovery/API request ceiling from becoming the memory budget for a
-small upload endpoint. Reconciliation and HAI retain their separate existing
-payload bounds.
+The API applies a 2 MiB default request-stream limit to mutating API requests,
+after authentication and before JSON or multipart parsing. Larger legitimate
+contracts have explicit limits: document intake, bank imports, OAuth credentials,
+Wave attachment readback, Drive relay, autonomy bank-transaction input,
+reconciliation, and HAI. Upload budgets include bounded encoding/metadata
+overhead and retain the existing decoded-byte checks. Every route limit is
+reduced by a smaller configured global request limit, so the 101 MiB global
+ceiling is no longer the default memory budget for ordinary commands.
 
 ## Error contract
 

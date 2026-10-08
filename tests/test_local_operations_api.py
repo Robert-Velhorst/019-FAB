@@ -21,8 +21,11 @@ from src.operations.local_backup import (
 from src.operations.local_api import (
     MAX_LOCAL_BANK_IMPORT_REQUEST_BYTES,
     MAX_LOCAL_INTAKE_REQUEST_BYTES,
+    DEFAULT_LOCAL_JSON_MUTATION_REQUEST_BYTES,
+    MAX_LOCAL_DRIVE_RELAY_REQUEST_BYTES,
     MAX_LOCAL_OAUTH_CREDENTIAL_REQUEST_BYTES,
     MAX_LOCAL_WAVE_READBACK_REQUEST_BYTES,
+    MAX_RECONCILIATION_REQUEST_BYTES,
     create_app,
 )
 from src.operations.local_autonomy import LocalAutonomousService
@@ -54,6 +57,10 @@ class TestLocalOperationsApi(unittest.TestCase):
                 "install_gmail_credentials_api": MAX_LOCAL_OAUTH_CREDENTIAL_REQUEST_BYTES,
                 "install_google_drive_credentials_api": MAX_LOCAL_OAUTH_CREDENTIAL_REQUEST_BYTES,
                 "drive_wave_attachment_readback_api": MAX_LOCAL_WAVE_READBACK_REQUEST_BYTES,
+                "google_drive_relay_intake_api": MAX_LOCAL_DRIVE_RELAY_REQUEST_BYTES,
+                "run_autonomy": MAX_RECONCILIATION_REQUEST_BYTES,
+                "refresh_notifications_api": DEFAULT_LOCAL_JSON_MUTATION_REQUEST_BYTES,
+                "save_wave_setup": DEFAULT_LOCAL_JSON_MUTATION_REQUEST_BYTES,
             }
 
             @app.before_request
@@ -72,11 +79,42 @@ class TestLocalOperationsApi(unittest.TestCase):
                 "install_gmail_credentials_api": "/api/connectors/gmail/credentials",
                 "install_google_drive_credentials_api": "/api/connectors/google-drive/credentials",
                 "drive_wave_attachment_readback_api": "/api/drive-wave/documents/1/attachment-readback",
+                "google_drive_relay_intake_api": "/api/connectors/google-drive/relay",
+                "run_autonomy": "/api/autonomy/run",
+                "refresh_notifications_api": "/api/notifications/refresh",
             }
             for endpoint, path in paths.items():
                 response = client.post(path, json={})
                 self.assertEqual(response.status_code, 204, endpoint)
                 self.assertEqual(observed[endpoint], expected[endpoint], endpoint)
+
+            response = client.put("/api/wave/setup", json={})
+            self.assertEqual(response.status_code, 204, "save_wave_setup")
+            self.assertEqual(
+                observed["save_wave_setup"],
+                DEFAULT_LOCAL_JSON_MUTATION_REQUEST_BYTES,
+            )
+
+    def test_lower_global_request_limit_caps_route_specific_budget(self):
+        global_limit = 128 * 1024
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = create_app({
+                "fab_local_ledger_path": os.path.join(temp_dir, "fab.sqlite3"),
+                "fab_local_api_max_request_bytes": global_limit,
+            })
+            observed = {}
+
+            @app.before_request
+            def observe_bound_request():
+                if request.endpoint == "upload_intake_document":
+                    observed["limit"] = request.max_content_length
+                    return "", 204
+                return None
+
+            response = app.test_client().post("/api/intake/upload", json={})
+
+            self.assertEqual(response.status_code, 204)
+            self.assertEqual(observed["limit"], global_limit)
 
     def test_oauth_credential_body_limit_rejects_before_json_decode(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -86,6 +124,21 @@ class TestLocalOperationsApi(unittest.TestCase):
             oversized_body = b"x" * (MAX_LOCAL_OAUTH_CREDENTIAL_REQUEST_BYTES + 1)
             response = app.test_client().post(
                 "/api/connectors/gmail/credentials",
+                data=oversized_body,
+                content_type="application/json",
+            )
+
+            self.assertEqual(response.status_code, 413)
+            self.assertEqual(response.get_json()["errorCode"], "payload_too_large")
+
+    def test_default_api_mutation_limit_rejects_before_json_decode(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = create_app({
+                "fab_local_ledger_path": os.path.join(temp_dir, "fab.sqlite3"),
+            })
+            oversized_body = b"x" * (DEFAULT_LOCAL_JSON_MUTATION_REQUEST_BYTES + 1)
+            response = app.test_client().post(
+                "/api/notifications/refresh",
                 data=oversized_body,
                 content_type="application/json",
             )
