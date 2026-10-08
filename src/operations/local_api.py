@@ -103,6 +103,32 @@ DEFAULT_LOCAL_UPLOAD_MAX_BYTES = 6 * 1024 * 1024
 DEFAULT_LOCAL_API_MAX_REQUEST_BYTES = 101 * 1024 * 1024
 MAX_RECONCILIATION_REQUEST_BYTES = MAX_RECONCILIATION_JSON_BYTES + 1024 * 1024
 MAX_LOCAL_API_MAX_REQUEST_BYTES = 128 * 1024 * 1024
+LOCAL_JSON_REQUEST_OVERHEAD_BYTES = 128 * 1024
+LOCAL_MULTIPART_REQUEST_OVERHEAD_BYTES = 1024 * 1024
+MAX_LOCAL_INTAKE_REQUEST_BYTES = (
+    4 * ((DEFAULT_LOCAL_UPLOAD_MAX_BYTES + 2) // 3)
+    + LOCAL_JSON_REQUEST_OVERHEAD_BYTES
+)
+MAX_LOCAL_BANK_IMPORT_REQUEST_BYTES = (
+    4 * ((MAX_BANK_STATEMENT_BYTES + 2) // 3)
+    + LOCAL_JSON_REQUEST_OVERHEAD_BYTES
+)
+MAX_LOCAL_OAUTH_CREDENTIAL_REQUEST_BYTES = 90_000 + 16 * 1024
+MAX_LOCAL_WAVE_READBACK_REQUEST_BYTES = (
+    WAVE_RECEIPT_MAX_BYTES + LOCAL_MULTIPART_REQUEST_OVERHEAD_BYTES
+)
+LOCAL_API_ROUTE_BODY_LIMITS = {
+    "upload_intake_document": MAX_LOCAL_INTAKE_REQUEST_BYTES,
+    "import_bank_transactions": MAX_LOCAL_BANK_IMPORT_REQUEST_BYTES,
+    "import_bank_transactions_form": MAX_LOCAL_BANK_IMPORT_REQUEST_BYTES,
+    "install_gmail_credentials_api": MAX_LOCAL_OAUTH_CREDENTIAL_REQUEST_BYTES,
+    "install_google_drive_credentials_api": MAX_LOCAL_OAUTH_CREDENTIAL_REQUEST_BYTES,
+    "drive_wave_attachment_readback_api": MAX_LOCAL_WAVE_READBACK_REQUEST_BYTES,
+    "run_reconciliation": MAX_RECONCILIATION_REQUEST_BYTES,
+    "run_reconciliation_form": MAX_RECONCILIATION_REQUEST_BYTES,
+    "hai_command_plan_api": MAX_HAI_PAYLOAD_BYTES + 1024 * 1024,
+    "hai_command_execute_api": MAX_HAI_PAYLOAD_BYTES + 1024 * 1024,
+}
 LOCAL_SOURCE_PREVIEW_MAX_BYTES = 25 * 1024 * 1024
 LOCAL_SOURCE_PREVIEW_MIME_TYPES = {
     "application/json",
@@ -4210,11 +4236,8 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
     def bound_local_operation_request():
         if request.method != "POST":
             return None
-        if request.endpoint in {"run_reconciliation", "run_reconciliation_form"}:
-            maximum = MAX_RECONCILIATION_REQUEST_BYTES
-        elif request.endpoint in {"hai_command_plan_api", "hai_command_execute_api"}:
-            maximum = MAX_HAI_PAYLOAD_BYTES + 1024 * 1024
-        else:
+        maximum = LOCAL_API_ROUTE_BODY_LIMITS.get(request.endpoint or "")
+        if maximum is None:
             return None
         # Enforce the stream bound after authentication, before JSON or form decoding.
         request.max_content_length = min(app.config["MAX_CONTENT_LENGTH"], maximum)

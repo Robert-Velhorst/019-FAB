@@ -10,13 +10,21 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from flask import request
+
 from src.operations.local_backup import (
     FULL_RESTORE_CONFIRMATION_PHRASE,
     LocalBackupService,
     RESTORE_CONFIRMATION_PHRASE,
     RESTORE_MODE_FULL,
 )
-from src.operations.local_api import create_app
+from src.operations.local_api import (
+    MAX_LOCAL_BANK_IMPORT_REQUEST_BYTES,
+    MAX_LOCAL_INTAKE_REQUEST_BYTES,
+    MAX_LOCAL_OAUTH_CREDENTIAL_REQUEST_BYTES,
+    MAX_LOCAL_WAVE_READBACK_REQUEST_BYTES,
+    create_app,
+)
 from src.operations.local_autonomy import LocalAutonomousService
 from src.operations.local_bookkeeping_records import LocalBookkeepingRecordService
 from src.operations.local_exports import EXPORT_APPROVAL_PHRASE, EXPORT_REJECTION_PHRASE, EXPORT_RESULT_CONFIRMATION_PHRASE
@@ -32,6 +40,59 @@ from src.utils.runtime_identity import local_instance_id
 
 
 class TestLocalOperationsApi(unittest.TestCase):
+    def test_bounded_upload_routes_set_request_caps_before_route_execution(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = create_app({
+                "fab_local_ledger_path": os.path.join(temp_dir, "fab.sqlite3"),
+                "fab_local_intake_paths": os.path.join(temp_dir, "intake"),
+            })
+            observed = {}
+            expected = {
+                "upload_intake_document": MAX_LOCAL_INTAKE_REQUEST_BYTES,
+                "import_bank_transactions": MAX_LOCAL_BANK_IMPORT_REQUEST_BYTES,
+                "import_bank_transactions_form": MAX_LOCAL_BANK_IMPORT_REQUEST_BYTES,
+                "install_gmail_credentials_api": MAX_LOCAL_OAUTH_CREDENTIAL_REQUEST_BYTES,
+                "install_google_drive_credentials_api": MAX_LOCAL_OAUTH_CREDENTIAL_REQUEST_BYTES,
+                "drive_wave_attachment_readback_api": MAX_LOCAL_WAVE_READBACK_REQUEST_BYTES,
+            }
+
+            @app.before_request
+            def observe_bound_request():
+                endpoint = request.endpoint
+                if endpoint in expected:
+                    observed[endpoint] = request.max_content_length
+                    return "", 204
+                return None
+
+            client = app.test_client()
+            paths = {
+                "upload_intake_document": "/api/intake/upload",
+                "import_bank_transactions": "/api/bank-transactions/import",
+                "import_bank_transactions_form": "/bank-transactions/import",
+                "install_gmail_credentials_api": "/api/connectors/gmail/credentials",
+                "install_google_drive_credentials_api": "/api/connectors/google-drive/credentials",
+                "drive_wave_attachment_readback_api": "/api/drive-wave/documents/1/attachment-readback",
+            }
+            for endpoint, path in paths.items():
+                response = client.post(path, json={})
+                self.assertEqual(response.status_code, 204, endpoint)
+                self.assertEqual(observed[endpoint], expected[endpoint], endpoint)
+
+    def test_oauth_credential_body_limit_rejects_before_json_decode(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = create_app({
+                "fab_local_ledger_path": os.path.join(temp_dir, "fab.sqlite3"),
+            })
+            oversized_body = b"x" * (MAX_LOCAL_OAUTH_CREDENTIAL_REQUEST_BYTES + 1)
+            response = app.test_client().post(
+                "/api/connectors/gmail/credentials",
+                data=oversized_body,
+                content_type="application/json",
+            )
+
+            self.assertEqual(response.status_code, 413)
+            self.assertEqual(response.get_json()["errorCode"], "payload_too_large")
+
     def test_api_exposes_failed_source_block_without_provider_dispatch(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             reset_all_limiters()

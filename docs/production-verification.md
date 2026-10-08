@@ -2095,3 +2095,24 @@ No fresh web build, rendered-browser, live provider, whole-app RAM/speed or
 deployment acceptance is claimed. No account mutation, real archival,
 credential change, shared-service restart, commit, push or deployment occurred.
 The full production objective remains incomplete.
+
+## Pre-Parse Upload Request Bounds (2026-10-08)
+
+Review found that the global 101 MB API request ceiling also applied to routes
+whose actual decoded uploads are limited to 4-6 MiB. Those routes parsed the
+entire JSON or multipart body before enforcing the smaller file limit, allowing
+unnecessary memory and parser work on rejected requests. The authenticated
+pre-parse request guard now applies separate budgets to local intake, bank
+imports, Gmail/Drive OAuth credential uploads, and Wave attachment readback.
+Budgets include bounded base64 or multipart metadata overhead, are clamped by a
+lower configured global ceiling, and do not replace the existing decoded-byte
+checks. Reconciliation and HAI keep their dedicated payload limits.
+
+Current-source verification passed **103 tests** in
+`tests/test_local_operations_api.py` and **87 tests** across bank import,
+reconciliation request-boundary, HAI contract, and ngrok-script test modules.
+The API suite proves each route installs its expected limit before handler
+execution; an oversized OAuth credential body is rejected with HTTP 413 before
+JSON decoding. These are focused local tests, not a new full Python suite,
+Windows-host acceptance, or live-provider/tunnel run. No account, provider,
+source-file, tunnel, or deployment state was changed.

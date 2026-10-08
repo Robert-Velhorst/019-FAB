@@ -40,6 +40,17 @@ Operator-facing links into the protected Flask ledger use `GET /api/fab/operator
 - MijnGeldzaken is an artifact export with supervised completion tracking.
 - Direct PSD2 and SVB mutation APIs are absent and are not advertised as live.
 
+## Request body limits
+
+The API applies route-specific request-stream limits after authentication but
+before JSON or multipart parsing for document intake, bank imports, Google OAuth
+credential uploads, and Wave attachment readback. The budgets include bounded
+encoding/metadata overhead, retain the existing decoded file-size checks, and
+are always reduced by a smaller configured global request limit. This prevents
+the broad recovery/API request ceiling from becoming the memory budget for a
+small upload endpoint. Reconciliation and HAI retain their separate existing
+payload bounds.
+
 ## Error contract
 
 Every JSON error below `/api/` has the same transport envelope: `success=false`, `status`, `errorCode`, `message`, and `requestId`. Route-specific fields such as `error`, validation details, or provider state are preserved. FAB accepts a caller-provided `X-Request-ID` only when it is a bounded safe identifier; otherwise it creates one and always returns the effective value in the response header and body. Unexpected exceptions return a generic message and create a sanitized correlated ledger audit event plus local log entry without exposing financial or provider details.
