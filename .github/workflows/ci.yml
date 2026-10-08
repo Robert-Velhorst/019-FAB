@@ -102,7 +102,7 @@ jobs:
           exit $LASTEXITCODE
       - name: Rehearse Windows dashboard API and ledger
         if: matrix.shard == 1
-        run: python scripts/run_stack_rehearsal.py
+        run: .venv\Scripts\python.exe scripts/run_stack_rehearsal.py
 
   frontend:
     name: Frontend
