@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 import tempfile
 from typing import Any, Iterable, Optional
+
+from src.security.local_secret_store import (
+    LocalSecretStoreError,
+    protect_with_current_user,
+    unprotect_with_current_user,
+)
 
 try:
     from google.oauth2.credentials import Credentials
@@ -12,6 +19,9 @@ except ImportError:
 
 
 LEGACY_TOKEN_SUFFIXES = {".pickle", ".pkl"}
+MAX_GOOGLE_TOKEN_BYTES = 1024 * 1024
+WINDOWS_TOKEN_ENVELOPE_KEY = "_fab_google_oauth_token_protection"
+WINDOWS_TOKEN_ENVELOPE_VERSION = 1
 
 
 class LegacyGoogleOAuthTokenError(RuntimeError):
@@ -109,10 +119,35 @@ class GoogleOAuthTokenStore:
             raise FileNotFoundError(
                 f"Google OAuth token is missing; complete supervised authorization to create {self.token_path}."
             )
-        return self.credentials_type.from_authorized_user_file(
-            self.token_path,
-            self.scopes,
-        )
+        with open(self.token_path, "rb") as handle:
+            raw = handle.read(MAX_GOOGLE_TOKEN_BYTES + 1)
+        if len(raw) > MAX_GOOGLE_TOKEN_BYTES:
+            raise ValueError("Google OAuth token exceeds the size limit.")
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("Google OAuth token is not valid JSON.") from exc
+        if not isinstance(payload, dict):
+            raise ValueError("Google OAuth token must be a JSON object.")
+
+        envelope = payload.get(WINDOWS_TOKEN_ENVELOPE_KEY)
+        if envelope is not None:
+            if set(payload) != {WINDOWS_TOKEN_ENVELOPE_KEY}:
+                raise ValueError("Google OAuth token protection envelope is invalid.")
+            if os.name != "nt":
+                raise ValueError("This Google OAuth token is protected for its Windows user.")
+            token_payload = _unprotect_windows_payload(envelope)
+            return self.credentials_type.from_authorized_user_info(
+                token_payload,
+                self.scopes,
+            )
+
+        if os.name == "nt":
+            # Migrate existing plaintext JSON tokens before returning credentials.
+            self._write_payload(payload)
+            return self.credentials_type.from_authorized_user_info(payload, self.scopes)
+
+        return self.credentials_type.from_authorized_user_file(self.token_path, self.scopes)
 
     def save(self, credentials: Any) -> str:
         serialized = credentials.to_json()
@@ -123,6 +158,17 @@ class GoogleOAuthTokenStore:
         if not isinstance(payload, dict):
             raise ValueError("Google OAuth credentials must serialize as a JSON object.")
 
+        self._write_payload(payload)
+        self.clear_reauthorization()
+        return self.token_path
+
+    def _write_payload(self, payload: dict[str, Any]) -> None:
+        serialized = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        if len(serialized) > MAX_GOOGLE_TOKEN_BYTES:
+            raise ValueError("Google OAuth token exceeds the size limit.")
+        if os.name == "nt":
+            serialized = _protect_windows_payload(serialized)
+
         directory = os.path.dirname(self.token_path)
         os.makedirs(directory, exist_ok=True)
         descriptor, temporary_path = tempfile.mkstemp(
@@ -131,9 +177,9 @@ class GoogleOAuthTokenStore:
             dir=directory,
         )
         try:
-            with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
-                json.dump(payload, handle, separators=(",", ":"), sort_keys=True)
-                handle.write("\n")
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(serialized)
+                handle.write(b"\n")
                 handle.flush()
                 os.fsync(handle.fileno())
             _make_private(temporary_path)
@@ -142,8 +188,6 @@ class GoogleOAuthTokenStore:
         finally:
             if os.path.exists(temporary_path):
                 os.unlink(temporary_path)
-        self.clear_reauthorization()
-        return self.token_path
 
     def mark_reauthorization(self, reason: str) -> None:
         payload = json.dumps(
@@ -201,3 +245,42 @@ def _make_private(path: str) -> None:
         os.chmod(path, 0o600)
     except OSError:
         pass
+
+
+def _protect_windows_payload(serialized: bytes) -> bytes:
+    try:
+        protected = protect_with_current_user(serialized)
+    except LocalSecretStoreError as exc:
+        raise RuntimeError("Google OAuth token could not be protected for this Windows user.") from exc
+    encoded = json.dumps(
+        {
+            WINDOWS_TOKEN_ENVELOPE_KEY: {
+                "version": WINDOWS_TOKEN_ENVELOPE_VERSION,
+                "protector": "windows_dpapi_current_user",
+                "protected": base64.b64encode(protected).decode("ascii"),
+            }
+        },
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("ascii")
+    if len(encoded) > MAX_GOOGLE_TOKEN_BYTES:
+        raise ValueError("Protected Google OAuth token exceeds the size limit.")
+    return encoded
+
+
+def _unprotect_windows_payload(envelope: Any) -> dict[str, Any]:
+    if (
+        not isinstance(envelope, dict)
+        or envelope.get("version") != WINDOWS_TOKEN_ENVELOPE_VERSION
+        or envelope.get("protector") != "windows_dpapi_current_user"
+        or not isinstance(envelope.get("protected"), str)
+    ):
+        raise ValueError("Google OAuth token protection envelope is invalid.")
+    try:
+        protected = base64.b64decode(envelope["protected"], validate=True)
+        payload = json.loads(unprotect_with_current_user(protected).decode("utf-8"))
+    except (LocalSecretStoreError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("Google OAuth token could not be unprotected for this Windows user.") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("Google OAuth token must be a JSON object.")
+    return payload

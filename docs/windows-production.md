@@ -31,6 +31,13 @@ and dashboard. File-variable aliases are removed only inside that scope to preve
 conflicting inputs, then the caller's environment is restored. Credentials are not
 placed in process arguments, runtime JSON, URLs, or launcher logs.
 
+Gmail, Drive, and Google Photos user-token files are encrypted with Windows
+current-user DPAPI. Existing plaintext JSON token files are migrated atomically
+when first loaded; they are not migrated merely by starting the dashboard. A
+token protected by one Windows user cannot be loaded under another user. OAuth
+client-credential files are separate and still require restrictive filesystem
+ACLs. This local-user protection does not replace host encryption or backups.
+
 If no API token is supplied, the launcher uses the existing encrypted local secret
 store to provision/reuse one. A supplied weak production token is rejected, not
 silently replaced. HAI uses a separate token; its file option is

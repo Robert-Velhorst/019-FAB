@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional
 from urllib.parse import quote, urlparse
 
 import requests
+from src.security.google_oauth_store import GoogleOAuthTokenStore
 
 try:
     from google.auth.transport.requests import Request
@@ -298,29 +299,20 @@ class GooglePhotosPickerClient:
             raise FileNotFoundError(
                 "Google Photos Picker token is missing; run python -m src.run_photos_picker_auth."
             )
-        return Credentials.from_authorized_user_file(self.token_path, [PICKER_SCOPE])
+        return GoogleOAuthTokenStore(
+            self.token_path,
+            [PICKER_SCOPE],
+            credentials_type=Credentials,
+        ).load()
 
     def _save_credentials(self, credentials: Any) -> None:
         if not self.token_path.lower().endswith(".json"):
             raise RuntimeError("Google Photos Picker token output must use a .json path.")
-        os.makedirs(os.path.dirname(self.token_path), exist_ok=True)
-        temporary_path = f"{self.token_path}.tmp"
-        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
-        descriptor = os.open(temporary_path, flags, 0o600)
-        try:
-            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                handle.write(credentials.to_json())
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary_path, self.token_path)
-            try:
-                os.chmod(self.token_path, 0o600)
-            except OSError:
-                pass
-        except Exception:
-            if os.path.exists(temporary_path):
-                os.remove(temporary_path)
-            raise
+        GoogleOAuthTokenStore(
+            self.token_path,
+            [PICKER_SCOPE],
+            credentials_type=Credentials,
+        ).save(credentials)
 
 
 def _safe_filename(value: Any, mime_type: str) -> str:
