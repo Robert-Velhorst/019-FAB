@@ -377,6 +377,29 @@ class TestLocalOperationsLedger(unittest.TestCase):
                 ledger.acquire_runtime_lease("autonomy", "owner-three", ttl_seconds=60)["acquired"]
             )
 
+    def test_runtime_lease_heartbeat_extends_only_an_active_owned_lease(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            acquired = ledger.acquire_runtime_lease("archive", "owner-one", ttl_seconds=60)
+            before = acquired["lease"]["expiresAt"]
+
+            self.assertTrue(ledger.heartbeat_runtime_lease("archive", "owner-one", ttl_seconds=120))
+            after = ledger.get_runtime_lease("archive")["expiresAt"]
+            self.assertGreater(after, before)
+            self.assertFalse(ledger.heartbeat_runtime_lease("archive", "owner-two", ttl_seconds=120))
+
+            connection = sqlite3.connect(ledger.path)
+            try:
+                connection.execute(
+                    "UPDATE runtime_leases SET expires_at = ? WHERE lease_name = ?",
+                    ("2000-01-01T00:00:00+00:00", "archive"),
+                )
+                connection.commit()
+            finally:
+                connection.close()
+            self.assertFalse(ledger.heartbeat_runtime_lease("archive", "owner-one", ttl_seconds=120))
+            self.assertTrue(ledger.acquire_runtime_lease("archive", "owner-two", ttl_seconds=60)["acquired"])
+
     def test_runtime_lease_can_be_force_released_after_owned_service_shutdown(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))

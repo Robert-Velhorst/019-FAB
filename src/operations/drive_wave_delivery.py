@@ -5,6 +5,7 @@ import json
 import math
 import os
 import re
+import threading
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -48,6 +49,59 @@ WAVE_RECEIPT_ALLOWED_MIME_TYPES = {
     "image/png",
     "image/tiff",
 }
+ARCHIVE_LEASE_TTL_SECONDS = 300
+
+
+class _RuntimeLeaseHeartbeat:
+    def __init__(self, ledger: LocalOperationsLedger, lease_name: str, owner_token: str, ttl_seconds: float):
+        self.ledger = ledger
+        self.lease_name = lease_name
+        self.owner_token = owner_token
+        self.ttl_seconds = ttl_seconds
+        self.interval_seconds = max(0.01, min(float(ttl_seconds) / 3, 30.0))
+        self._stop = threading.Event()
+        self._lost = threading.Event()
+        self._thread = threading.Thread(
+            target=self._run,
+            name="fab-drive-archive-lease-heartbeat",
+            daemon=True,
+        )
+
+    def __enter__(self):
+        self._thread.start()
+        return self
+
+    def __exit__(self, *_exc_info):
+        self._stop.set()
+        self._thread.join()
+
+    def _renew(self) -> bool:
+        acquired = self.ledger.heartbeat_runtime_lease(
+            self.lease_name,
+            self.owner_token,
+            ttl_seconds=self.ttl_seconds,
+        )
+        if not acquired:
+            self._lost.set()
+        return acquired
+
+    def _run(self) -> None:
+        while not self._stop.wait(self.interval_seconds):
+            try:
+                if not self._renew():
+                    return
+            except Exception:
+                continue
+
+    def assert_owned(self) -> None:
+        if self._lost.is_set():
+            raise RuntimeError("archive_lease_lost")
+        try:
+            if self._renew():
+                return
+        except Exception as exc:
+            raise RuntimeError("archive_lease_heartbeat_failed") from exc
+        raise RuntimeError("archive_lease_lost")
 
 
 class DriveWaveDeliveryService:
@@ -801,10 +855,11 @@ class DriveWaveDeliveryService:
 
         lease_name = f"drive-wave-archive:{document_id}"
         owner_token = uuid.uuid4().hex
+        lease_ttl_seconds = ARCHIVE_LEASE_TTL_SECONDS
         lease = self.ledger.acquire_runtime_lease(
             lease_name,
             owner_token,
-            ttl_seconds=300,
+            ttl_seconds=lease_ttl_seconds,
             metadata={"documentId": document_id, "actor": str(actor or "local_worker")[:200]},
         )
         if not lease.get("acquired"):
@@ -816,11 +871,22 @@ class DriveWaveDeliveryService:
                 "externalSubmission": "not_executed",
             }
         try:
-            return self._archive_document_with_lease(document_id, actor)
+            with _RuntimeLeaseHeartbeat(
+                self.ledger,
+                lease_name,
+                owner_token,
+                lease_ttl_seconds,
+            ) as heartbeat:
+                return self._archive_document_with_lease(document_id, actor, heartbeat)
         finally:
             self.ledger.release_runtime_lease(lease_name, owner_token)
 
-    def _archive_document_with_lease(self, document_id: int, actor: str) -> Dict[str, Any]:
+    def _archive_document_with_lease(
+        self,
+        document_id: int,
+        actor: str,
+        heartbeat: _RuntimeLeaseHeartbeat,
+    ) -> Dict[str, Any]:
         plan = self.plan_archive(document_id)
         if plan.get("status") == "not_applicable":
             return {"success": False, **plan, "externalSubmission": "not_executed"}
@@ -852,6 +918,7 @@ class DriveWaveDeliveryService:
                 self._ensure_review_item(document_id, reasons)
                 return {"success": False, **final_plan, "externalSubmission": "not_executed"}
             plan = final_plan
+            heartbeat.assert_owned()
             move_result = archiver.move_file(
                 provider_id,
                 str(plan["sourceFolderId"]),
@@ -867,6 +934,7 @@ class DriveWaveDeliveryService:
                 str(plan["sourceFolderId"]),
                 str(plan["archiveFolderId"]),
             )
+            heartbeat.assert_owned()
         except Exception as exc:
             reason = _safe_reason(exc)
             rollback = None

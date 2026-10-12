@@ -3,6 +3,8 @@ import io
 import json
 import os
 import tempfile
+import threading
+import time
 import unittest
 from datetime import datetime, timezone
 from unittest.mock import patch
@@ -1275,6 +1277,77 @@ class TestDriveWaveDeliveryService(unittest.TestCase):
         self.assertFalse(result["success"])
         self.assertIn("archive_operation_already_in_progress", result["reasons"])
         self.assertEqual(archiver.moves, [])
+
+    def test_archive_lease_heartbeat_blocks_competing_worker_during_slow_drive_move(self):
+        archiver = FakeDriveArchiver(self.source_hash, self.source_size)
+        service = DriveWaveDeliveryService(self.ledger, self.config, drive_archiver=archiver)
+        service.record_attachment_readback(
+            self.document_id,
+            self.source_bytes,
+            filename="invoice.pdf",
+            mime_type="application/pdf",
+            evidence=self._evidence(),
+        )
+        move_started = threading.Event()
+        allow_move_to_finish = threading.Event()
+        original_move = archiver.move_file
+
+        def slow_move(*args):
+            move_started.set()
+            if not allow_move_to_finish.wait(timeout=5):
+                raise TimeoutError("test did not release slow Drive move")
+            return original_move(*args)
+
+        archiver.move_file = slow_move
+        result = {}
+        errors = []
+
+        def archive():
+            try:
+                result.update(service.archive_document(self.document_id))
+            except Exception as exc:
+                errors.append(exc)
+
+        lease_name = f"drive-wave-archive:{self.document_id}"
+        with patch("src.operations.drive_wave_delivery.ARCHIVE_LEASE_TTL_SECONDS", 0.05):
+            worker = threading.Thread(target=archive)
+            worker.start()
+            try:
+                self.assertTrue(move_started.wait(timeout=2))
+                time.sleep(1.1)
+                competitor = self.ledger.acquire_runtime_lease(
+                    lease_name,
+                    "competing-worker",
+                    ttl_seconds=60,
+                )
+                self.assertFalse(competitor["acquired"])
+            finally:
+                allow_move_to_finish.set()
+                worker.join(timeout=5)
+
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(errors, [])
+        self.assertTrue(result.get("success"), result)
+        self.assertEqual(len(archiver.moves), 1)
+
+    def test_archive_aborts_before_drive_move_when_lease_ownership_is_lost(self):
+        archiver = FakeDriveArchiver(self.source_hash, self.source_size)
+        service = DriveWaveDeliveryService(self.ledger, self.config, drive_archiver=archiver)
+        service.record_attachment_readback(
+            self.document_id,
+            self.source_bytes,
+            filename="invoice.pdf",
+            mime_type="application/pdf",
+            evidence=self._evidence(),
+        )
+
+        with patch.object(self.ledger, "heartbeat_runtime_lease", return_value=False):
+            result = service.archive_document(self.document_id)
+
+        self.assertFalse(result["success"])
+        self.assertIn("archive_lease_lost", result["reasons"])
+        self.assertEqual(archiver.moves, [])
+        self.assertFalse(archiver.archived)
 
     def test_review_in_progress_blocks_archive(self):
         review_id = self.ledger.create_review_item({

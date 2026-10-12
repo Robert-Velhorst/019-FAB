@@ -1221,6 +1221,48 @@ class LocalOperationsLedger:
             "lease": self._public_runtime_lease(lease or {}, now_value),
         }
 
+    def heartbeat_runtime_lease(
+        self,
+        lease_name: str,
+        owner_token: str,
+        ttl_seconds: float = 21600,
+    ) -> bool:
+        """Extend an active lease only while its current owner still holds it."""
+        lease_name = str(lease_name or "").strip()
+        owner_token = str(owner_token or "").strip()
+        if not lease_name or not owner_token:
+            return False
+        try:
+            ttl_seconds = max(float(ttl_seconds), 1.0)
+        except (TypeError, ValueError):
+            ttl_seconds = 21600.0
+        now_value = datetime.now(timezone.utc)
+        now = now_value.isoformat()
+        expires_at = datetime.fromtimestamp(
+            now_value.timestamp() + ttl_seconds,
+            tz=timezone.utc,
+        ).isoformat()
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT expires_at FROM runtime_leases WHERE lease_name = ? AND owner_token = ? LIMIT 1",
+                (lease_name, owner_token),
+            ).fetchone()
+            if not row:
+                return False
+            current_expiry = self._parse_datetime(row["expires_at"])
+            if current_expiry is None or current_expiry <= now_value:
+                return False
+            cursor = connection.execute(
+                """
+                UPDATE runtime_leases
+                SET heartbeat_at = ?, expires_at = ?, updated_at = ?
+                WHERE lease_name = ? AND owner_token = ? AND expires_at = ?
+                """,
+                (now, expires_at, now, lease_name, owner_token, row["expires_at"]),
+            )
+            return int(cursor.rowcount) == 1
+
     def release_runtime_lease(self, lease_name: str, owner_token: str) -> bool:
         with self._connection() as connection:
             cursor = connection.execute(
