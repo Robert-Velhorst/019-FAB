@@ -1,7 +1,9 @@
+import io
 import os
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 
 from src.operations.local_api import create_app
 from src.operations.local_hai_connector import LocalHaiConnector
@@ -388,6 +390,90 @@ class TestLocalHaiConnector(unittest.TestCase):
             self.assertEqual(conflicting.get_json()["status"], "idempotency_conflict")
             self.assertEqual(invalid_nested_payload.status_code, 400)
             self.assertEqual(invalid_nested_payload.get_json()["status"], "invalid")
+
+    def test_hai_token_cannot_spoof_audit_actor_on_allowed_routes(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = create_app({
+                "fab_local_ledger_path": os.path.join(temp_dir, "fab.sqlite3"),
+                "fab_local_api_token": "operator-token-for-tests",
+                "fab_hai_api_token": "hai-token-for-tests",
+            })
+            client = app.test_client()
+            headers = {"Authorization": "Bearer hai-token-for-tests"}
+            operator_headers = {"Authorization": "Bearer operator-token-for-tests"}
+            with (
+                patch("src.operations.local_api.LocalWaveReceiptExecutorService") as executor,
+                patch("src.operations.local_api.DriveWaveDeliveryService") as delivery,
+            ):
+                executor.return_value.register.return_value = {"success": True}
+                executor.return_value.claim_next.return_value = {"success": True}
+                executor.return_value.release.return_value = {"success": True}
+                delivery.return_value.record_attachment_readback.return_value = {"success": True}
+
+                responses = [
+                    client.post(
+                        "/api/wave/receipt-executor/session",
+                        headers=headers,
+                        json={"actor": "operator_admin", "executorId": "executor-1"},
+                    ),
+                    client.post(
+                        "/api/wave/receipt-executor/claim",
+                        headers=headers,
+                        json={"actor": "operator_admin"},
+                    ),
+                    client.post(
+                        "/api/wave/receipt-executor/release",
+                        headers=headers,
+                        json={"actor": "operator_admin", "documentId": 1},
+                    ),
+                    client.post(
+                        "/api/drive-wave/documents/1/attachment-readback",
+                        headers=headers,
+                        data={
+                            "actor": "operator_admin",
+                            "evidence": "{}",
+                            "executorId": "executor-1",
+                            "sessionId": "session-1",
+                            "attachment": (io.BytesIO(b"receipt"), "receipt.pdf"),
+                        },
+                        content_type="multipart/form-data",
+                    ),
+                ]
+                operator_response = client.post(
+                    "/api/wave/receipt-executor/session",
+                    headers=operator_headers,
+                    json={"actor": "wave_browser_executor"},
+                )
+
+            self.assertEqual(
+                [response.status_code for response in responses],
+                [200, 200, 200, 200],
+            )
+            self.assertEqual(operator_response.status_code, 200)
+            self.assertEqual(
+                executor.return_value.register.call_args_list[0].kwargs["actor"],
+                "fab_hai_api:hai",
+            )
+            self.assertEqual(
+                executor.return_value.register.call_args_list[1].kwargs["actor"],
+                "wave_browser_executor",
+            )
+            self.assertEqual(
+                executor.return_value.claim_next.call_args.kwargs["actor"],
+                "fab_hai_api:hai",
+            )
+            self.assertEqual(
+                executor.return_value.release.call_args.kwargs["actor"],
+                "fab_hai_api:hai",
+            )
+            self.assertEqual(
+                [call.kwargs["actor"] for call in executor.return_value.release.call_args_list],
+                ["fab_hai_api:hai", "fab_hai_api:hai"],
+            )
+            self.assertEqual(
+                delivery.return_value.record_attachment_readback.call_args.kwargs["actor"],
+                "fab_hai_api:hai",
+            )
 
 
 if __name__ == "__main__":

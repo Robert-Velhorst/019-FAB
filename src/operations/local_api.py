@@ -212,6 +212,12 @@ def _hai_request_allowed(method: str, path: str) -> bool:
     )
 
 
+def _request_audit_actor(requested_actor: Any, default_actor: str) -> str:
+    if getattr(g, "fab_api_principal", None) == "hai":
+        return "fab_hai_api:hai"
+    return str(requested_actor or default_actor)[:200]
+
+
 def _hai_backup_status_projection(payload: Dict[str, Any]) -> Dict[str, Any]:
     backups = payload.get("backups") if isinstance(payload, dict) else []
     schedule = payload.get("schedule") if isinstance(payload, dict) else {}
@@ -5176,7 +5182,10 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         session_payload = {key: value for key, value in payload.items() if key != "actor"}
         result = LocalWaveReceiptExecutorService(ledger, config).register(
             session_payload,
-            actor=str(payload.get("actor") or "local_api_wave_receipt_executor"),
+            actor=_request_audit_actor(
+                payload.get("actor"),
+                "local_api_wave_receipt_executor",
+            ),
         )
         return jsonify(result), 200 if result.get("success") else 400
 
@@ -5195,7 +5204,10 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         result = LocalWaveReceiptExecutorService(ledger, config).claim_next(
             DriveWaveDeliveryService(ledger, config),
             payload,
-            actor=str(payload.get("actor") or "local_api_wave_receipt_executor"),
+            actor=_request_audit_actor(
+                payload.get("actor"),
+                "local_api_wave_receipt_executor",
+            ),
         )
         return jsonify(result), 200 if result.get("success") else 409
 
@@ -5205,7 +5217,10 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         result = LocalWaveReceiptExecutorService(ledger, config).release(
             payload.get("documentId"),
             payload,
-            actor=str(payload.get("actor") or "local_api_wave_receipt_executor"),
+            actor=_request_audit_actor(
+                payload.get("actor"),
+                "local_api_wave_receipt_executor",
+            ),
         )
         return jsonify(result), 200 if result.get("success") else 400
 
@@ -5284,7 +5299,10 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             filename=attachment.filename,
             mime_type=attachment.mimetype,
             evidence=evidence,
-            actor=str(request.form.get("actor") or "local_api_wave_browser"),
+            actor=_request_audit_actor(
+                request.form.get("actor"),
+                "local_api_wave_browser",
+            ),
         )
         executor_id = str(request.form.get("executorId") or "").strip()
         session_id = str(request.form.get("sessionId") or "").strip()
@@ -5304,7 +5322,10 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
                         else "Wave receipt binary readback was blocked by FAB verification."
                     ),
                 },
-                actor=str(request.form.get("actor") or "local_api_wave_browser"),
+                actor=_request_audit_actor(
+                    request.form.get("actor"),
+                    "local_api_wave_browser",
+                ),
             )
         return jsonify(result), 200 if result.get("success") else 400
 
