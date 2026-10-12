@@ -611,6 +611,7 @@ See [docs/OPERATOR_RUNBOOK.md](docs/OPERATOR_RUNBOOK.md) and
 ### Prerequisites
 
 - Python 3.13.
+- uv 0.11.26 only when intentionally regenerating dependency locks.
 - Node.js 22.
 - pnpm 11.20.0.
 - Tesseract OCR with `eng` and `nld` language data.
@@ -622,7 +623,7 @@ See [docs/OPERATOR_RUNBOOK.md](docs/OPERATOR_RUNBOOK.md) and
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install --disable-pip-version-check -r requirements.txt pytest
+python -m pip install --disable-pip-version-check --require-hashes -r requirements-test.lock
 python -m src.operations.local_api
 ```
 
@@ -634,6 +635,13 @@ http://127.0.0.1:5001
 
 Set a strong `operations.api_token` in `config/config.ini` or set
 `FAB_LOCAL_API_TOKEN` before exposing anything beyond loopback.
+
+Python runtime and test dependencies are installed from hash-verified lockfiles.
+When changing a `requirements*.txt` input or intentionally upgrading Python
+dependencies, regenerate the matching lockfiles with `python scripts/compile_python_locks.py`
+(`--upgrade` refreshes compatible versions), and run the full backend suite
+before publishing. CI runs the same compiler in `--verify` mode to reject stale
+lockfiles.
 
 ### Web dashboard
 

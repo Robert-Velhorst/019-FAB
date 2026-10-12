@@ -7,6 +7,17 @@ from src.runtime_fingerprint import runtime_fingerprint
 
 
 class TestRuntimeFingerprint(unittest.TestCase):
+    def test_python_lockfiles_invalidate_the_runtime(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in ("requirements.lock", "requirements-local.lock"):
+                with self.subTest(name=name):
+                    lockfile = root / name
+                    lockfile.write_text("package==1.0\n", encoding="utf-8")
+                    initial = runtime_fingerprint(root)
+                    lockfile.write_text("package==2.0\n", encoding="utf-8")
+                    self.assertNotEqual(runtime_fingerprint(root), initial)
+
     def test_web_startup_and_build_scripts_invalidate_the_runtime(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

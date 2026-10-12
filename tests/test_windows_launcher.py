@@ -188,7 +188,8 @@ class TestWindowsLauncher(unittest.TestCase):
     def test_launcher_reconciles_only_its_checksum_bound_virtual_environment(self):
         script = (ROOT / "Start-FAB.ps1").read_text(encoding="utf-8")
 
-        self.assertIn("requirements-local.txt", script)
+        self.assertIn("requirements-local.lock", script)
+        self.assertIn("--require-hashes", script)
         self.assertIn(".fab-requirements.sha256", script)
         self.assertIn("Get-FileHash -LiteralPath $requirementsPath -Algorithm SHA256", script)
         self.assertIn("[System.IO.FileAttributes]::ReparsePoint", script)

@@ -578,8 +578,12 @@ reported `.Size` changed from 358430595 to 301122962 bytes: 57307633 bytes,
 latency or a controlled build-time comparison. Python package name/version
 inventory hashes matched between images:
 `e2d2e756cccd7b2c4a9aac5dcec6ee8cf1f3d7eff7680a7ccdb4bded6b20e366`.
-Requirements and the base tag remain unpinned, so reproducible future builds
-and dependency vulnerability acceptance are still open.
+Python direct and transitive dependencies are now pinned with universal
+SHA-256-verified lockfiles for desktop, container, and CI/test environments.
+The Windows launcher, Docker build, and CI install from those locks. Python and
+Node image references are pinned to the verified multi-platform manifest digests.
+Debian apt package versions and provider acceptance remain separate
+reproducibility and release gates.
 
 The reusable `scripts/container_runtime_smoke.py` was piped into both images.
 Each ran with no network, no published ports, no host data mounts, a read-only
@@ -2175,3 +2179,23 @@ build was written to a temporary directory. `pnpm exec` could not update the
 existing dependency map due to Windows `EPERM`, so the already-installed test,
 type-check and build binaries were invoked directly; no dependency directory
 was cleaned or replaced.
+
+## Python Dependency Locks and Container Base Pinning (2026-10-13)
+
+Added universal Python 3.13 hash locks for the standalone Windows runtime,
+production API container, and CI/test environment. `Start-FAB.ps1`, the Python
+Dockerfile, release-package requirements, and CI now consume their matching
+lockfiles with pip hash checking enabled. The local launcher fingerprints the
+lock so a dependency change cannot leave a runtime falsely marked current.
+CI checks the generated lock content against the declared inputs using pinned
+uv 0.11.26. The Python and Node container images are pinned to multi-platform
+manifest digests; Debian package versions installed by `apt` remain floating.
+
+Verification on Windows: lock regeneration and `--verify` matched; the desktop
+lock passed `pip install --dry-run --ignore-installed --no-cache-dir
+--require-hashes`; `pip check` passed; runtime-fingerprint, launcher, release
+package, and container-context tests passed (**36 tests, 8 subtests**); Python
+compilation passed. This validates current Windows artifact hashes and package
+resolution only. Linux container build/install, a fresh Windows 11 install,
+provider acceptance, live deployment, and sustained resource/performance
+acceptance remain open.

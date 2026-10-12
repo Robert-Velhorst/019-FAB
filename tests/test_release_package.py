@@ -139,6 +139,8 @@ class ReleasePackageTests(unittest.TestCase):
             "Stop-FAB.ps1": "Write-Output 'stop'\n",
             "config/config_template.ini": "[operations]\nenabled=false\n",
             "requirements.txt": "Flask\n",
+            "requirements-local.lock": "Flask==3.1.0\n",
+            "requirements.lock": "Flask==3.1.0\n",
             "src/main.py": "def main(): return 0\n",
             "web/package.json": '{"name":"fab-test"}\n',
             "web/pnpm-lock.yaml": "lockfileVersion: '9.0'\n",

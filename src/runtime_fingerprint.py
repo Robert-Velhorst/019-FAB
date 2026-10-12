@@ -22,6 +22,8 @@ _SOURCE_FILES = (
     "scripts/Windows-Process.ps1",
     "requirements.txt",
     "requirements-local.txt",
+    "requirements.lock",
+    "requirements-local.lock",
     "config/config_template.ini",
     "web/.env.example",
     "web/package.json",

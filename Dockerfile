@@ -1,4 +1,4 @@
-FROM python:3.13-slim-bookworm
+FROM python:3.13-slim-bookworm@sha256:a1165e272e578941b84abc79e4ab38a0305cd12803a5c4247979ac7655f4d641
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
@@ -13,8 +13,8 @@ RUN apt-get update \
         tesseract-ocr-nld \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt ./requirements.txt
-RUN python -m pip install --no-cache-dir --disable-pip-version-check -r requirements.txt \
+COPY requirements.lock ./requirements.lock
+RUN python -m pip install --no-cache-dir --disable-pip-version-check --require-hashes -r requirements.lock \
     && rm -rf /var/lib/apt/lists/* /root/.cache/pip
 
 COPY src ./src

@@ -510,7 +510,7 @@ function Remove-FabVirtualEnvironment {
 
 Set-Location -LiteralPath $root
 
-$requirementsPath = Join-Path $root "requirements-local.txt"
+$requirementsPath = Join-Path $root "requirements-local.lock"
 $requirementsHash = (Get-FileHash -LiteralPath $requirementsPath -Algorithm SHA256).Hash.ToLowerInvariant()
 $venvRoot = Join-Path $root ".venv"
 $venvPython = Join-Path $venvRoot "Scripts\python.exe"
@@ -581,7 +581,7 @@ $pnpm = Get-Command pnpm.cmd -ErrorAction Stop
 & $python.Source -c "import importlib.util,sys; modules=('flask','waitress','PIL','pytesseract','pdf2image','langdetect','googleapiclient','sklearn','joblib'); sys.exit(0 if all(importlib.util.find_spec(module) for module in modules) else 1)" 2>$null
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Installing FAB local runtime dependencies..."
-    & $python.Source -m pip install --disable-pip-version-check --no-input -r $requirementsPath
+    & $python.Source -m pip install --disable-pip-version-check --no-input --require-hashes -r $requirementsPath
     if ($LASTEXITCODE -ne 0) {
         throw "FAB local runtime dependency installation failed with exit code $LASTEXITCODE."
     }
