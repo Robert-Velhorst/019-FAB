@@ -10,7 +10,7 @@ class TestRuntimeFingerprint(unittest.TestCase):
     def test_python_lockfiles_invalidate_the_runtime(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            for name in ("requirements.lock", "requirements-local.lock"):
+            for name in ("requirements.lock", "requirements-local.lock", "requirements-ml.lock"):
                 with self.subTest(name=name):
                     lockfile = root / name
                     lockfile.write_text("package==1.0\n", encoding="utf-8")

@@ -14,6 +14,7 @@ UV_VERSION = "0.11.26"
 LOCKS = (
     ("requirements.txt", "requirements.lock"),
     ("requirements-local.txt", "requirements-local.lock"),
+    ("requirements-ml.in", "requirements-ml.lock"),
     ("requirements-test.in", "requirements-test.lock"),
 )
 

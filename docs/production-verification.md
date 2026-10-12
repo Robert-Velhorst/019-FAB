@@ -2199,3 +2199,22 @@ compilation passed. This validates current Windows artifact hashes and package
 resolution only. Linux container build/install, a fresh Windows 11 install,
 provider acceptance, live deployment, and sustained resource/performance
 acceptance remain open.
+
+## Optional Machine-Learning Runtime (2026-10-13)
+
+Moved scikit-learn and joblib, plus their NumPy/SciPy dependency chain, into a
+separate hash-locked optional install. The default Windows runtime no longer
+resolves that stack; Compose can opt in with `FAB_ENABLE_ML=true`. Readiness now
+reports model artifacts as unavailable when the optional packages are absent,
+and model-load failures fall back to deterministic categorization/review rather
+than preventing startup. The Windows ML lock resolved its platform wheels in a
+hash-enforced dry run (about 58 MB of downloads); the default local lock also
+passed a hash-enforced Windows dry run without NumPy, SciPy, scikit-learn, or
+joblib.
+
+Verification on Windows: full backend suite **1,784 passed, 1 skipped, 112
+subtests**; both Compose files passed config-only validation; `pip check`, lock
+compiler `--verify`, Python compilation, and `git diff --check` passed. This did
+not run a Linux image build, install the default lock into a fresh environment,
+or verify provider/live deployment behavior. Hosted CI remains authoritative
+for the updated PR commit.

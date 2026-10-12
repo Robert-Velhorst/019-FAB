@@ -3,6 +3,8 @@ FROM python:3.13-slim-bookworm@sha256:a1165e272e578941b84abc79e4ab38a0305cd12803
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
+ARG FAB_ENABLE_ML=false
+
 WORKDIR /app
 
 RUN apt-get update \
@@ -13,8 +15,9 @@ RUN apt-get update \
         tesseract-ocr-nld \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.lock ./requirements.lock
+COPY requirements.lock requirements-ml.lock ./
 RUN python -m pip install --no-cache-dir --disable-pip-version-check --require-hashes -r requirements.lock \
+    && if [ "$FAB_ENABLE_ML" = "true" ]; then python -m pip install --no-cache-dir --disable-pip-version-check --require-hashes -r requirements-ml.lock; fi \
     && rm -rf /var/lib/apt/lists/* /root/.cache/pip
 
 COPY src ./src

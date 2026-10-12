@@ -84,7 +84,7 @@ def test_real_docker_context_excludes_runtime_data_and_keeps_build_sources(tmp_p
     kept = (["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "vite.config.ts", "tsconfig.json",
              "client/src/App.tsx", "client/public/fab-mark.svg", "server/fabStandalone.ts", "shared/types.ts",
              "drizzle/schema.ts", "scripts/production-env.mjs", "patches/wouter.patch"] if context == "web" else
-            ["requirements.txt", "requirements.lock", "src/main.py", "src/operations/local_api.py",
+            ["requirements.txt", "requirements.lock", "requirements-ml.lock", "src/main.py", "src/operations/local_api.py",
              "config/config_template.ini"])
     excluded = [".env", ".env.production", "config/config.ini", "credentials/provider.json",
                 "tokens/google.json", "data/ledger.sqlite3", "output/receipt.txt", "backups/private.bin",

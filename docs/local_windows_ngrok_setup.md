@@ -19,7 +19,7 @@ FAB is local-first. The supported Windows runtime is the authenticated API, auto
 .\.venv\Scripts\python.exe -m src.run_fab_doctor
 ```
 
-The first start installs the local Python requirements into `.venv` and the dashboard packages into `web/node_modules` when they are absent. FAB can bootstrap Python 3.13 through the Windows Python launcher, `uv`, or a matching system `python`. It binds that private environment to the SHA-256 checksum of `requirements-local.txt`; when the dependency contract changes, the launcher stops FAB and rebuilds only this checkout's verified, non-linked `.venv`. This removes packages that are no longer part of FAB without modifying the system Python installation. The launcher prints the selected URLs. Defaults are:
+The first start installs the hash-locked local Python requirements into `.venv` and the dashboard packages into `web/node_modules` when they are absent. FAB can bootstrap Python 3.13 through the Windows Python launcher, `uv`, or a matching system `python`. It binds that private environment to the SHA-256 checksum of `requirements-local.lock`; when the dependency contract changes, the launcher stops FAB and rebuilds only this checkout's verified, non-linked `.venv`. This removes packages that are no longer part of FAB without modifying the system Python installation. Optional ML dependencies are separate; see [Dependencies](dependencies.md). The launcher prints the selected URLs. Defaults are:
 
 - Operator dashboard: `http://127.0.0.1:3000/admin/operations`
 - Local API: `http://127.0.0.1:5001`

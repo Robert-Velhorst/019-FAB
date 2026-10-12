@@ -637,11 +637,23 @@ Set a strong `operations.api_token` in `config/config.ini` or set
 `FAB_LOCAL_API_TOKEN` before exposing anything beyond loopback.
 
 Python runtime and test dependencies are installed from hash-verified lockfiles.
-When changing a `requirements*.txt` input or intentionally upgrading Python
-dependencies, regenerate the matching lockfiles with `python scripts/compile_python_locks.py`
-(`--upgrade` refreshes compatible versions), and run the full backend suite
-before publishing. CI runs the same compiler in `--verify` mode to reject stale
-lockfiles.
+The optional ML categorizer is not installed by default. To enable it on Windows,
+stop FAB, install the separate hash-locked dependencies, verify the environment,
+and restart:
+
+```powershell
+.\Stop-FAB.cmd
+.\.venv\Scripts\python.exe -m pip install --require-hashes -r requirements-ml.lock
+.\.venv\Scripts\python.exe -m pip check
+.\Start-FAB.cmd
+```
+
+For Docker Compose, set `$env:FAB_ENABLE_ML = "true"` before building. When
+changing a `requirements*.txt` or `requirements-*.in` input or intentionally
+upgrading Python dependencies, regenerate the matching lockfiles with
+`python scripts/compile_python_locks.py` (`--upgrade` refreshes compatible
+versions), and run the full backend suite before publishing. CI runs the same
+compiler in `--verify` mode to reject stale lockfiles.
 
 ### Web dashboard
 

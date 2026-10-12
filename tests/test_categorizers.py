@@ -48,7 +48,8 @@ class TestCategorizers(unittest.TestCase):
 
     @patch("src.categorizers.ml_categorizer.joblib")
     @patch("src.categorizers.ml_categorizer.os.path.exists")
-    def test_ml_categorizer(self, mock_exists, mock_joblib):
+    @patch("src.categorizers.ml_categorizer._ml_dependencies_available", return_value=True)
+    def test_ml_categorizer(self, mock_dependencies, mock_exists, mock_joblib):
         mock_exists.return_value = True
         
         mock_model = MagicMock()
@@ -74,7 +75,8 @@ class TestCategorizers(unittest.TestCase):
 
     @patch("src.categorizers.ml_categorizer.joblib")
     @patch("src.categorizers.ml_categorizer.os.path.exists")
-    def test_hybrid_categorizer(self, mock_exists, mock_joblib):
+    @patch("src.categorizers.ml_categorizer._ml_dependencies_available", return_value=True)
+    def test_hybrid_categorizer(self, mock_dependencies, mock_exists, mock_joblib):
         # Mock ML categorizer to return low confidence initially
         mock_exists.return_value = True
         mock_model = MagicMock()
@@ -105,6 +107,16 @@ class TestCategorizers(unittest.TestCase):
         mock_model.predict_proba.return_value = [[0.3, 0.2]] # 0.3 confidence (below threshold)
         result = categorizer.categorize(processed_data)
         self.assertEqual(result["category"], "Manual Review")
+
+    @patch("src.categorizers.ml_categorizer._ml_dependencies_available", return_value=False)
+    @patch("src.categorizers.ml_categorizer.os.path.exists", return_value=True)
+    def test_ml_artifacts_fall_back_when_optional_dependencies_are_missing(self, mock_exists, mock_dependencies):
+        categorizer = MLCategorizer(self.config)
+
+        result = categorizer.categorize({"ocr_text": "receipt text"})
+
+        self.assertEqual(categorizer.unavailable_reason, "dependencies_missing")
+        self.assertEqual(result["source"], "ml_unavailable")
 
 if __name__ == "__main__":
     unittest.main()

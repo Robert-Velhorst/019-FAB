@@ -377,10 +377,11 @@ class TestLocalReadinessService(unittest.TestCase):
             for path in (model_path, vectorizer_path):
                 with open(path, "wb") as handle:
                     handle.write(b"approved-test-artifact")
-            ready_summary = LocalReadinessService({
-                "ml_model_path": model_path,
-                "ml_vectorizer_path": vectorizer_path,
-            }).summarize()
+            with patch("src.operations.local_readiness._ml_dependencies_available", return_value=True):
+                ready_summary = LocalReadinessService({
+                    "ml_model_path": model_path,
+                    "ml_vectorizer_path": vectorizer_path,
+                }).summarize()
             ready = next(
                 item for item in ready_summary["dependencies"]
                 if item["id"] == "category_model"
@@ -388,6 +389,23 @@ class TestLocalReadinessService(unittest.TestCase):
 
             self.assertEqual(ready["status"], "ok")
             self.assertTrue(ready["configured"])
+
+            with patch("src.operations.local_readiness._ml_dependencies_available", return_value=False):
+                unavailable_summary = LocalReadinessService({
+                    "ml_model_path": model_path,
+                    "ml_vectorizer_path": vectorizer_path,
+                }).summarize()
+            unavailable = next(
+                item for item in unavailable_summary["dependencies"]
+                if item["id"] == "category_model"
+            )
+            self.assertEqual(unavailable["status"], "attention")
+            self.assertFalse(unavailable["configured"])
+            self.assertIn("requirements-ml.lock", unavailable["details"])
+            self.assertFalse(any(
+                issue.get("entity") == "category_model"
+                for issue in unavailable_summary["issues"]
+            ))
 
     def test_disabled_optional_sources_do_not_create_readiness_issues(self):
         with tempfile.TemporaryDirectory() as temp_dir:

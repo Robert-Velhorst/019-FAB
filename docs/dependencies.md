@@ -16,7 +16,7 @@ The following Python libraries are used in the project. They are listed in `requ
 - A separately controlled browser session is required only for supervised provider workflows; the always-on FAB runtime does not install or invoke Playwright.
 - `pandas`: For data manipulation, especially for CSV generation and historical data analysis.
 - `numpy`: For numerical operations, often used with pandas and image processing.
-- `scikit-learn`: For machine learning models in categorization and learning modules.
+- `scikit-learn` and `joblib`: Optional dependencies for the approved-feedback category model. They are excluded from the default local and container runtime; install the hash-locked `requirements-ml.lock` only when enabling ML categorization.
 - `tensorflow` or `pytorch`: (Optional, depending on specific ML model implementation) For deep learning models.
 - `cryptography`: For secure credential encryption.
 - `python-dotenv`: For loading environment variables.
@@ -47,11 +47,17 @@ The following Python libraries are used in the project. They are listed in `requ
 
 ## Installation
 
-All Python dependencies can be installed using pip:
+The launcher and container builds install the core dependencies from hash-locked
+files. For the optional ML categorizer, stop FAB and install its separate lock:
 
-```bash
-pip install -r requirements.txt
+```powershell
+.\.venv\Scripts\python.exe -m pip install --require-hashes -r requirements-ml.lock
+.\.venv\Scripts\python.exe -m pip check
 ```
+
+For Docker Compose, build with `FAB_ENABLE_ML=true`. Training and enabling a
+model remain operator-controlled; deterministic categorization and review
+continue to work without the optional packages.
 
 External tools like Tesseract OCR Engine might require separate installation steps depending on the operating system and deployment environment.
 

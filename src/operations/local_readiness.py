@@ -217,7 +217,8 @@ class LocalReadinessService:
         )
         ml_model_path = os.path.abspath(os.path.expanduser(os.path.expandvars(ml_model_value)))
         ml_vectorizer_path = os.path.abspath(os.path.expanduser(os.path.expandvars(ml_vectorizer_value)))
-        ml_model_ready = os.path.isfile(ml_model_path) and os.path.isfile(ml_vectorizer_path)
+        ml_artifacts_present = os.path.isfile(ml_model_path) and os.path.isfile(ml_vectorizer_path)
+        ml_model_ready = ml_artifacts_present and _ml_dependencies_available()
         return [
             {
                 "id": "python",
@@ -290,6 +291,8 @@ class LocalReadinessService:
                 "details": (
                     "Local model and vectorizer files are available; training provenance remains review-controlled."
                     if ml_model_ready
+                    else "Model artifacts exist, but optional ML packages are missing; install requirements-ml.lock to enable them."
+                    if ml_artifacts_present
                     else "No approved model is trained yet; deterministic and approved vendor rules remain available."
                 ),
             },
@@ -1127,6 +1130,13 @@ def _truthy(value: Any) -> bool:
     if isinstance(value, bool):
         return value
     return str(value or "").strip().lower() in {"1", "true", "yes", "on", "enabled"}
+
+
+def _ml_dependencies_available() -> bool:
+    try:
+        return all(importlib.util.find_spec(name) is not None for name in ("sklearn", "joblib"))
+    except (ImportError, ModuleNotFoundError, ValueError):
+        return False
 
 
 def _config_value(config: Dict[str, Any], *keys: str, default: Any = None) -> Any:

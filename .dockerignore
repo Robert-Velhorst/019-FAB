@@ -3,6 +3,7 @@
 !Dockerfile
 !requirements.txt
 !requirements.lock
+!requirements-ml.lock
 !src/
 !src/**
 !config/

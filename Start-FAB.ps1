@@ -578,7 +578,7 @@ if ($LASTEXITCODE -ne 0) {
 $node = Get-Command node -ErrorAction Stop
 $pnpm = Get-Command pnpm.cmd -ErrorAction Stop
 
-& $python.Source -c "import importlib.util,sys; modules=('flask','waitress','PIL','pytesseract','pdf2image','langdetect','googleapiclient','sklearn','joblib'); sys.exit(0 if all(importlib.util.find_spec(module) for module in modules) else 1)" 2>$null
+& $python.Source -c "import importlib.util,sys; modules=('flask','waitress','PIL','pytesseract','pdf2image','langdetect','googleapiclient'); sys.exit(0 if all(importlib.util.find_spec(module) for module in modules) else 1)" 2>$null
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Installing FAB local runtime dependencies..."
     & $python.Source -m pip install --disable-pip-version-check --no-input --require-hashes -r $requirementsPath

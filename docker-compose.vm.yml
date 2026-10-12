@@ -19,6 +19,8 @@ x-python: &python
   build:
     context: .
     dockerfile: Dockerfile
+    args:
+      FAB_ENABLE_ML: ${FAB_ENABLE_ML:-false}
   cpus: 2.0
   mem_limit: 2g
   environment: &python-env

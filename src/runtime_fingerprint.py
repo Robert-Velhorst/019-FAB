@@ -24,6 +24,7 @@ _SOURCE_FILES = (
     "requirements-local.txt",
     "requirements.lock",
     "requirements-local.lock",
+    "requirements-ml.lock",
     "config/config_template.ini",
     "web/.env.example",
     "web/package.json",
