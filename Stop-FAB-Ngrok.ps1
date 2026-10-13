@@ -80,24 +80,25 @@ try {
     $processId = [int]$runtime.processId
 }
 catch {
-    $processId = 0
+    throw "The managed FAB tunnel metadata has no valid process ID. Refusing to remove ownership state or agent files."
 }
-if ($processId -gt 0) {
-    $process = Get-CimInstance Win32_Process -Filter "ProcessId = $processId" -ErrorAction SilentlyContinue
-    if ($process) {
-        $normalizedCommand = ([string]$process.CommandLine).Replace("\", "/").ToLowerInvariant()
-        $overlayMarker = ([System.IO.Path]::GetFullPath([string]$runtime.overlayPath)).Replace("\", "/").ToLowerInvariant()
-        $owned = (
-            ([string]$process.Name).ToLowerInvariant() -eq "ngrok.exe" -and
-            $normalizedCommand.Contains("fab-managed") -and
-            $normalizedCommand.Contains($overlayMarker)
-        )
-        if (-not $owned) {
-            throw "PID $processId no longer matches this checkout's managed FAB tunnel. Refusing to stop it."
-        }
-        Stop-Process -Id $processId -Force -ErrorAction Stop
-        Wait-Process -Id $processId -Timeout 10 -ErrorAction SilentlyContinue
+if ($processId -le 0) {
+    throw "The managed FAB tunnel metadata has no valid process ID. Refusing to remove ownership state or agent files."
+}
+$process = Get-CimInstance Win32_Process -Filter "ProcessId = $processId" -ErrorAction SilentlyContinue
+if ($process) {
+    $normalizedCommand = ([string]$process.CommandLine).Replace("\", "/").ToLowerInvariant()
+    $overlayMarker = ([System.IO.Path]::GetFullPath([string]$runtime.overlayPath)).Replace("\", "/").ToLowerInvariant()
+    $owned = (
+        ([string]$process.Name).ToLowerInvariant() -eq "ngrok.exe" -and
+        $normalizedCommand.Contains("fab-managed") -and
+        $normalizedCommand.Contains($overlayMarker)
+    )
+    if (-not $owned) {
+        throw "PID $processId no longer matches this checkout's managed FAB tunnel. Refusing to stop it."
     }
+    Stop-Process -Id $processId -Force -ErrorAction Stop
+    Wait-Process -Id $processId -Timeout 10 -ErrorAction SilentlyContinue
 }
 
 foreach ($path in @($runtime.overlayPath, $runtime.stdoutPath, $runtime.stderrPath)) {
