@@ -3,12 +3,20 @@ name: Publish FAB container packages
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      confirm_private_packages:
+        description: "Confirm both GHCR packages were pre-created with private, granular access"
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
   publish:
+    if: startsWith(github.ref, 'refs/tags/v')
     name: Publish ${{ matrix.component }} image
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -28,6 +36,28 @@ jobs:
             context: ./web
             dockerfile: Dockerfile
     steps:
+      - name: Require explicit confirmation for manual dispatch
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          CONFIRM_PRIVATE_PACKAGES: ${{ inputs.confirm_private_packages }}
+        run: |
+          if [ "$CONFIRM_PRIVATE_PACKAGES" != "true" ]; then
+            echo "::error::Confirm that both GHCR packages are private before publishing."
+            exit 1
+          fi
+
+      - name: Verify the existing GHCR package is private
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PACKAGE_NAME: ${{ matrix.image }}
+        run: |
+          set -euo pipefail
+          visibility="$(gh api "/users/${GITHUB_REPOSITORY_OWNER}/packages/container/${PACKAGE_NAME}" --jq '.visibility')"
+          if [ "$visibility" != "private" ]; then
+            echo "::error::GHCR package ${PACKAGE_NAME} must already exist and be private. No image was published."
+            exit 1
+          fi
+
       - name: Check out the published release tag
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
