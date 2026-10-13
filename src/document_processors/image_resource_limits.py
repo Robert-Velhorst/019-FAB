@@ -10,7 +10,7 @@ except ImportError:
 
 MAX_RASTER_IMAGE_PIXELS = 20_000_000
 MAX_RASTER_IMAGE_EDGE = 10_000
-MAX_VISION_IMAGE_BYTES = 20 * 1024 * 1024
+MAX_VISION_IMAGE_BYTES = 20_000_000
 
 
 def validate_raster_dimensions(image_or_size: Any) -> Tuple[int, int]:
