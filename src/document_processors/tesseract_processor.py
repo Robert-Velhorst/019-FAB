@@ -22,6 +22,7 @@ except ImportError:
     pdfinfo_from_path = None
 
 from src.document_processors.poppler_renderer import render_pdf_page as convert_from_path
+from src.document_processors.image_resource_limits import validate_raster_dimensions
 
 from src.document_processors.base import BaseProcessor
 from src.utils.tesseract_runtime import (
@@ -136,6 +137,7 @@ class TesseractProcessor(BaseProcessor):
         if not str(document_path).lower().endswith(".pdf"):
             page = Image.open(document_path)
             try:
+                validate_raster_dimensions(page)
                 yield page
             finally:
                 page.close()

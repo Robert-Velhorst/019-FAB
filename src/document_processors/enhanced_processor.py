@@ -9,6 +9,7 @@ except ImportError:
     cv2 = None
 
 from src.document_processors.base import BaseProcessor
+from src.document_processors.image_resource_limits import validate_raster_path
 
 class EnhancedProcessor(BaseProcessor):
     """Applies advanced image preprocessing techniques to documents."""
@@ -51,6 +52,7 @@ class EnhancedProcessor(BaseProcessor):
 
         processed_path = None
         try:
+            validate_raster_path(str(source_path))
             img = cv2.imread(str(source_path))
             if img is None:
                 return _unchanged(document_path, "image_unreadable")

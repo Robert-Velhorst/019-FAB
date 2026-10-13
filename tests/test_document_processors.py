@@ -83,6 +83,7 @@ class TestDocumentProcessors(unittest.TestCase):
     def test_tesseract_processor(self, mock_image_open, mock_image_to_string):
         mock_image_to_string.return_value = "Tesseract OCR Text"
         mock_image_open.return_value = MagicMock()
+        mock_image_open.return_value.size = (100, 50)
 
         processor = TesseractProcessor(self.config)
         result = processor.process_document(self.dummy_image_path)
@@ -195,10 +196,38 @@ class TestDocumentProcessors(unittest.TestCase):
             patch.object(handwritten_module, "np", fake_np),
             patch.object(handwritten_module, "Image", fake_image),
             patch.object(handwritten_module, "pytesseract", fake_pytesseract),
+            patch.object(handwritten_module, "validate_raster_path", return_value=(100, 100)),
         ):
             processor = HandwrittenRecognitionProcessor(self.config)
             result = processor.process_document(self.dummy_image_path)
         self.assertIn("Handwritten Text", result["ocr_text"])
+
+    @unittest.skipIf(
+        any(value is None for value in (handwritten_module.cv2, handwritten_module.np, handwritten_module.Image, handwritten_module.pytesseract)),
+        "Handwriting OCR dependencies are optional in this test runtime",
+    )
+    def test_handwritten_processor_rejects_oversized_image_before_decode(self):
+        fake_cv2 = MagicMock()
+        with (
+            patch.object(handwritten_module, "cv2", fake_cv2),
+            patch.object(handwritten_module, "validate_raster_path", side_effect=ValueError("Image pixel limit")),
+        ):
+            result = HandwrittenRecognitionProcessor(self.config).process_document("oversized.png")
+
+        fake_cv2.imread.assert_not_called()
+        self.assertIn("pixel limit", result["error"])
+
+    @unittest.skipIf(enhanced_module.cv2 is None, "OpenCV is optional in this test runtime")
+    def test_enhanced_processor_rejects_oversized_image_before_decode(self):
+        processor = EnhancedProcessor({})
+        with (
+            patch.object(enhanced_module, "validate_raster_path", side_effect=ValueError("Image pixel limit")),
+            patch.object(enhanced_module.cv2, "imread") as decode,
+        ):
+            result = processor.process_document("oversized.png")
+
+        decode.assert_not_called()
+        self.assertEqual(result["preprocessing_reason"], "preprocessing_failed")
 
     def test_template_matching_processor(self):
         with open(self.config["vendor_templates_file"], "w", encoding="utf-8") as handle:

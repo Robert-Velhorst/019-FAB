@@ -24,7 +24,7 @@ class TestTesseractResourceBounds(unittest.TestCase):
         self.processor = module.TesseractProcessor({})
 
     def page(self, number):
-        page = SimpleNamespace(number=number, close=Mock(side_effect=lambda: self.events.append(("close", number))))
+        page = SimpleNamespace(number=number, size=(100, 100), close=Mock(side_effect=lambda: self.events.append(("close", number))))
         self.pages.append(page)
         return page
 
@@ -128,6 +128,16 @@ class TestTesseractResourceBounds(unittest.TestCase):
         self.assertEqual(result["ocr_strategy"], "standard")
         self.assertTrue(0 < self.ocr.call_args.kwargs["timeout"] <= 30)
         page.close.assert_called_once()
+        self.render.assert_not_called()
+
+    def test_oversized_raster_is_rejected_before_ocr(self):
+        page = SimpleNamespace(size=(5000, 5000), close=Mock())
+        with patch.object(module.Image, "open", return_value=page):
+            result = self.processor.process_document("oversized.png")
+
+        self.assertIn("pixel count exceeds", result.get("error", ""))
+        page.close.assert_called_once()
+        self.ocr.assert_not_called()
         self.render.assert_not_called()
 
     def test_document_deadline_stops_before_next_page_and_discards_partial_text(self):

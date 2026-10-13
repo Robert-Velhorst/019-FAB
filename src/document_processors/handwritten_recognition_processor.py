@@ -18,6 +18,7 @@ except ImportError:
     pytesseract = None
 
 from src.document_processors.base import BaseProcessor
+from src.document_processors.image_resource_limits import validate_raster_path
 from src.document_processors.tesseract_processor import TesseractProcessor
 from src.utils.tesseract_runtime import (
     configured_tesseract_languages,
@@ -49,6 +50,7 @@ class HandwrittenRecognitionProcessor(BaseProcessor):
             }
 
         try:
+            validate_raster_path(document_path)
             image = cv2.imread(document_path)
             if image is None:
                 raise ValueError(f"Could not load image from {document_path}")
