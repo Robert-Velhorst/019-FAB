@@ -14,7 +14,12 @@ This project is maintained on a best-effort basis. No guaranteed response or rem
 
 ## Supported Versions
 
-The initial FAB release is a development preview. The latest main branch and newest published release are the review targets; no service-level response commitment is offered. Users should update to the newest release and rotate any credential that may have been exposed.
+| Version | Security fixes |
+| --- | --- |
+| `v0.1.0-preview.1` | Best-effort review; update to the newest preview. |
+| Latest `main` | Best-effort review; not a stable release. |
+
+FAB is an early development preview and no service-level response or remediation time is offered. Users should update to the newest release and rotate any credential that may have been exposed.
 
 ## Scope and Limitations
 
