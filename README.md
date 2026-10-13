@@ -134,7 +134,19 @@ The workflow publishes separate GitHub Container Registry images for the Python 
     ghcr.io/robert-velhorst/fab-api:<release-tag>
     ghcr.io/robert-velhorst/fab-dashboard:<release-tag>
 
-Both images target `linux/amd64`. Before the first workflow publication, bootstrap each package from a clean release-tag checkout using a GitHub personal access token (classic) scoped only to `write:packages`. The initial CLI push creates an unlinked package with private visibility. In each package's settings, retain `private`, use granular permissions instead of inheriting access from the public repository, and grant the `019-FAB` repository Actions access with write permission. The workflow checks that the package already exists and is private before it pushes; it fails closed otherwise. Then run the workflow manually on an existing `v*` release tag with the private-package confirmation, or let a future version tag trigger it. Use only `read:packages` tokens to pull. Do not make these packages public.
+Both images target `linux/amd64`. Because this repository is public, the first packages must be created privately before the workflow can publish. From a clean checkout of the release tag, create a classic PAT scoped only to `write:packages`, authenticate at Docker's hidden password prompt, then build and push both images:
+
+    git clone https://github.com/Robert-Velhorst/019-FAB.git FAB-ghcr-bootstrap
+    Set-Location FAB-ghcr-bootstrap
+    git checkout v0.1.0-preview.1
+    docker login ghcr.io -u Robert-Velhorst
+    $tag = "v0.1.0-preview.1"
+    docker build --tag "ghcr.io/robert-velhorst/fab-api:$tag" .
+    docker build --tag "ghcr.io/robert-velhorst/fab-dashboard:$tag" ./web
+    docker push "ghcr.io/robert-velhorst/fab-api:$tag"
+    docker push "ghcr.io/robert-velhorst/fab-dashboard:$tag"
+
+Do not add repository-source labels during this bootstrap. The CLI-created packages start unlinked and private. In each package's GitHub settings, verify visibility is `private`, use granular permissions rather than inheriting access from this public repository, and grant the `019-FAB` repository Actions access with write permission. Never make either package public. The release workflow checks that each package exists and is private before pushing; it fails closed otherwise. After merging the workflow, manually run it on the existing `v0.1.0-preview.1` tag with the private-package confirmation. Future `v*` tags publish automatically. Use only `read:packages` tokens to pull.
 
 The workflow attaches SBOM and provenance attestations, but images are not cryptographically signed. Verify the source and tag; use checksum-manifested ZIPs when you need source bundles. The mutable `edge` tag follows the newest published release tag, including a release candidate.
 
