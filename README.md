@@ -44,12 +44,17 @@ The standard Compose profile runs the Python API, recurring worker, and producti
     $env:FAB_WEB_JWT_SECRET = "<long random secret>"
     docker compose up --build
 
-The command above builds from source. To use the published x86-64 release
-images instead, set `FAB_IMAGE_TAG` to a published release tag (or `edge` for
-the most recently published release candidate), then run `docker compose pull`
-and `docker compose up -d --no-build`. The VM profile supports the same image
-tags. Review the release notes and verify the image tag before deploying; the
-images do not include credentials or financial data.
+The command above builds from source. To use the private x86-64 release images instead, first authenticate to GHCR using a GitHub personal access token (classic) with only the `read:packages` scope. Supply the token through Docker's password prompt, not a command-line argument:
+
+    docker login ghcr.io -u Robert-Velhorst
+
+Then set `FAB_IMAGE_TAG` to a published release tag (or `edge` for the most recently published release candidate), and run:
+
+    $env:FAB_IMAGE_TAG = "v0.1.0-preview.1"
+    docker compose pull
+    docker compose up -d --no-build
+
+The VM profile supports the same image tags. The first GHCR publication defaults to private; package visibility and repository access must be checked in GitHub before use and must not be changed to public. The images do not include credentials or financial data. Review the release notes and verify the image tag before deploying.
 
 Published ports bind to loopback by default. State is in persistent Compose volumes and configured mounts. Remote deployment additionally needs reviewed TLS/reverse-proxy configuration, managed secrets, access controls, monitoring, backup/restore drills, and provider acceptance. See the VM deployment and deployment guidance. A successful Compose config check does not certify a host deployment.
 
@@ -124,17 +129,12 @@ From a clean, committed checkout, build both source distributions:
 
 The tracked-source-only builder fails closed on dirty tracked files, forbidden runtime/secret paths, unsafe links, missing required files, or size limits. Each ZIP contains RELEASE-MANIFEST.json with per-file SHA-256 values and a .zip.sha256 archive checksum. The builder verifies each archive and member before success; compare the sidecar after downloading. These are source bundles, not signed installers or prebuilt images.
 
-Published releases also provide separate GitHub Container Registry images for
-the Python API/worker and the React dashboard:
+The release workflow can publish separate private GitHub Container Registry images for the Python API/worker and the React dashboard:
 
     ghcr.io/robert-velhorst/fab-api:<release-tag>
     ghcr.io/robert-velhorst/fab-dashboard:<release-tag>
 
-Images are built from a pushed `v*` release tag and currently target
-`linux/amd64`. The build publishes SBOM and provenance attestations, but the
-images are not cryptographically signed. Verify the source and tag, and use
-the checksum-manifested ZIPs when you need a source bundle. The `edge` tag
-follows the newest pushed release tag, including a release candidate.
+Images are built from a pushed `v*` release tag and currently target `linux/amd64`. The first publication defaults to private, and the workflow uses `GITHUB_TOKEN` with package-write permission to link the packages to this repository. Use a personal access token (classic) with only `read:packages` to pull them; do not make the packages public. The build publishes SBOM and provenance attestations, but the images are not cryptographically signed. Verify the source and tag, and use the checksum-manifested ZIPs when you need a source bundle. The `edge` tag follows the newest pushed release tag, including a release candidate.
 
 ## Security and Privacy
 
