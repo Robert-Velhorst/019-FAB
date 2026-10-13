@@ -2236,3 +2236,21 @@ The local operations API, backup, and backup-inspection-boundary suites passed
 mode and nearby safety behavior; it is not a measured whole-dashboard speedup,
 does not bound central-directory parsing or deep verification time, and does not
 replace Windows host, live-provider, or recovery acceptance.
+
+## Backup ZIP Directory Preflight, 2026-10-13
+
+Backup inspection previously constructed `zipfile.ZipFile` before enforcing the
+10,000-entry limit. Python's ZIP parser materializes central-directory metadata
+during construction, so a crafted archive could consume memory before FAB's
+member checks. Inspection and restore now preflight the ZIP end record through
+the already-open file handle, including ZIP64 records, and reject multi-volume
+archives, more than 10,000 entries, or a central directory larger than 8 MiB
+before calling `ZipFile`. Restore repeats the preflight when it reopens the
+archive, preserving the existing revalidation boundary.
+
+Regression tests prove oversized entry-count and directory-size metadata is
+rejected before the ZIP parser is called, and that standard and ZIP64 packages
+remain inspectable. The backup, restore, API, autonomy and component suites
+passed **193 tests with one platform skip**. This bounds central-directory
+metadata allocation; it does not add an overall time or process-memory limit to
+deep checksum reads or SQLite integrity checks.

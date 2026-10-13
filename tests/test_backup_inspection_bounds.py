@@ -1,5 +1,6 @@
 import hashlib
 import json
+import struct
 import zipfile
 from unittest.mock import patch
 
@@ -47,6 +48,44 @@ def record_opens(opened):
     return patch.object(zipfile.ZipFile, "open", tracked)
 
 
+def force_zip64_end_record(path):
+    with open(path, "rb") as handle:
+        contents = bytearray(handle.read())
+    end_offset = contents.rfind(b"PK\x05\x06")
+    fields = struct.unpack_from("<4s4H2LH", contents, end_offset)
+    _, _, _, entries_on_disk, entries_total, directory_size, directory_offset, _ = fields
+    zip64_offset = end_offset
+    zip64_end = struct.pack(
+        "<4sQ2H2I4Q",
+        b"PK\x06\x06",
+        44,
+        45,
+        45,
+        0,
+        0,
+        entries_on_disk,
+        entries_total,
+        directory_size,
+        directory_offset,
+    )
+    locator = struct.pack("<4sIQI", b"PK\x06\x07", 0, zip64_offset, 1)
+    contents[end_offset:end_offset] = zip64_end + locator
+    end_offset += len(zip64_end) + len(locator)
+    struct.pack_into(
+        "<4H2L",
+        contents,
+        end_offset + 4,
+        0,
+        0,
+        0xFFFF,
+        0xFFFF,
+        0xFFFFFFFF,
+        0xFFFFFFFF,
+    )
+    with open(path, "wb") as handle:
+        handle.write(contents)
+
+
 def test_manifest_only_never_decompresses_ledger_or_receipts(package):
     service, path, _ = package
     opened = []
@@ -85,6 +124,43 @@ def test_archive_limits_are_checked_before_member_decompression(package, method,
         with pytest.raises(ValueError, match="size|oversized"):
             getattr(service, method)(path)
     assert opened == []
+
+
+@pytest.mark.parametrize("method", ["inspect_backup_manifest", "inspect_backup"])
+@pytest.mark.parametrize(
+    "setting,limit",
+    [
+        ("MAX_BACKUP_ARCHIVE_FILES", 2),
+        ("MAX_BACKUP_CENTRAL_DIRECTORY_BYTES", 1),
+    ],
+)
+def test_directory_budgets_are_enforced_before_zipfile_parsing(
+    package,
+    method,
+    setting,
+    limit,
+):
+    service, path, _ = package
+    with (
+        patch.object(backups, setting, limit),
+        patch.object(backups.zipfile, "ZipFile") as parser,
+    ):
+        with pytest.raises(ValueError, match="too many files|directory exceeds"):
+            getattr(service, method)(path)
+    parser.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "method,expected_status",
+    [("inspect_backup_manifest", "manifest_valid"), ("inspect_backup", "valid")],
+)
+def test_zip64_backup_end_record_passes_bounded_preflight(package, method, expected_status):
+    service, path, _ = package
+    force_zip64_end_record(path)
+
+    result = getattr(service, method)(path)
+
+    assert result["status"] == expected_status
 
 
 @pytest.mark.parametrize("method", ["inspect_backup_manifest", "inspect_backup"])

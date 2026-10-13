@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 import copy
 import hashlib
 import json
@@ -6,6 +7,7 @@ import os
 import re
 import shutil
 import sqlite3
+import struct
 import tempfile
 import uuid
 import zipfile
@@ -29,6 +31,7 @@ SOURCE_EVIDENCE_PREFIX = "source_evidence/"
 RESTORED_SOURCE_DIR_PREFIX = "fab-source-evidence-"
 SCHEDULED_BACKUP_LEASE_NAME = "local_scheduled_backup"
 MAX_BACKUP_ARCHIVE_FILES = 10_000
+MAX_BACKUP_CENTRAL_DIRECTORY_BYTES = 8 * 1024 * 1024
 MAX_BACKUP_EVIDENCE_FILE_BYTES = 250 * 1024 * 1024
 MAX_BACKUP_UNCOMPRESSED_BYTES = 20 * 1024 * 1024 * 1024
 MAX_BACKUP_MANIFEST_BYTES = 8 * 1024 * 1024
@@ -202,7 +205,7 @@ class LocalBackupService:
         cached = _MANIFEST_INSPECTION_CACHE.get(resolved_path)
         if cached and cached.get("signature") == signature:
             return copy.deepcopy(cached["result"])
-        with zipfile.ZipFile(resolved_path, "r") as archive:
+        with _open_preflighted_archive(resolved_path) as archive:
             names = archive.namelist()
             self._validate_member_names(names)
             manifest = self._read_backup_manifest(archive)
@@ -251,7 +254,7 @@ class LocalBackupService:
         if cached and cached.get("signature") == signature:
             return copy.deepcopy(cached["result"])
 
-        with zipfile.ZipFile(resolved_path, "r") as archive:
+        with _open_preflighted_archive(resolved_path) as archive:
             names = archive.namelist()
             self._validate_member_names(names)
             manifest = self._read_backup_manifest(archive)
@@ -585,7 +588,7 @@ class LocalBackupService:
             rollback_ledger_path = os.path.join(temp_dir, "pre-restore-live.sqlite3")
             prepared_ledger_path = os.path.join(temp_dir, "prepared-restore.sqlite3")
             self._snapshot_ledger(rollback_ledger_path)
-            with zipfile.ZipFile(resolved_path, "r") as archive:
+            with _open_preflighted_archive(resolved_path) as archive:
                 names = archive.namelist()
                 self._validate_member_names(names)
                 if self._read_backup_manifest(archive) != manifest:
@@ -1416,6 +1419,103 @@ def _file_signature(path: str) -> Tuple[int, int, int]:
         int(stat.st_mtime_ns),
         int(stat.st_ctime_ns),
     )
+
+
+@contextmanager
+def _open_preflighted_archive(path: str):
+    with open(path, "rb") as source:
+        _preflight_zip_directory(source)
+        with zipfile.ZipFile(source, "r") as archive:
+            yield archive
+
+
+def _preflight_zip_directory(source: Any) -> None:
+    file_size = os.fstat(source.fileno()).st_size
+    minimum_end_record_bytes = 22
+    if file_size < minimum_end_record_bytes:
+        raise ValueError("Backup archive has no valid end-of-directory record")
+
+    tail_size = min(file_size, minimum_end_record_bytes + 0xFFFF)
+    source.seek(file_size - tail_size)
+    tail = source.read(tail_size)
+    end_record_signature = b"PK\x05\x06"
+    end_record_offset = tail.rfind(end_record_signature)
+    while end_record_offset >= 0:
+        if end_record_offset + minimum_end_record_bytes <= len(tail):
+            comment_size = struct.unpack_from("<H", tail, end_record_offset + 20)[0]
+            if end_record_offset + minimum_end_record_bytes + comment_size == len(tail):
+                break
+        end_record_offset = tail.rfind(end_record_signature, 0, end_record_offset)
+    if end_record_offset < 0:
+        raise ValueError("Backup archive has no valid end-of-directory record")
+
+    (
+        _,
+        disk_number,
+        central_directory_disk,
+        entries_on_disk,
+        entry_count,
+        central_directory_size,
+        central_directory_offset,
+        _,
+    ) = struct.unpack_from("<4s4H2LH", tail, end_record_offset)
+    end_record_position = file_size - tail_size + end_record_offset
+    zip64_required = (
+        entries_on_disk == 0xFFFF
+        or entry_count == 0xFFFF
+        or central_directory_size == 0xFFFFFFFF
+        or central_directory_offset == 0xFFFFFFFF
+    )
+
+    if zip64_required:
+        locator_position = end_record_position - 20
+        if locator_position < 0:
+            raise ValueError("Backup archive has an invalid ZIP64 locator")
+        source.seek(locator_position)
+        locator = source.read(20)
+        if len(locator) != 20:
+            raise ValueError("Backup archive has an invalid ZIP64 locator")
+        locator_signature, locator_disk, zip64_record_position, disk_count = struct.unpack(
+            "<4sIQI",
+            locator,
+        )
+        if (
+            locator_signature != b"PK\x06\x07"
+            or locator_disk != 0
+            or disk_count != 1
+        ):
+            raise ValueError("Multi-volume backup archives are not supported")
+        source.seek(zip64_record_position)
+        zip64_record = source.read(56)
+        if len(zip64_record) != 56:
+            raise ValueError("Backup archive has an invalid ZIP64 end record")
+        (
+            zip64_signature,
+            zip64_record_size,
+            _,
+            _,
+            disk_number,
+            central_directory_disk,
+            entries_on_disk,
+            entry_count,
+            central_directory_size,
+            central_directory_offset,
+        ) = struct.unpack("<4sQ2H2I4Q", zip64_record)
+        if (
+            zip64_signature != b"PK\x06\x06"
+            or zip64_record_size < 44
+            or zip64_record_position + 12 + zip64_record_size > locator_position
+        ):
+            raise ValueError("Backup archive has an invalid ZIP64 end record")
+
+    if disk_number != 0 or central_directory_disk != 0 or entries_on_disk != entry_count:
+        raise ValueError("Multi-volume backup archives are not supported")
+    if entry_count > MAX_BACKUP_ARCHIVE_FILES:
+        raise ValueError("Backup archive contains too many files")
+    if central_directory_size > MAX_BACKUP_CENTRAL_DIRECTORY_BYTES:
+        raise ValueError("Backup archive directory exceeds the maximum size")
+    if central_directory_offset + central_directory_size > file_size:
+        raise ValueError("Backup archive has an invalid central-directory range")
 
 
 def _store_inspection_cache(
