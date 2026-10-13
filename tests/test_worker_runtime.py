@@ -16,9 +16,39 @@ from src.worker.runtime import (
     managed_worker_maintenance,
     managed_worker_runtime,
 )
+from src.worker.scheduler import FabWorker
 
 
 class TestWorkerRuntime(unittest.TestCase):
+    def test_invalid_worker_interval_cannot_create_a_hot_loop(self):
+        worker = FabWorker({
+            "worker_interval_seconds": 0,
+            "fab_local_ledger_enabled": False,
+            "worker_process_legacy_postings": False,
+        })
+
+        self.assertEqual(worker.interval_seconds, 1)
+        with patch("src.worker.scheduler.time.sleep") as sleep:
+            worker._sleep_until_next_cycle()
+
+        sleep.assert_called_once_with(1)
+
+    def test_worker_interval_is_bounded_and_nonfinite_values_fall_back(self):
+        config = {
+            "fab_local_ledger_enabled": False,
+            "worker_process_legacy_postings": False,
+        }
+        for value, expected in (
+            (-5, 1),
+            (1000000, 86400),
+            ("invalid", 300),
+            (float("inf"), 300),
+            (float("nan"), 300),
+        ):
+            with self.subTest(value=value):
+                worker = FabWorker({**config, "worker_interval_seconds": value})
+                self.assertEqual(worker.interval_seconds, expected)
+
     def test_runtime_descriptor_tracks_the_owned_process_and_cleans_up(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
