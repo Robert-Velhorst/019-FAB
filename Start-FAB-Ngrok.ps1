@@ -56,6 +56,30 @@ function Find-AvailableLoopbackPort {
     throw "No free private ngrok inspection port is available."
 }
 
+function Assert-FabNgrokInspectorOwned {
+    param(
+        [Parameter(Mandatory = $true)][int]$Port,
+        [Parameter(Mandatory = $true)][int]$ProcessId
+    )
+
+    try {
+        $listeners = @(
+            Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction Stop |
+                Where-Object { [string]$_.LocalAddress -eq "127.0.0.1" }
+        )
+    }
+    catch {
+        throw "FAB could not verify ownership of the private ngrok inspector."
+    }
+
+    if (
+        $listeners.Count -ne 1 -or
+        [int]$listeners[0].OwningProcess -ne $ProcessId
+    ) {
+        throw "The private FAB ngrok inspector is not owned by the managed ngrok process."
+    }
+}
+
 function Test-CleanHttpsOrigin {
     param([Parameter(Mandatory = $true)][System.Uri]$Uri)
 
@@ -321,6 +345,8 @@ try {
         }
         throw "FAB ngrok startup failed with code $exitCode`: $classified"
     }
+
+    Assert-FabNgrokInspectorOwned -Port $inspectionPort -ProcessId $process.Id
 
     $publicUrl = ([string]$tunnel.public_url).TrimEnd("/")
     $publicUri = [System.Uri]$publicUrl

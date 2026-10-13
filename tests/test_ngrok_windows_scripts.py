@@ -10,6 +10,43 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class TestNgrokWindowsScripts(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "process inspection is Windows-specific")
+    def test_private_inspector_must_belong_to_managed_ngrok_process(self):
+        script = (ROOT / "Start-FAB-Ngrok.ps1").read_text(encoding="utf-8")
+        start = script.index("function Assert-FabNgrokInspectorOwned {")
+        end = script.index("\nfunction Test-CleanHttpsOrigin", start)
+        helper = script[start:end]
+        shell = shutil.which("pwsh") or shutil.which("powershell")
+        if not shell:
+            self.skipTest("PowerShell is unavailable")
+
+        command = f"""
+        $ErrorActionPreference = 'Stop'
+        {helper}
+        $script:connection = [pscustomobject]@{{ LocalAddress = '127.0.0.1'; OwningProcess = 2468 }}
+        function Get-NetTCPConnection {{ return $script:connection }}
+        Assert-FabNgrokInspectorOwned -Port 4041 -ProcessId 2468
+        $script:connection = [pscustomobject]@{{ LocalAddress = '127.0.0.1'; OwningProcess = 1357 }}
+        try {{
+            Assert-FabNgrokInspectorOwned -Port 4041 -ProcessId 2468
+            throw 'A foreign inspector process was accepted.'
+        }} catch {{
+            if ($_.Exception.Message -notlike '*not owned by the managed ngrok process*') {{ throw }}
+        }}
+        $script:connection = [pscustomobject]@{{ LocalAddress = '::1'; OwningProcess = 2468 }}
+        try {{
+            Assert-FabNgrokInspectorOwned -Port 4041 -ProcessId 2468
+            throw 'An IPv6 or non-loopback listener was accepted.'
+        }} catch {{
+            if ($_.Exception.Message -notlike '*not owned by the managed ngrok process*') {{ throw }}
+        }}
+        'verified'
+        """
+        result = subprocess.run([shell, "-NoProfile", "-NonInteractive", "-Command", command],
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "verified")
+
     @unittest.skipUnless(os.name == "nt", "process launch flags are Windows-specific")
     def test_failed_startup_uses_process_handle_and_confirms_exit(self):
         script = (ROOT / "Start-FAB-Ngrok.ps1").read_text(encoding="utf-8")
