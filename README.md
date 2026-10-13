@@ -10,7 +10,7 @@ FAB is designed to reduce repetitive bookkeeping without hiding uncertainty. Con
 
 This repository contains a runnable Windows-oriented application, Docker Compose deployment profiles, a React operator dashboard, a Python bookkeeping engine, automated tests, and a source-package builder. FAB is under active development; it is not a certified accounting product or a fully unattended replacement for professional oversight.
 
-The latest merged main commit has a successful GitHub Actions run for Linux and Windows backend tests, frontend checks/build, and synthetic dashboard/API/ledger rehearsals. That verifies those CI jobs on that commit only. It does not prove a user's installation, provider credentials, live bookkeeping, tax treatment, deployment, or recovery plan. See the production verification record and goal-completion matrix for detailed evidence and outstanding gates.
+Check the repository's Actions page for the current main-branch CI status. A green run is evidence only for its commit and configured checks; it does not prove a user's installation, provider credentials, live bookkeeping, tax treatment, deployment, or recovery plan. See the production verification record and goal-completion matrix for detailed evidence and outstanding gates.
 
 | Area | Current support | Boundary |
 | --- | --- | --- |
