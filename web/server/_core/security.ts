@@ -20,7 +20,6 @@ export function createFabSecurityMiddleware(production: boolean): RequestHandler
         scriptSrc: production ? ["'self'"] : ["'self'", "'unsafe-eval'"],
         scriptSrcAttr: ["'none'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
-        upgradeInsecureRequests: production ? [] : null,
       },
     },
     crossOriginEmbedderPolicy: false,
