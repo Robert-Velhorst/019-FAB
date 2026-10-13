@@ -123,6 +123,33 @@ class TestLocalHaiConnector(unittest.TestCase):
             self.assertFalse(result["success"])
             self.assertEqual(result["status"], "connector_disabled")
 
+    def test_blocked_plan_reports_command_disallowed_when_connector_cannot_execute(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            policies = (
+                (
+                    {"fab_hai_connector_enabled": False, "fab_hai_allowed_commands": "refresh_notifications"},
+                    "connector_disabled",
+                ),
+                (
+                    {
+                        "fab_hai_connector_enabled": True,
+                        "fab_hai_allowed_commands": "refresh_notifications",
+                        "fab_maintenance_mode": True,
+                    },
+                    "maintenance_locked",
+                ),
+            )
+
+            for config, expected_status in policies:
+                with self.subTest(expected_status=expected_status):
+                    connector = LocalHaiConnector(ledger, config)
+
+                    result = connector.plan("refresh_notifications")
+
+                    self.assertEqual(result["status"], expected_status)
+                    self.assertFalse(result["command"]["allowed"])
+
     def test_execution_requires_allowlist_and_is_idempotent(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))

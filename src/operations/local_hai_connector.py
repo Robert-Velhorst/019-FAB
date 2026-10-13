@@ -678,7 +678,9 @@ class LocalHaiConnector:
             "success": False,
             "status": status,
             "commandId": command_id,
-            "command": command.as_dict(command.command_id in self.allowed_command_ids) if command else None,
+            "command": command.as_dict(
+                self.enabled and command.command_id in self.allowed_command_ids
+            ) if command else None,
             "payload": payload or {},
             "error": error,
             "externalSubmission": "not_executed",
