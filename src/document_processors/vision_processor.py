@@ -6,6 +6,7 @@ except ImportError:
     vision = None
 
 from src.document_processors.base import BaseProcessor
+from src.document_processors.image_resource_limits import MAX_VISION_IMAGE_BYTES
 from src.document_processors.tesseract_processor import TesseractProcessor
 
 
@@ -27,7 +28,12 @@ class VisionProcessor(BaseProcessor):
 
         try:
             with open(document_path, "rb") as image_file:
-                image = vision.Image(content=image_file.read())
+                content = image_file.read(MAX_VISION_IMAGE_BYTES + 1)
+            if len(content) > MAX_VISION_IMAGE_BYTES:
+                raise ValueError(
+                    f"Image exceeds the Google Vision {MAX_VISION_IMAGE_BYTES}-byte limit."
+                )
+            image = vision.Image(content=content)
 
             response = self.client.document_text_detection(image=image)
             error_message = getattr(getattr(response, "error", None), "message", "")
