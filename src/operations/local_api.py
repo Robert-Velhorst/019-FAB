@@ -8070,7 +8070,10 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             modified_time=metadata.get("modifiedTime"),
             md5_checksum=metadata.get("md5Checksum"),
             web_view_link=metadata.get("webViewLink"),
-            actor=metadata.get("actor") or "local_api_drive_relay",
+            actor=_request_audit_actor(
+                metadata.get("actor"),
+                "local_api_drive_relay",
+            ),
         )
         return jsonify(result), 201 if result.get("success") else 400
 

@@ -404,11 +404,14 @@ class TestLocalHaiConnector(unittest.TestCase):
             with (
                 patch("src.operations.local_api.LocalWaveReceiptExecutorService") as executor,
                 patch("src.operations.local_api.DriveWaveDeliveryService") as delivery,
+                patch("src.operations.local_api.DriveRelayIntakeService") as drive_relay,
             ):
                 executor.return_value.register.return_value = {"success": True}
                 executor.return_value.claim_next.return_value = {"success": True}
                 executor.return_value.release.return_value = {"success": True}
                 delivery.return_value.record_attachment_readback.return_value = {"success": True}
+                drive_relay.return_value.status.return_value = {"maxBytes": 2048}
+                drive_relay.return_value.ingest.return_value = {"success": True}
 
                 responses = [
                     client.post(
@@ -438,6 +441,15 @@ class TestLocalHaiConnector(unittest.TestCase):
                         },
                         content_type="multipart/form-data",
                     ),
+                    client.post(
+                        "/api/connectors/google-drive/relay",
+                        headers=headers,
+                        data={
+                            "metadata": '{"actor":"operator_admin"}',
+                            "file": (io.BytesIO(b"receipt"), "receipt.pdf"),
+                        },
+                        content_type="multipart/form-data",
+                    ),
                 ]
                 operator_response = client.post(
                     "/api/wave/receipt-executor/session",
@@ -447,7 +459,7 @@ class TestLocalHaiConnector(unittest.TestCase):
 
             self.assertEqual(
                 [response.status_code for response in responses],
-                [200, 200, 200, 200],
+                [200, 200, 200, 200, 201],
             )
             self.assertEqual(operator_response.status_code, 200)
             self.assertEqual(
@@ -472,6 +484,10 @@ class TestLocalHaiConnector(unittest.TestCase):
             )
             self.assertEqual(
                 delivery.return_value.record_attachment_readback.call_args.kwargs["actor"],
+                "fab_hai_api:hai",
+            )
+            self.assertEqual(
+                drive_relay.return_value.ingest.call_args.kwargs["actor"],
                 "fab_hai_api:hai",
             )
 
