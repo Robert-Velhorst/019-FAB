@@ -44,17 +44,17 @@ The standard Compose profile runs the Python API, recurring worker, and producti
     $env:FAB_WEB_JWT_SECRET = "<long random secret>"
     docker compose up --build
 
-The command above builds from source. To use the private x86-64 release images instead, first authenticate to GHCR using a GitHub personal access token (classic) with only the `read:packages` scope. Supply the token through Docker's password prompt, not a command-line argument:
+The release images are private. To pull them, authenticate with a GitHub personal access token (classic) that has only `read:packages`; enter it at Docker's password prompt, never as a command-line argument:
 
     docker login ghcr.io -u Robert-Velhorst
 
-Then set `FAB_IMAGE_TAG` to a published release tag (or `edge` for the most recently published release candidate), and run:
+Then set `FAB_IMAGE_TAG` to a published release tag and run:
 
     $env:FAB_IMAGE_TAG = "v0.1.0-preview.1"
     docker compose pull
     docker compose up -d --no-build
 
-The VM profile supports the same image tags. The first GHCR publication defaults to private; package visibility and repository access must be checked in GitHub before use and must not be changed to public. The images do not include credentials or financial data. Review the release notes and verify the image tag before deploying.
+The VM profile uses the same tags. Confirm you have package read access before pulling. The images contain no credentials or financial data; verify the tag and release notes before deployment.
 
 Published ports bind to loopback by default. State is in persistent Compose volumes and configured mounts. Remote deployment additionally needs reviewed TLS/reverse-proxy configuration, managed secrets, access controls, monitoring, backup/restore drills, and provider acceptance. See the VM deployment and deployment guidance. A successful Compose config check does not certify a host deployment.
 
@@ -129,12 +129,14 @@ From a clean, committed checkout, build both source distributions:
 
 The tracked-source-only builder fails closed on dirty tracked files, forbidden runtime/secret paths, unsafe links, missing required files, or size limits. Each ZIP contains RELEASE-MANIFEST.json with per-file SHA-256 values and a .zip.sha256 archive checksum. The builder verifies each archive and member before success; compare the sidecar after downloading. These are source bundles, not signed installers or prebuilt images.
 
-The release workflow can publish separate private GitHub Container Registry images for the Python API/worker and the React dashboard:
+The workflow publishes separate GitHub Container Registry images for the Python API/worker and React dashboard:
 
     ghcr.io/robert-velhorst/fab-api:<release-tag>
     ghcr.io/robert-velhorst/fab-dashboard:<release-tag>
 
-Images are built from a pushed `v*` release tag and currently target `linux/amd64`. The first publication defaults to private, and the workflow uses `GITHUB_TOKEN` with package-write permission to link the packages to this repository. Use a personal access token (classic) with only `read:packages` to pull them; do not make the packages public. The build publishes SBOM and provenance attestations, but the images are not cryptographically signed. Verify the source and tag, and use the checksum-manifested ZIPs when you need a source bundle. The `edge` tag follows the newest pushed release tag, including a release candidate.
+Both images target `linux/amd64`. Before the first workflow publication, bootstrap each package from a clean release-tag checkout using a GitHub personal access token (classic) scoped only to `write:packages`. The initial CLI push creates an unlinked package with private visibility. In each package's settings, retain `private`, use granular permissions instead of inheriting access from the public repository, and grant the `019-FAB` repository Actions access with write permission. The workflow checks that the package already exists and is private before it pushes; it fails closed otherwise. Then run the workflow manually on an existing `v*` release tag with the private-package confirmation, or let a future version tag trigger it. Use only `read:packages` tokens to pull. Do not make these packages public.
+
+The workflow attaches SBOM and provenance attestations, but images are not cryptographically signed. Verify the source and tag; use checksum-manifested ZIPs when you need source bundles. The mutable `edge` tag follows the newest published release tag, including a release candidate.
 
 ## Security and Privacy
 
