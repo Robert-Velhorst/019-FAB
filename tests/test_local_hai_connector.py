@@ -240,6 +240,41 @@ class TestLocalHaiConnector(unittest.TestCase):
             self.assertEqual(changed_payload["status"], "idempotency_conflict")
             self.assertEqual(changed_command["status"], "idempotency_conflict")
 
+    def test_idempotent_result_replay_rechecks_current_connector_policy(self):
+        revoked_policies = (
+            ({"fab_hai_connector_enabled": False, "fab_hai_allowed_commands": "refresh_notifications"}, "connector_disabled"),
+            ({"fab_hai_connector_enabled": True, "fab_hai_allowed_commands": "run_reconciliation"}, "not_allowed"),
+            ({"fab_hai_connector_enabled": True, "fab_hai_allowed_commands": "refresh_notifications", "fab_maintenance_mode": True}, "maintenance_locked"),
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            for index, (config, expected_status) in enumerate(revoked_policies):
+                request_id = f"revoked-policy-{index}"
+                enabled = LocalHaiConnector(
+                    ledger,
+                    {"fab_hai_connector_enabled": True, "fab_hai_allowed_commands": "refresh_notifications"},
+                    executors={"refresh_notifications": lambda payload, actor: {"sensitiveResult": "private"}},
+                )
+                first = enabled.execute(request_id, "refresh_notifications")
+                revoked = LocalHaiConnector(
+                    ledger,
+                    config,
+                    executors={"refresh_notifications": lambda payload, actor: {"sensitiveResult": "private"}},
+                )
+
+                replay = revoked.execute(request_id, "refresh_notifications")
+
+                self.assertEqual(first["status"], "completed")
+                self.assertEqual(replay["status"], expected_status)
+                self.assertNotIn("result", replay)
+
+            allowed_without_executor = LocalHaiConnector(
+                ledger,
+                {"fab_hai_connector_enabled": True, "fab_hai_allowed_commands": "refresh_notifications"},
+            )
+            replay = allowed_without_executor.execute("revoked-policy-0", "refresh_notifications")
+            self.assertEqual(replay["status"], "already_executed")
+
     def test_hai_can_engage_but_cannot_clear_operator_emergency_stop(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             ledger_path = os.path.join(temp_dir, "fab.sqlite3")

@@ -373,7 +373,13 @@ class LocalHaiConnector:
             "externalSubmission": "not_executed",
         }
 
-    def plan(self, command_id: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def plan(
+        self,
+        command_id: str,
+        payload: Optional[Dict[str, Any]] = None,
+        *,
+        require_executor: bool = True,
+    ) -> Dict[str, Any]:
         command = self._commands.get(str(command_id or "").strip())
         if command is None:
             return self._blocked_plan(command_id, "unsupported", "Command is not in the HAI manifest.")
@@ -408,7 +414,7 @@ class LocalHaiConnector:
                 command=command,
                 payload=normalized_payload,
             )
-        if command.command_id not in self.executors:
+        if require_executor and command.command_id not in self.executors:
             return self._blocked_plan(
                 command.command_id,
                 "executor_unavailable",
@@ -454,6 +460,13 @@ class LocalHaiConnector:
         except ValueError as exc:
             return {
                 **self._blocked_plan(command_id, "invalid", str(exc), command=command),
+                "requestId": request_id,
+            }
+
+        plan = self.plan(command_id, normalized_payload, require_executor=False)
+        if plan.get("status") != "ready":
+            return {
+                **plan,
                 "requestId": request_id,
             }
 
