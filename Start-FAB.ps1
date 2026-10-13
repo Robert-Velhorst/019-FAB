@@ -487,6 +487,19 @@ function Invoke-FabNativeCommand {
     }
 }
 
+function Get-FabPython313Candidates {
+    param([string[]]$LauncherOutput)
+
+    foreach ($line in $LauncherOutput) {
+        if ([string]$line -match '^\s*-\S*3\.13\S*(?:\s+\*)?\s+(.+?)\s*$') {
+            $candidate = $Matches[1].Trim().Trim('"')
+            if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+                Write-Output $candidate
+            }
+        }
+    }
+}
+
 function Remove-FabVirtualEnvironment {
     param(
         [Parameter(Mandatory = $true)][string]$InstanceRoot,
@@ -536,6 +549,21 @@ if (-not (Test-Path -LiteralPath $venvPython)) {
             $createExitCode = Invoke-FabNativeCommand -FilePath $pyLauncher.Source -ArgumentList @("-3.13", "-m", "venv", $venvRoot)
             if ($createExitCode -ne 0) {
                 Remove-FabVirtualEnvironment -InstanceRoot $root -VenvPath $venvRoot
+            }
+        }
+
+        if (-not (Test-Path -LiteralPath $venvPython)) {
+            $launcherOutput = @(& $pyLauncher.Source -0p 2>$null)
+            foreach ($python313 in @(Get-FabPython313Candidates -LauncherOutput $launcherOutput)) {
+                $probeExitCode = Invoke-FabNativeCommand -FilePath $python313 -ArgumentList @("-c", $pythonVersionProbe) -DiscardOutput
+                if ($probeExitCode -eq 0) {
+                    Write-Host "Creating FAB's isolated Python 3.13 runtime..."
+                    $createExitCode = Invoke-FabNativeCommand -FilePath $python313 -ArgumentList @("-m", "venv", $venvRoot)
+                    if ($createExitCode -ne 0) {
+                        Remove-FabVirtualEnvironment -InstanceRoot $root -VenvPath $venvRoot
+                    }
+                    break
+                }
             }
         }
     }

@@ -2,6 +2,7 @@ import unittest
 import os
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 
@@ -9,6 +10,55 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class TestWindowsLauncher(unittest.TestCase):
+    def test_python_launcher_discovers_tagged_313_runtimes_by_path(self):
+        script = (ROOT / "Start-FAB.ps1").read_text(encoding="utf-8")
+        start = script.index("function Get-FabPython313Candidates {")
+        end = script.index("\nfunction ", start + 1)
+        helper = script[start:end]
+        shell = shutil.which("pwsh") or shutil.which("powershell")
+        if not shell:
+            self.skipTest("PowerShell is unavailable")
+
+        with tempfile.TemporaryDirectory() as directory:
+            python313 = Path(directory) / "Python 3.13" / "python.exe"
+            python314 = Path(directory) / "Python 3.14" / "python.exe"
+            python313.parent.mkdir()
+            python314.parent.mkdir()
+            python313.touch()
+            python314.touch()
+            path313 = str(python313).replace("'", "''")
+            path314 = str(python314).replace("'", "''")
+            command = f"""
+            $ErrorActionPreference = 'Stop'
+            {helper}
+            $output = @(
+                '-V:Astral/CPython3.13.14 "{path313}"',
+                '-V:3.14 * "{path314}"',
+                '-3.13-64 "{path313}"'
+            )
+            $found = @(Get-FabPython313Candidates -LauncherOutput $output)
+            if ($found.Count -ne 2 -or $found[0] -cne '{path313}' -or $found[1] -cne '{path313}') {{
+                throw "Unexpected Python 3.13 candidates: $($found -join ', ')"
+            }}
+            $pyLauncher = Get-Command py -ErrorAction SilentlyContinue
+            if ($pyLauncher) {{
+                $actualOutput = @(& $pyLauncher.Source -0p)
+                $actualCandidates = @(Get-FabPython313Candidates -LauncherOutput $actualOutput)
+                $usableCandidates = @($actualCandidates | Where-Object {{
+                    & $_ -c 'import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 13) else 1)' 2>$null
+                    $LASTEXITCODE -eq 0
+                }})
+                if ($actualCandidates.Count -gt 0 -and $usableCandidates.Count -eq 0) {{
+                    throw "No listed Python 3.13 runtime passed its version probe: $($actualCandidates -join ', ')"
+                }}
+            }}
+            "verified"
+            """
+            result = subprocess.run([shell, "-NoProfile", "-NonInteractive", "-Command", command],
+                                    capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), "verified")
+
     def test_production_runtime_cannot_reuse_an_unverified_local_ledger(self):
         script = (ROOT / "Start-FAB.ps1").read_text(encoding="utf-8")
         self.assertIn('deploymentStorageId = $deploymentStorageId', script)
