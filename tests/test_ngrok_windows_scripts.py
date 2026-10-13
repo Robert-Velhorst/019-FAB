@@ -1,3 +1,4 @@
+import os
 import shutil
 import subprocess
 import tempfile
@@ -9,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class TestNgrokWindowsScripts(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "process launch flags are Windows-specific")
     def test_failed_startup_uses_process_handle_and_confirms_exit(self):
         script = (ROOT / "Start-FAB-Ngrok.ps1").read_text(encoding="utf-8")
         start = script.index("function Stop-FabStartedNgrokProcess {")
@@ -73,7 +75,7 @@ class TestNgrokWindowsScripts(unittest.TestCase):
         command = f"""
         $ErrorActionPreference = 'Stop'
         {helper}
-        $overlay = Join-Path $env:TEMP 'fab-managed-overlay.yml'
+        $overlay = [System.IO.Path]::GetFullPath('fab-managed-overlay.yml')
         $script:fakeProcess = [pscustomobject]@{{
             Name = 'ngrok.exe'
             CommandLine = 'ngrok.exe http 5001 --name fab-managed --config ' + $overlay
@@ -83,6 +85,9 @@ class TestNgrokWindowsScripts(unittest.TestCase):
             param($ClassName, $Filter, $ErrorAction)
             if ($script:inspectionFails) {{ throw 'inspection unavailable' }}
             return $script:fakeProcess
+        }}
+        if (-not (Test-FabManagedNgrokProcess -Process $script:fakeProcess -OverlayPath $overlay)) {{
+            throw "Synthetic process did not match managed ownership: $($script:fakeProcess.CommandLine)"
         }}
         try {{
             Assert-FabNgrokProcessStopped -ProcessId 4321 -OverlayPath $overlay
