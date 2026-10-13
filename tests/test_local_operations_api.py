@@ -26,7 +26,6 @@ from src.operations.local_api import (
     MAX_LOCAL_OAUTH_CREDENTIAL_REQUEST_BYTES,
     MAX_LOCAL_WAVE_READBACK_REQUEST_BYTES,
     MAX_LOCAL_WAVE_REPORT_RESULT_REQUEST_BYTES,
-    MAX_LOCAL_WAVE_REPORT_RESULT_REQUEST_BYTES,
     MAX_RECONCILIATION_REQUEST_BYTES,
     create_app,
 )
@@ -60,7 +59,6 @@ class TestLocalOperationsApi(unittest.TestCase):
                 "install_google_drive_credentials_api": MAX_LOCAL_OAUTH_CREDENTIAL_REQUEST_BYTES,
                 "drive_wave_attachment_readback_api": MAX_LOCAL_WAVE_READBACK_REQUEST_BYTES,
                 "record_wave_report_result": MAX_LOCAL_WAVE_REPORT_RESULT_REQUEST_BYTES,
-                "record_wave_report_result": MAX_LOCAL_WAVE_REPORT_RESULT_REQUEST_BYTES,
                 "google_drive_relay_intake_api": MAX_LOCAL_DRIVE_RELAY_REQUEST_BYTES,
                 "run_autonomy": MAX_RECONCILIATION_REQUEST_BYTES,
                 "refresh_notifications_api": DEFAULT_LOCAL_JSON_MUTATION_REQUEST_BYTES,
@@ -83,7 +81,6 @@ class TestLocalOperationsApi(unittest.TestCase):
                 "install_gmail_credentials_api": "/api/connectors/gmail/credentials",
                 "install_google_drive_credentials_api": "/api/connectors/google-drive/credentials",
                 "drive_wave_attachment_readback_api": "/api/drive-wave/documents/1/attachment-readback",
-                "record_wave_report_result": "/api/wave/report-results",
                 "record_wave_report_result": "/api/wave/report-results",
                 "google_drive_relay_intake_api": "/api/connectors/google-drive/relay",
                 "run_autonomy": "/api/autonomy/run",
@@ -3288,6 +3285,42 @@ class TestLocalOperationsApi(unittest.TestCase):
             self.assertIn("Last backup action", html)
             self.assertIn("fab-recovery-package", html)
             self.assertIn(RESTORE_CONFIRMATION_PHRASE, html)
+
+    def test_dashboard_backup_listing_is_lightweight_outside_maintenance(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger_path = os.path.join(temp_dir, "fab.sqlite3")
+            backup_dir = os.path.join(temp_dir, "backups")
+            config = {
+                "fab_local_ledger_path": ledger_path,
+                "fab_local_backup_dir": backup_dir,
+            }
+            LocalBackupService(
+                LocalOperationsLedger(ledger_path),
+                config,
+            ).create_backup()
+            original_list_backups = LocalBackupService.list_backups
+
+            modes = ((False, False), (True, True))
+            for maintenance_mode, expected_verification in modes:
+                calls = []
+                app = create_app({
+                    **config,
+                    "fab_maintenance_mode": maintenance_mode,
+                })
+
+                def track_verification(service, *args, **kwargs):
+                    calls.append(kwargs.get("deep_verify"))
+                    return original_list_backups(service, *args, **kwargs)
+
+                with patch.object(
+                    LocalBackupService,
+                    "list_backups",
+                    track_verification,
+                ):
+                    response = app.test_client().get("/")
+
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(calls, [expected_verification])
 
     def test_api_plans_and_executes_full_recovery_in_maintenance(self):
         with tempfile.TemporaryDirectory() as temp_dir:

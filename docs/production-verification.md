@@ -2218,3 +2218,21 @@ compiler `--verify`, Python compilation, and `git diff --check` passed. This did
 not run a Linux image build, install the default lock into a fresh environment,
 or verify provider/live deployment behavior. Hosted CI remains authoritative
 for the updated PR commit.
+
+## Dashboard Backup Verification Cost, 2026-10-13
+
+The server-rendered operator dashboard previously used the deep-verification
+default while listing up to ten backups. A normal dashboard refresh could
+therefore re-hash ledger and source-evidence bytes for several large archives.
+The React dashboard already requested manifest-only status. The server-rendered
+dashboard now also uses manifest-only inspection in standard mode; maintenance
+mode retains deep verification because its restore controls must only appear for
+fully verified packages. Explicit inspection, backup creation, recovery
+scheduling, and restore continue to perform their existing deep checks.
+
+Regression coverage verifies both standard and maintenance dashboard modes.
+The local operations API, backup, and backup-inspection-boundary suites passed
+**145 tests with one platform skip**. This confirms the selected verification
+mode and nearby safety behavior; it is not a measured whole-dashboard speedup,
+does not bound central-directory parsing or deep verification time, and does not
+replace Windows host, live-provider, or recovery acceptance.

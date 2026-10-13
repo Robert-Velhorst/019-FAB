@@ -4705,7 +4705,10 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             limit=25,
         ) if latest_compliance_assessment_id else []
         retention_records = ledger.list_retention_records(limit=25)
-        backups = LocalBackupService(ledger, config).list_backups(limit=10)
+        backups = LocalBackupService(ledger, config).list_backups(
+            limit=10,
+            deep_verify=maintenance_mode,
+        )
         mijngeldzaken_service = LocalMijngeldzakenControlService(config)
         mijngeldzaken_control = mijngeldzaken_service.overview(ledger)
         mijngeldzaken_controls = mijngeldzaken_control.get("masterLedgerControls")
