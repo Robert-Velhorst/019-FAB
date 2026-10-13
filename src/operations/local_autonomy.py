@@ -1569,7 +1569,11 @@ class LocalAutonomousService:
         )
 
     def _run_reconciliation(self, bank_transactions: List[Dict[str, Any]], limit: int) -> Dict[str, Any]:
-        summary = LocalReconciliationService(self.ledger, self.config).run(bank_transactions, limit=limit)
+        summary = LocalReconciliationService(self.ledger, self.config).run(
+            bank_transactions,
+            limit=limit,
+            actor="local_autonomy",
+        )
         return {"id": "run_reconciliation", "status": "completed", "summary": summary}
 
     def _reconciliation_transactions(

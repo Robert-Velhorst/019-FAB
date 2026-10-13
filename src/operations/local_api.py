@@ -5038,13 +5038,16 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             )
 
         def run_reconciliation_command(payload: Dict[str, Any], actor: str) -> Dict[str, Any]:
-            del actor
             limit = _bounded_positive_int(payload.get("limit"), default=100, maximum=500)
             transactions = LocalBankTransactionImportService(
                 ledger,
                 config,
             ).transactions_for_reconciliation(limit=limit)
-            return LocalReconciliationService(ledger, config).run(transactions, limit=limit)
+            return LocalReconciliationService(ledger, config).run(
+                transactions,
+                limit=limit,
+                actor=actor,
+            )
 
         def record_wave_attachment_command(payload: Dict[str, Any], actor: str) -> Dict[str, Any]:
             return DriveWaveDeliveryService(ledger, config).record_attachment_evidence(
@@ -7664,6 +7667,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
                 bank_transactions,
                 document_ids=payload.get("documentIds"),
                 limit=_bounded_positive_int(payload.get("limit"), default=100, maximum=500),
+                actor=_request_audit_actor(payload.get("actor"), "local_api_reconciliation"),
             )
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
@@ -7682,6 +7686,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             session["fab_last_reconciliation_summary"] = LocalReconciliationService(ledger, config).run(
                 bank_transactions,
                 limit=100,
+                actor="local_reconciliation_form",
             )
         except (TypeError, ValueError, json.JSONDecodeError, RecursionError) as exc:
             session["fab_last_reconciliation_summary"] = {

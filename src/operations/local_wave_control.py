@@ -552,6 +552,7 @@ class LocalWaveControlService:
                 reconciliation_summary = LocalReconciliationService(ledger, self.config).run(
                     bank_transactions,
                     limit=max(100, len(bank_transactions)),
+                    actor="local_wave_control",
                 )
             metadata["resultCapture"]["bankTransactionImport"] = {
                 "bankStatementImportId": bank_import_summary.get("bankStatementImportId"),

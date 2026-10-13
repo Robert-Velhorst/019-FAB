@@ -45,6 +45,7 @@ class LocalReconciliationService:
         bank_transactions: List[Dict[str, Any]],
         document_ids: Optional[Iterable[int]] = None,
         limit: int = 100,
+        actor: str = "local_reconciliation",
     ) -> Dict[str, Any]:
         document_ids = _capture_document_selection(document_ids)
         if not isinstance(bank_transactions, list):
@@ -95,10 +96,19 @@ class LocalReconciliationService:
             for bank_id, expected in bank_evidence.items():
                 if _evidence_fingerprint(self.ledger.get_bank_transaction(bank_id)) != expected:
                     raise ValueError("Bank reconciliation evidence changed; refresh and run again.")
-            return self._record_results(raw_results, len(bank_transactions), len(documents))
+            return self._record_results(
+                raw_results,
+                len(bank_transactions),
+                len(documents),
+                actor=actor,
+            )
 
     def _record_results(
-        self, raw_results: List[Dict[str, Any]], transaction_count: int, document_count: int,
+        self,
+        raw_results: List[Dict[str, Any]],
+        transaction_count: int,
+        document_count: int,
+        actor: str,
     ) -> Dict[str, Any]:
         summary: Dict[str, Any] = {
             "requestedTransactions": transaction_count,
@@ -135,6 +145,7 @@ class LocalReconciliationService:
             "action": "local_reconciliation.run_completed",
             "entityType": "reconciliation_run",
             "details": {
+                "actor": str(actor or "local_reconciliation")[:200],
                 "requestedTransactions": summary["requestedTransactions"],
                 "candidateDocuments": summary["candidateDocuments"],
                 "matchedCandidates": summary["matchedCandidates"],

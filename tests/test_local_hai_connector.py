@@ -42,6 +42,34 @@ class TestLocalHaiConnector(unittest.TestCase):
                 "hai_connector",
             )
 
+    def test_hai_reconciliation_actor_is_persisted_in_ledger(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger_path = os.path.join(temp_dir, "fab.sqlite3")
+            app = create_app({
+                "fab_local_ledger_path": ledger_path,
+                "fab_local_api_token": "operator-token-for-tests",
+                "fab_hai_api_token": "hai-token-for-tests",
+                "fab_hai_connector_enabled": True,
+                "fab_hai_allowed_commands": "run_reconciliation",
+            })
+            response = app.test_client().post(
+                "/api/hai/commands/execute",
+                headers={"Authorization": "Bearer hai-token-for-tests"},
+                json={
+                    "requestId": "hai-reconciliation-1",
+                    "commandId": "run_reconciliation",
+                    "payload": {},
+                },
+            )
+
+            self.assertEqual(response.status_code, 200)
+            event = next(
+                item
+                for item in LocalOperationsLedger(ledger_path).list_audit_events()
+                if item["action"] == "local_reconciliation.run_completed"
+            )
+            self.assertEqual(event["details"]["actor"], "fab_hai_api:hai")
+
     def test_hai_token_is_scoped_to_declared_connector_routes(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             app = create_app({
