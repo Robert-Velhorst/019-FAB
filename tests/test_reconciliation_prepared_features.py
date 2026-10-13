@@ -32,7 +32,7 @@ def test_prepared_matching_preserves_complete_results_and_input(config, seed):
 def test_feature_parsing_is_linear_in_rows_not_comparisons(monkeypatch):
     engine = AutomatedReconciliation({})
     counts = {}
-    for name in ("_amount", "_date", "_vendor_text"):
+    for name in ("_amount", "_date", "_vendor_text", "_document_id"):
         original = getattr(engine, name)
 
         def observed(value, original=original, name=name):
@@ -47,6 +47,7 @@ def test_feature_parsing_is_linear_in_rows_not_comparisons(monkeypatch):
     assert counts["_amount"] <= 180, counts
     assert counts["_date"] <= 180, counts
     assert counts["_vendor_text"] <= 180, counts
+    assert counts["_document_id"] == 80, counts
 
 
 def test_custom_score_override_keeps_its_original_contract():

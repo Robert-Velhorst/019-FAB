@@ -181,12 +181,13 @@ class AutomatedReconciliation:
         prepare = (getattr(self._match_score, "__func__", None) is AutomatedReconciliation._match_score
                    and bool(bank_transactions) and bool(processed_documents))
         prepared_documents = [self._prepare_document(doc) for doc in processed_documents] if prepare else []
+        prepared_document_ids = [self._document_id(doc) for doc in processed_documents] if prepare else []
 
         for bt in bank_transactions:
             best_match = None
             bank_features = self._prepare_bank(bt) if prepare else None
             for index, doc in enumerate(processed_documents):
-                document_id = self._document_id(doc)
+                document_id = prepared_document_ids[index] if prepare else self._document_id(doc)
                 if document_id in matched_doc_ids:
                     continue
 
@@ -234,8 +235,8 @@ class AutomatedReconciliation:
                 })
         
         # Identify unmatched documents
-        for doc in processed_documents:
-            document_id = self._document_id(doc)
+        for index, doc in enumerate(processed_documents):
+            document_id = prepared_document_ids[index] if prepare else self._document_id(doc)
             if document_id not in matched_doc_ids:
                 reconciliation_results.append({
                     "type": "unmatched_document",
