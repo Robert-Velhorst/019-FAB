@@ -26,6 +26,8 @@ from src.utils.tesseract_runtime import (
     tesseract_cli_config,
 )
 
+HANDWRITTEN_OCR_TIMEOUT_SECONDS = 30
+
 
 class HandwrittenRecognitionProcessor(BaseProcessor):
     """Enhance handwriting contrast before running local Tesseract OCR."""
@@ -66,7 +68,12 @@ class HandwrittenRecognitionProcessor(BaseProcessor):
             kernel = np.ones((2, 2), np.uint8)
             prepared = Image.fromarray(cv2.dilate(threshold, kernel, iterations=1))
             config = tesseract_cli_config(self.config, f"--psm {self.psm} --oem 3")
-            full_text = pytesseract.image_to_string(prepared, lang=self.ocr_lang, config=config)
+            full_text = pytesseract.image_to_string(
+                prepared,
+                lang=self.ocr_lang,
+                config=config,
+                timeout=HANDWRITTEN_OCR_TIMEOUT_SECONDS,
+            )
             return {
                 "ocr_text": full_text,
                 "extracted_data": self._extract_data_from_text(full_text),

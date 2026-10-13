@@ -201,6 +201,28 @@ class TestDocumentProcessors(unittest.TestCase):
             processor = HandwrittenRecognitionProcessor(self.config)
             result = processor.process_document(self.dummy_image_path)
         self.assertIn("Handwritten Text", result["ocr_text"])
+        self.assertEqual(fake_pytesseract.image_to_string.call_args.kwargs["timeout"], 30)
+
+    @unittest.skipIf(
+        any(value is None for value in (handwritten_module.cv2, handwritten_module.np, handwritten_module.Image, handwritten_module.pytesseract)),
+        "Handwriting OCR dependencies are optional in this test runtime",
+    )
+    def test_handwritten_processor_bounds_tesseract_runtime(self):
+        fake_cv2 = MagicMock()
+        fake_cv2.imread.return_value = MagicMock()
+        fake_pytesseract = MagicMock()
+        fake_pytesseract.image_to_string.side_effect = RuntimeError("Tesseract timed out")
+        with (
+            patch.object(handwritten_module, "cv2", fake_cv2),
+            patch.object(handwritten_module, "np", MagicMock()),
+            patch.object(handwritten_module, "Image", MagicMock()),
+            patch.object(handwritten_module, "pytesseract", fake_pytesseract),
+            patch.object(handwritten_module, "validate_raster_path", return_value=(100, 100)),
+        ):
+            result = HandwrittenRecognitionProcessor(self.config).process_document(self.dummy_image_path)
+
+        self.assertEqual(fake_pytesseract.image_to_string.call_args.kwargs["timeout"], 30)
+        self.assertIn("timed out", result["error"])
 
     @unittest.skipIf(
         any(value is None for value in (handwritten_module.cv2, handwritten_module.np, handwritten_module.Image, handwritten_module.pytesseract)),
