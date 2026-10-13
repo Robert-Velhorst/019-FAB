@@ -11,6 +11,37 @@ from src.operations.local_ledger import LocalOperationsLedger
 
 
 class TestLocalHaiConnector(unittest.TestCase):
+    def test_hai_safe_cycle_preserves_its_trigger_source(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = create_app({
+                "fab_local_ledger_path": os.path.join(temp_dir, "fab.sqlite3"),
+                "fab_local_api_token": "operator-token-for-tests",
+                "fab_hai_api_token": "hai-token-for-tests",
+                "fab_hai_connector_enabled": True,
+                "fab_hai_allowed_commands": "run_safe_cycle",
+            })
+            client = app.test_client()
+            with patch("src.operations.local_api._autonomy_service") as autonomy:
+                autonomy.return_value.run_cycle.return_value = {
+                    "success": True,
+                    "status": "completed",
+                }
+                response = client.post(
+                    "/api/hai/commands/execute",
+                    headers={"Authorization": "Bearer hai-token-for-tests"},
+                    json={
+                        "requestId": "hai-safe-cycle-1",
+                        "commandId": "run_safe_cycle",
+                        "payload": {"limit": 1},
+                    },
+                )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(
+                autonomy.return_value.run_cycle.call_args.kwargs["trigger_source"],
+                "hai_connector",
+            )
+
     def test_hai_token_is_scoped_to_declared_connector_routes(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             app = create_app({

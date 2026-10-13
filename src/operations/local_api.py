@@ -5015,6 +5015,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
                 include_wave_plan=True,
                 include_wave_sync=True,
                 dry_run=bool(payload.get("dryRun", False)),
+                trigger_source="hai_connector",
             )
 
         def engage_emergency_stop_command(payload: Dict[str, Any], actor: str) -> Dict[str, Any]:
