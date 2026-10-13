@@ -109,6 +109,25 @@ function Write-JsonAtomic {
     }
 }
 
+function Stop-FabStartedNgrokProcess {
+    param([Parameter(Mandatory = $true)][System.Diagnostics.Process]$Process)
+
+    try {
+        $Process.Refresh()
+        if (-not $Process.HasExited) {
+            $Process.Kill()
+            if (-not $Process.WaitForExit(10000)) {
+                return $false
+            }
+        }
+        $Process.Refresh()
+        return [bool]$Process.HasExited
+    }
+    catch {
+        return $false
+    }
+}
+
 if (-not (Test-Path -LiteralPath $fabRuntimePath)) {
     throw "FAB is not running. Start it with Start-FAB.cmd first."
 }
@@ -231,6 +250,8 @@ $overlay = "version: 3`nagent:`n  web_addr: 127.0.0.1:$inspectionPort`n"
 )
 
 $process = $null
+$tunnel = $null
+$publicUrl = ""
 $started = $false
 try {
     & $ngrok.Source config check --config $mainConfig --config $overlayPath | Out-Null
@@ -259,7 +280,6 @@ try {
         -PassThru
 
     $deadline = (Get-Date).AddSeconds([Math]::Max(10, $TimeoutSeconds))
-    $tunnel = $null
     do {
         Start-Sleep -Milliseconds 500
         $process.Refresh()
@@ -360,13 +380,40 @@ finally {
     $apiToken = ""
     $haiApiToken = ""
     if (-not $started) {
-        if ($process -and -not $process.HasExited) {
-            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-            Wait-Process -Id $process.Id -Timeout 10 -ErrorAction SilentlyContinue
+        $processStopped = $true
+        if ($process) {
+            $processStopped = Stop-FabStartedNgrokProcess -Process $process
         }
-        foreach ($path in @($overlayPath, $stdoutPath, $stderrPath)) {
-            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        if ($processStopped) {
+            foreach ($path in @($overlayPath, $stdoutPath, $stderrPath)) {
+                Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+            }
+            Remove-Item -LiteralPath $cloudRuntimePath -Force -ErrorAction SilentlyContinue
         }
-        Remove-Item -LiteralPath $cloudRuntimePath -Force -ErrorAction SilentlyContinue
+        else {
+            $cleanupRuntime = [ordered]@{
+                version = 1
+                service = "fab-ngrok-tunnel"
+                instanceRoot = $root
+                instanceId = $expectedInstanceId
+                processId = $process.Id
+                inspectorPort = $inspectionPort
+                publicUrl = $publicUrl
+                localApiBaseUrl = $apiBaseUrl
+                status = "cleanup_required"
+                authRequired = $true
+                haiManifestUrl = if ($publicUrl) { "$publicUrl/api/hai/manifest" } else { "" }
+                overlayPath = $overlayPath
+                stdoutPath = $stdoutPath
+                stderrPath = $stderrPath
+            }
+            try {
+                Write-JsonAtomic -Value $cleanupRuntime -Path $cloudRuntimePath
+                Write-Warning "FAB could not confirm that the failed ngrok startup stopped. Ownership metadata and agent logs were retained; run Stop-FAB-Ngrok.cmd to retry cleanup."
+            }
+            catch {
+                Write-Warning "FAB could not confirm that ngrok stopped or persist its cleanup record. Agent files were retained under $managedRoot; inspect PID $($process.Id) before removing them."
+            }
+        }
     }
 }

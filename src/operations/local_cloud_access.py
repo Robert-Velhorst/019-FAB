@@ -157,7 +157,11 @@ class LocalCloudAccessService:
             return None
         if str(runtime.get("instanceId") or "") != local_instance_id(self.project_root):
             return None
-        if runtime.get("version") != 1 or runtime.get("service") != "fab-ngrok-tunnel":
+        if (
+            runtime.get("version") != 1
+            or runtime.get("service") != "fab-ngrok-tunnel"
+            or runtime.get("status") != "active"
+        ):
             return None
         if runtime.get("authRequired") is not True:
             return None

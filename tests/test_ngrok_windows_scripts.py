@@ -1,5 +1,6 @@
 import shutil
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -8,6 +9,58 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class TestNgrokWindowsScripts(unittest.TestCase):
+    def test_failed_startup_uses_process_handle_and_confirms_exit(self):
+        script = (ROOT / "Start-FAB-Ngrok.ps1").read_text(encoding="utf-8")
+        start = script.index("function Stop-FabStartedNgrokProcess {")
+        end = script.index("\nif (-not (Test-Path -LiteralPath $fabRuntimePath))", start)
+        helper = script[start:end]
+        shell = shutil.which("pwsh") or shutil.which("powershell")
+        if not shell:
+            self.skipTest("PowerShell is unavailable")
+
+        command = f"""
+        $ErrorActionPreference = 'Stop'
+        {helper}
+        $shellPath = Join-Path $PSHOME ((Get-Process -Id $PID).ProcessName + '.exe')
+        $child = Start-Process -FilePath $shellPath -ArgumentList @('-NoProfile', '-NonInteractive', '-Command', 'Start-Sleep -Seconds 30') -WindowStyle Hidden -PassThru
+        if (-not (Stop-FabStartedNgrokProcess -Process $child)) {{ throw 'The started process was not confirmed stopped.' }}
+        if (-not $child.HasExited) {{ throw 'The process handle still reports a live process.' }}
+        $child.Dispose()
+        'verified'
+        """
+        result = subprocess.run([shell, "-NoProfile", "-NonInteractive", "-Command", command],
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "verified")
+
+    def test_verification_cleanup_retains_files_when_process_stop_is_unconfirmed(self):
+        script = (ROOT / "Test-FAB-Ngrok.ps1").read_text(encoding="utf-8")
+        start = script.index("function Stop-FabStartedNgrokProcess {")
+        end = script.index("\n$inspectionPort = Find-AvailableLoopbackPort", start)
+        helpers = script[start:end]
+        shell = shutil.which("pwsh") or shutil.which("powershell")
+        if not shell:
+            self.skipTest("PowerShell is unavailable")
+
+        command = f"""
+        $ErrorActionPreference = 'Stop'
+        {helpers}
+        function Stop-FabStartedNgrokProcess {{ return $false }}
+        $paths = @('verification-overlay.yml', 'verification.out.log', 'verification.err.log')
+        foreach ($path in $paths) {{ [System.IO.File]::WriteAllText($path, 'retained') }}
+        $child = [System.Diagnostics.Process]::new()
+        $result = Complete-FabNgrokVerificationCleanup -Process $child -Paths $paths
+        if ($result) {{ throw 'Cleanup must report an unconfirmed stop.' }}
+        if (@($paths | Where-Object {{ -not (Test-Path -LiteralPath $_) }}).Count -ne 0) {{ throw 'Cleanup removed files before confirming process exit.' }}
+        foreach ($path in $paths) {{ Remove-Item -LiteralPath $path -Force }}
+        'verified'
+        """
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = subprocess.run([shell, "-NoProfile", "-NonInteractive", "-Command", command],
+                                   cwd=temp_dir, capture_output=True, text=True, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip().splitlines()[-1], "verified")
+
     def test_managed_stop_retains_ownership_when_tunnel_is_live_or_unverifiable(self):
         script = (ROOT / "Stop-FAB-Ngrok.ps1").read_text(encoding="utf-8")
         start = script.index("function Test-FabManagedNgrokProcess {")

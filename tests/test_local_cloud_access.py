@@ -115,6 +115,28 @@ class TestLocalCloudAccessService(unittest.TestCase):
         self.assertIsNone(result["publicUrl"])
         self.assertIsNone(result["haiManifestUrl"])
 
+    def test_cleanup_required_runtime_is_never_reported_as_active(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            runtime_path = self._write_runtime(root)
+            runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
+            runtime["status"] = "cleanup_required"
+            runtime_path.write_text(json.dumps(runtime), encoding="utf-8")
+
+            result = LocalCloudAccessService(
+                project_root=root,
+                runtime_path=runtime_path,
+                api_token_configured=True,
+                inspector_fetch=lambda _url, _timeout: self.fail(
+                    "unverified cleanup state must not query the inspector"
+                ),
+            ).summarize()
+
+        self.assertEqual(result["status"], "invalid_runtime")
+        self.assertFalse(result["active"])
+        self.assertIsNone(result["publicUrl"])
+        self.assertIsNone(result["haiManifestUrl"])
+
     def test_runtime_for_another_checkout_or_without_auth_is_invalid(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

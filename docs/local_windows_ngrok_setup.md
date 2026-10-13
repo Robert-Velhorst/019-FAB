@@ -83,7 +83,7 @@ Start FAB locally, configure ngrok for the Windows user, then run:
 .\Test-FAB-Ngrok.ps1
 ```
 
-The verifier creates an isolated temporary agent, exposes only the local API port, proves an unauthenticated request receives `401`, verifies authenticated liveness and the HAI manifest, and then removes its temporary files and endpoint. It uses FAB's isolated Python runtime and leaves no persistent cloud status.
+The verifier creates an isolated temporary agent, exposes only the local API port, proves an unauthenticated request receives `401`, verifies authenticated liveness and the HAI manifest, and then stops its temporary endpoint. It removes temporary files only after confirming the ngrok process has exited; if shutdown cannot be confirmed, it retains the configuration and logs and reports the PID for inspection. The verifier uses FAB's isolated Python runtime and leaves no persistent cloud status.
 
 If the ngrok account requires a second reserved endpoint, supply it explicitly:
 

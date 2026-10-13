@@ -110,6 +110,52 @@ function Find-AvailableLoopbackPort {
     throw "No free ngrok inspection port is available."
 }
 
+function Stop-FabStartedNgrokProcess {
+    param([Parameter(Mandatory = $true)][System.Diagnostics.Process]$Process)
+
+    try {
+        $Process.Refresh()
+        if (-not $Process.HasExited) {
+            $Process.Kill()
+            if (-not $Process.WaitForExit(10000)) {
+                return $false
+            }
+        }
+        $Process.Refresh()
+        return [bool]$Process.HasExited
+    }
+    catch {
+        return $false
+    }
+}
+
+function Complete-FabNgrokVerificationCleanup {
+    param(
+        [AllowNull()][System.Diagnostics.Process]$Process,
+        [Parameter(Mandatory = $true)][string[]]$Paths
+    )
+
+    $processStopped = $true
+    if ($Process) {
+        $processStopped = Stop-FabStartedNgrokProcess -Process $Process
+    }
+    if ($processStopped) {
+        foreach ($path in $Paths) {
+            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        }
+        return $true
+    }
+
+    $processId = 0
+    try {
+        $processId = $Process.Id
+    }
+    catch {
+    }
+    Write-Warning "FAB could not confirm that the verification ngrok process stopped. Its configuration and logs were retained; inspect PID $processId before removing them: $($Paths -join ', ')"
+    return $false
+}
+
 $inspectionPort = Find-AvailableLoopbackPort -StartPort 4041
 $id = [Guid]::NewGuid().ToString("N")
 $overlayPath = Join-Path $env:TEMP "fab-ngrok-$id.yml"
@@ -247,13 +293,7 @@ try {
 finally {
     $apiToken = ""
     $haiApiToken = ""
-    if ($process -and -not $process.HasExited) {
-        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-        Wait-Process -Id $process.Id -Timeout 10 -ErrorAction SilentlyContinue
-    }
-    foreach ($path in @($overlayPath, $stdoutPath, $stderrPath)) {
-        if (Test-Path -LiteralPath $path) {
-            Remove-Item -LiteralPath $path -Force
-        }
-    }
+    Complete-FabNgrokVerificationCleanup `
+        -Process $process `
+        -Paths @($overlayPath, $stdoutPath, $stderrPath) | Out-Null
 }
