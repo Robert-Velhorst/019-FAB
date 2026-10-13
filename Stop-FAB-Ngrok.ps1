@@ -43,6 +43,36 @@ function Test-OwnedManagedPath {
     }
 }
 
+function Test-FabManagedNgrokProcess {
+    param(
+        [AllowNull()][object]$Process,
+        [Parameter(Mandatory = $true)][string]$OverlayPath
+    )
+
+    if (-not $Process) {
+        return $false
+    }
+    $normalizedCommand = ([string]$Process.CommandLine).Replace("\", "/").ToLowerInvariant()
+    $overlayMarker = ([System.IO.Path]::GetFullPath($OverlayPath)).Replace("\", "/").ToLowerInvariant()
+    return (
+        ([string]$Process.Name).ToLowerInvariant() -eq "ngrok.exe" -and
+        $normalizedCommand.Contains("fab-managed") -and
+        $normalizedCommand.Contains($overlayMarker)
+    )
+}
+
+function Assert-FabNgrokProcessStopped {
+    param(
+        [Parameter(Mandatory = $true)][int]$ProcessId,
+        [Parameter(Mandatory = $true)][string]$OverlayPath
+    )
+
+    $remainingProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $ProcessId" -ErrorAction Stop
+    if (Test-FabManagedNgrokProcess -Process $remainingProcess -OverlayPath $OverlayPath) {
+        throw "The managed FAB ngrok tunnel is still running. Ownership metadata and agent files are being retained."
+    }
+}
+
 if (-not (Test-Path -LiteralPath $runtimePath)) {
     if (-not $Quiet) {
         Write-Host "No managed FAB tunnel is recorded."
@@ -85,20 +115,14 @@ catch {
 if ($processId -le 0) {
     throw "The managed FAB tunnel metadata has no valid process ID. Refusing to remove ownership state or agent files."
 }
-$process = Get-CimInstance Win32_Process -Filter "ProcessId = $processId" -ErrorAction SilentlyContinue
+$process = Get-CimInstance Win32_Process -Filter "ProcessId = $processId" -ErrorAction Stop
 if ($process) {
-    $normalizedCommand = ([string]$process.CommandLine).Replace("\", "/").ToLowerInvariant()
-    $overlayMarker = ([System.IO.Path]::GetFullPath([string]$runtime.overlayPath)).Replace("\", "/").ToLowerInvariant()
-    $owned = (
-        ([string]$process.Name).ToLowerInvariant() -eq "ngrok.exe" -and
-        $normalizedCommand.Contains("fab-managed") -and
-        $normalizedCommand.Contains($overlayMarker)
-    )
-    if (-not $owned) {
+    if (-not (Test-FabManagedNgrokProcess -Process $process -OverlayPath ([string]$runtime.overlayPath))) {
         throw "PID $processId no longer matches this checkout's managed FAB tunnel. Refusing to stop it."
     }
     Stop-Process -Id $processId -Force -ErrorAction Stop
     Wait-Process -Id $processId -Timeout 10 -ErrorAction SilentlyContinue
+    Assert-FabNgrokProcessStopped -ProcessId $processId -OverlayPath ([string]$runtime.overlayPath)
 }
 
 foreach ($path in @($runtime.overlayPath, $runtime.stdoutPath, $runtime.stderrPath)) {
