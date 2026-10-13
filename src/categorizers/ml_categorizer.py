@@ -1,4 +1,5 @@
 import logging
+import importlib.util
 import os
 from typing import Dict, Any
 from src.categorizers.base import BaseCategorizer
@@ -19,6 +20,13 @@ def _joblib_module():
     joblib = loaded_joblib
     return joblib
 
+
+def _ml_dependencies_available():
+    try:
+        return _joblib_module() is not None and importlib.util.find_spec("sklearn") is not None
+    except (ImportError, ModuleNotFoundError, ValueError):
+        return False
+
 class MLCategorizer(BaseCategorizer):
     """Categorizes documents using a trained Machine Learning model."""
 
@@ -33,13 +41,20 @@ class MLCategorizer(BaseCategorizer):
 
     def _load_model(self):
         if os.path.exists(self.model_path) and os.path.exists(self.vectorizer_path):
-            loader = _joblib_module()
-            if loader is None:
+            if not _ml_dependencies_available():
                 self.unavailable_reason = "dependencies_missing"
                 logger.info("ML categorization is unavailable because optional dependencies are missing.")
                 return
-            self.model = loader.load(self.model_path)
-            self.vectorizer = loader.load(self.vectorizer_path)
+            loader = _joblib_module()
+            try:
+                self.model = loader.load(self.model_path)
+                self.vectorizer = loader.load(self.vectorizer_path)
+            except Exception:
+                self.model = None
+                self.vectorizer = None
+                self.unavailable_reason = "model_load_failed"
+                logger.exception("ML categorization artifacts could not be loaded; rule-based fallback remains active.")
+                return
             logger.info("ML categorization model loaded.")
         else:
             self.unavailable_reason = "model_not_trained"

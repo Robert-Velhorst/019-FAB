@@ -1,11 +1,13 @@
 import { createHash, timingSafeEqual } from "crypto";
 import type { Application, Request, Response } from "express";
 import { ENV } from "./_core/env";
-import { sdk } from "./_core/sdk";
 import { getFabLocalApiBaseUrl } from "./fabLocalGateway";
-import { resolveFabOperatorAccess } from "./fabOperatorAccess";
+import { resolveFabOperatorAccess, type FabOperatorAccessOptions } from "./fabOperatorAccess";
+import { FAB_MANAGED_LOGIN_PATH, isFabManagedAuthEnabled, isFabManagedRequestSafe } from "./fabManagedAuth";
+import { FabResponseTooLargeError, readBoundedFabResponseBody } from "./lib/fabResponseBody";
 
 export const MAX_FAB_SOURCE_PREVIEW_BYTES = 25 * 1024 * 1024;
+export const MAX_FAB_CONCURRENT_SOURCE_PREVIEWS = 4;
 
 const SAFE_PREVIEW_MIME_TYPES = new Set([
   "application/json",
@@ -22,12 +24,11 @@ const SAFE_PREVIEW_MIME_TYPES = new Set([
   "text/xml",
 ]);
 
-type FabSourcePreviewOptions = {
-  authenticateRequest?: typeof sdk.authenticateRequest;
+type FabSourcePreviewOptions = FabOperatorAccessOptions & {
   baseUrl?: string;
   fetchImpl?: typeof fetch;
-  localOperatorMode?: boolean;
   maxBytes?: number;
+  maxConcurrent?: number;
   timeoutMs?: number;
   token?: string;
 };
@@ -64,6 +65,15 @@ export function registerFabSourcePreviewRoutes(
   app: Application,
   options: FabSourcePreviewOptions = {},
 ) {
+  const maxBytes = options.maxBytes ?? MAX_FAB_SOURCE_PREVIEW_BYTES;
+  const maxConcurrent = options.maxConcurrent ?? MAX_FAB_CONCURRENT_SOURCE_PREVIEWS;
+  const timeoutMs = options.timeoutMs ?? 12_000;
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_FAB_SOURCE_PREVIEW_BYTES
+    || !Number.isSafeInteger(maxConcurrent) || maxConcurrent < 1 || maxConcurrent > MAX_FAB_CONCURRENT_SOURCE_PREVIEWS
+    || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120_000) {
+    throw new Error("Invalid FAB source preview resource limits");
+  }
+  let activePreviews = 0;
   app.get("/api/fab/source/:documentId", async (req: Request, res: Response) => {
     const documentId = Number(req.params.documentId);
     if (!Number.isSafeInteger(documentId) || documentId <= 0) {
@@ -73,11 +83,21 @@ export function registerFabSourcePreviewRoutes(
 
     const access = await resolveFabOperatorAccess(req, options);
     if (!access.allowed) {
+      if (isFabManagedAuthEnabled() && isFabManagedRequestSafe(req) && req.headers.accept?.includes("text/html")) {
+        sourceSecurityHeaders(res);
+        res.redirect(303, FAB_MANAGED_LOGIN_PATH);
+        return;
+      }
       sourceError(res, 403, "FAB operator access is required");
       return;
     }
 
-    const maxBytes = options.maxBytes ?? MAX_FAB_SOURCE_PREVIEW_BYTES;
+    if (req.aborted || res.destroyed) return;
+    if (activePreviews >= maxConcurrent) {
+      res.setHeader("retry-after", "1");
+      sourceError(res, 429, "FAB source previews are busy; please try again");
+      return;
+    }
     const baseUrl = getFabLocalApiBaseUrl(options.baseUrl);
     const target = new URL(`/api/documents/${documentId}/source`, baseUrl);
     if (target.origin !== baseUrl.origin) {
@@ -85,15 +105,23 @@ export function registerFabSourcePreviewRoutes(
       return;
     }
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 12_000);
     const headers = new Headers({ accept: "application/pdf,image/*,text/plain,application/json,application/xml" });
     const token = options.token ?? ENV.fabLocalApiToken;
     if (token) headers.set("authorization", `Bearer ${token}`);
+    const controller = new AbortController();
+    const disconnected = () => {
+      if (!res.writableFinished) controller.abort();
+    };
+    req.once("aborted", disconnected);
+    res.once("close", disconnected);
+    let timedOut = false;
+    const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
+    activePreviews += 1;
 
     try {
       const fetchImpl = options.fetchImpl ?? fetch;
-      const upstream = await fetchImpl(target, { headers, signal: controller.signal });
+      const upstream = await fetchImpl(target, { headers, signal: controller.signal, redirect: "manual" });
+      if (req.aborted || res.destroyed) return;
       if (!upstream.ok) {
         const status = [404, 409, 413, 415].includes(upstream.status) ? upstream.status : 502;
         sourceError(res, status, "The verified FAB source preview is unavailable");
@@ -109,17 +137,8 @@ export function registerFabSourcePreviewRoutes(
         return;
       }
 
-      const advertisedLength = Number(upstream.headers.get("content-length") || "0");
-      if (Number.isFinite(advertisedLength) && advertisedLength > maxBytes) {
-        sourceError(res, 413, "The FAB source file exceeds the preview limit");
-        return;
-      }
-
-      const body = Buffer.from(await upstream.arrayBuffer());
-      if (body.byteLength > maxBytes) {
-        sourceError(res, 413, "The FAB source file exceeds the preview limit");
-        return;
-      }
+      const body = await readBoundedFabResponseBody(upstream, maxBytes);
+      if (req.aborted || res.destroyed) return;
 
       const expectedSha256 = String(upstream.headers.get("x-fab-source-sha256") || "").toLowerCase();
       const integrity = String(upstream.headers.get("x-fab-source-integrity") || "").toLowerCase();
@@ -137,12 +156,30 @@ export function registerFabSourcePreviewRoutes(
       res.setHeader("x-fab-source-sha256", expectedSha256);
       res.status(200).send(body);
     } catch (error) {
-      const timedOut = error instanceof DOMException && error.name === "AbortError";
+      if (req.aborted || res.destroyed) return;
+      if (error instanceof FabResponseTooLargeError) {
+        sourceError(res, 413, "The FAB source file exceeds the preview limit");
+        return;
+      }
       sourceError(res, timedOut ? 504 : 502, timedOut
         ? "The FAB source preview request timed out"
         : "The verified FAB source preview is unavailable");
     } finally {
       clearTimeout(timeout);
+      req.off("aborted", disconnected);
+      res.off("close", disconnected);
+      controller.abort();
+      // Keep the slot while Node still holds bytes for a slow browser.
+      const release = () => {
+        res.off("finish", release);
+        res.off("close", release);
+        activePreviews -= 1;
+      };
+      if (res.destroyed || res.writableFinished) release();
+      else {
+        res.once("finish", release);
+        res.once("close", release);
+      }
     }
   });
 }

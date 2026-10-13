@@ -1,7 +1,9 @@
+import io
 import os
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 
 from src.operations.local_api import create_app
 from src.operations.local_hai_connector import LocalHaiConnector
@@ -9,6 +11,65 @@ from src.operations.local_ledger import LocalOperationsLedger
 
 
 class TestLocalHaiConnector(unittest.TestCase):
+    def test_hai_safe_cycle_preserves_its_trigger_source(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = create_app({
+                "fab_local_ledger_path": os.path.join(temp_dir, "fab.sqlite3"),
+                "fab_local_api_token": "operator-token-for-tests",
+                "fab_hai_api_token": "hai-token-for-tests",
+                "fab_hai_connector_enabled": True,
+                "fab_hai_allowed_commands": "run_safe_cycle",
+            })
+            client = app.test_client()
+            with patch("src.operations.local_api._autonomy_service") as autonomy:
+                autonomy.return_value.run_cycle.return_value = {
+                    "success": True,
+                    "status": "completed",
+                }
+                response = client.post(
+                    "/api/hai/commands/execute",
+                    headers={"Authorization": "Bearer hai-token-for-tests"},
+                    json={
+                        "requestId": "hai-safe-cycle-1",
+                        "commandId": "run_safe_cycle",
+                        "payload": {"limit": 1},
+                    },
+                )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(
+                autonomy.return_value.run_cycle.call_args.kwargs["trigger_source"],
+                "hai_connector",
+            )
+
+    def test_hai_reconciliation_actor_is_persisted_in_ledger(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger_path = os.path.join(temp_dir, "fab.sqlite3")
+            app = create_app({
+                "fab_local_ledger_path": ledger_path,
+                "fab_local_api_token": "operator-token-for-tests",
+                "fab_hai_api_token": "hai-token-for-tests",
+                "fab_hai_connector_enabled": True,
+                "fab_hai_allowed_commands": "run_reconciliation",
+            })
+            response = app.test_client().post(
+                "/api/hai/commands/execute",
+                headers={"Authorization": "Bearer hai-token-for-tests"},
+                json={
+                    "requestId": "hai-reconciliation-1",
+                    "commandId": "run_reconciliation",
+                    "payload": {},
+                },
+            )
+
+            self.assertEqual(response.status_code, 200)
+            event = next(
+                item
+                for item in LocalOperationsLedger(ledger_path).list_audit_events()
+                if item["action"] == "local_reconciliation.run_completed"
+            )
+            self.assertEqual(event["details"]["actor"], "fab_hai_api:hai")
+
     def test_hai_token_is_scoped_to_declared_connector_routes(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             app = create_app({
@@ -61,6 +122,33 @@ class TestLocalHaiConnector(unittest.TestCase):
             self.assertIn("submit_to_wave", manifest["excludedCapabilities"])
             self.assertFalse(result["success"])
             self.assertEqual(result["status"], "connector_disabled")
+
+    def test_blocked_plan_reports_command_disallowed_when_connector_cannot_execute(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            policies = (
+                (
+                    {"fab_hai_connector_enabled": False, "fab_hai_allowed_commands": "refresh_notifications"},
+                    "connector_disabled",
+                ),
+                (
+                    {
+                        "fab_hai_connector_enabled": True,
+                        "fab_hai_allowed_commands": "refresh_notifications",
+                        "fab_maintenance_mode": True,
+                    },
+                    "maintenance_locked",
+                ),
+            )
+
+            for config, expected_status in policies:
+                with self.subTest(expected_status=expected_status):
+                    connector = LocalHaiConnector(ledger, config)
+
+                    result = connector.plan("refresh_notifications")
+
+                    self.assertEqual(result["status"], expected_status)
+                    self.assertFalse(result["command"]["allowed"])
 
     def test_execution_requires_allowlist_and_is_idempotent(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -178,6 +266,41 @@ class TestLocalHaiConnector(unittest.TestCase):
             self.assertEqual(completed["status"], "completed")
             self.assertEqual(changed_payload["status"], "idempotency_conflict")
             self.assertEqual(changed_command["status"], "idempotency_conflict")
+
+    def test_idempotent_result_replay_rechecks_current_connector_policy(self):
+        revoked_policies = (
+            ({"fab_hai_connector_enabled": False, "fab_hai_allowed_commands": "refresh_notifications"}, "connector_disabled"),
+            ({"fab_hai_connector_enabled": True, "fab_hai_allowed_commands": "run_reconciliation"}, "not_allowed"),
+            ({"fab_hai_connector_enabled": True, "fab_hai_allowed_commands": "refresh_notifications", "fab_maintenance_mode": True}, "maintenance_locked"),
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            for index, (config, expected_status) in enumerate(revoked_policies):
+                request_id = f"revoked-policy-{index}"
+                enabled = LocalHaiConnector(
+                    ledger,
+                    {"fab_hai_connector_enabled": True, "fab_hai_allowed_commands": "refresh_notifications"},
+                    executors={"refresh_notifications": lambda payload, actor: {"sensitiveResult": "private"}},
+                )
+                first = enabled.execute(request_id, "refresh_notifications")
+                revoked = LocalHaiConnector(
+                    ledger,
+                    config,
+                    executors={"refresh_notifications": lambda payload, actor: {"sensitiveResult": "private"}},
+                )
+
+                replay = revoked.execute(request_id, "refresh_notifications")
+
+                self.assertEqual(first["status"], "completed")
+                self.assertEqual(replay["status"], expected_status)
+                self.assertNotIn("result", replay)
+
+            allowed_without_executor = LocalHaiConnector(
+                ledger,
+                {"fab_hai_connector_enabled": True, "fab_hai_allowed_commands": "refresh_notifications"},
+            )
+            replay = allowed_without_executor.execute("revoked-policy-0", "refresh_notifications")
+            self.assertEqual(replay["status"], "already_executed")
 
     def test_hai_can_engage_but_cannot_clear_operator_emergency_stop(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -388,6 +511,106 @@ class TestLocalHaiConnector(unittest.TestCase):
             self.assertEqual(conflicting.get_json()["status"], "idempotency_conflict")
             self.assertEqual(invalid_nested_payload.status_code, 400)
             self.assertEqual(invalid_nested_payload.get_json()["status"], "invalid")
+
+    def test_hai_token_cannot_spoof_audit_actor_on_allowed_routes(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = create_app({
+                "fab_local_ledger_path": os.path.join(temp_dir, "fab.sqlite3"),
+                "fab_local_api_token": "operator-token-for-tests",
+                "fab_hai_api_token": "hai-token-for-tests",
+            })
+            client = app.test_client()
+            headers = {"Authorization": "Bearer hai-token-for-tests"}
+            operator_headers = {"Authorization": "Bearer operator-token-for-tests"}
+            with (
+                patch("src.operations.local_api.LocalWaveReceiptExecutorService") as executor,
+                patch("src.operations.local_api.DriveWaveDeliveryService") as delivery,
+                patch("src.operations.local_api.DriveRelayIntakeService") as drive_relay,
+            ):
+                executor.return_value.register.return_value = {"success": True}
+                executor.return_value.claim_next.return_value = {"success": True}
+                executor.return_value.release.return_value = {"success": True}
+                delivery.return_value.record_attachment_readback.return_value = {"success": True}
+                drive_relay.return_value.status.return_value = {"maxBytes": 2048}
+                drive_relay.return_value.ingest.return_value = {"success": True}
+
+                responses = [
+                    client.post(
+                        "/api/wave/receipt-executor/session",
+                        headers=headers,
+                        json={"actor": "operator_admin", "executorId": "executor-1"},
+                    ),
+                    client.post(
+                        "/api/wave/receipt-executor/claim",
+                        headers=headers,
+                        json={"actor": "operator_admin"},
+                    ),
+                    client.post(
+                        "/api/wave/receipt-executor/release",
+                        headers=headers,
+                        json={"actor": "operator_admin", "documentId": 1},
+                    ),
+                    client.post(
+                        "/api/drive-wave/documents/1/attachment-readback",
+                        headers=headers,
+                        data={
+                            "actor": "operator_admin",
+                            "evidence": "{}",
+                            "executorId": "executor-1",
+                            "sessionId": "session-1",
+                            "attachment": (io.BytesIO(b"receipt"), "receipt.pdf"),
+                        },
+                        content_type="multipart/form-data",
+                    ),
+                    client.post(
+                        "/api/connectors/google-drive/relay",
+                        headers=headers,
+                        data={
+                            "metadata": '{"actor":"operator_admin"}',
+                            "file": (io.BytesIO(b"receipt"), "receipt.pdf"),
+                        },
+                        content_type="multipart/form-data",
+                    ),
+                ]
+                operator_response = client.post(
+                    "/api/wave/receipt-executor/session",
+                    headers=operator_headers,
+                    json={"actor": "wave_browser_executor"},
+                )
+
+            self.assertEqual(
+                [response.status_code for response in responses],
+                [200, 200, 200, 200, 201],
+            )
+            self.assertEqual(operator_response.status_code, 200)
+            self.assertEqual(
+                executor.return_value.register.call_args_list[0].kwargs["actor"],
+                "fab_hai_api:hai",
+            )
+            self.assertEqual(
+                executor.return_value.register.call_args_list[1].kwargs["actor"],
+                "wave_browser_executor",
+            )
+            self.assertEqual(
+                executor.return_value.claim_next.call_args.kwargs["actor"],
+                "fab_hai_api:hai",
+            )
+            self.assertEqual(
+                executor.return_value.release.call_args.kwargs["actor"],
+                "fab_hai_api:hai",
+            )
+            self.assertEqual(
+                [call.kwargs["actor"] for call in executor.return_value.release.call_args_list],
+                ["fab_hai_api:hai", "fab_hai_api:hai"],
+            )
+            self.assertEqual(
+                delivery.return_value.record_attachment_readback.call_args.kwargs["actor"],
+                "fab_hai_api:hai",
+            )
+            self.assertEqual(
+                drive_relay.return_value.ingest.call_args.kwargs["actor"],
+                "fab_hai_api:hai",
+            )
 
 
 if __name__ == "__main__":

@@ -19,7 +19,7 @@ FAB is local-first. The supported Windows runtime is the authenticated API, auto
 .\.venv\Scripts\python.exe -m src.run_fab_doctor
 ```
 
-The first start installs the local Python requirements into `.venv` and the dashboard packages into `web/node_modules` when they are absent. FAB can bootstrap Python 3.13 through the Windows Python launcher, `uv`, or a matching system `python`. It binds that private environment to the SHA-256 checksum of `requirements-local.txt`; when the dependency contract changes, the launcher stops FAB and rebuilds only this checkout's verified, non-linked `.venv`. This removes packages that are no longer part of FAB without modifying the system Python installation. The launcher prints the selected URLs. Defaults are:
+The first start installs the hash-locked local Python requirements into `.venv` and the dashboard packages into `web/node_modules` when they are absent. FAB can bootstrap Python 3.13 through the Windows Python launcher, `uv`, or a matching system `python`. It binds that private environment to the SHA-256 checksum of `requirements-local.lock`; when the dependency contract changes, the launcher stops FAB and rebuilds only this checkout's verified, non-linked `.venv`. This removes packages that are no longer part of FAB without modifying the system Python installation. Optional ML dependencies are separate; see [Dependencies](dependencies.md). The launcher prints the selected URLs. Defaults are:
 
 - Operator dashboard: `http://127.0.0.1:3000/admin/operations`
 - Local API: `http://127.0.0.1:5001`
@@ -37,6 +37,21 @@ The managed launcher exposes only the authenticated FAB API. The operator dashbo
 ```powershell
 .\Start-FAB-Ngrok.cmd
 ```
+
+Run the ngrok launcher and verifier with the same configuration/environment used
+to start FAB. Both resolve the configured operator and separate HAI credentials,
+including `FAB_LOCAL_API_TOKEN_FILE` and `FAB_HAI_API_TOKEN_FILE`. Configured values
+take precedence over encrypted stored credentials. When configuration omits a
+credential, they can read the existing encrypted local store, but never create or
+rotate a credential. Missing, invalid or identical operator/HAI credentials block
+the tunnel before any public endpoint is started. The `local` profile retains the
+main launcher's stored-credential fallback for short legacy configured values;
+an explicit weak `windows` credential is rejected instead.
+
+If configuration changed since FAB started, these scripts cannot recover the
+running process's former credentials. Restore its startup configuration or perform
+an explicit owned stop/start with the intended settings. Do not replace tokens or
+disable authentication simply to make a tunnel check pass.
 
 When another ngrok endpoint is already online, FAB refuses to stop or pool it. Reserve a separate HTTPS endpoint for FAB and pass its clean origin explicitly:
 
@@ -68,7 +83,7 @@ Start FAB locally, configure ngrok for the Windows user, then run:
 .\Test-FAB-Ngrok.ps1
 ```
 
-The verifier creates an isolated temporary agent, exposes only the local API port, proves an unauthenticated request receives `401`, verifies authenticated liveness and the HAI manifest, and then removes its temporary files and endpoint. It uses FAB's isolated Python runtime and leaves no persistent cloud status.
+The verifier creates an isolated temporary agent, exposes only the local API port, proves an unauthenticated request receives `401`, verifies authenticated liveness and the HAI manifest, and then stops its temporary endpoint. It removes temporary files only after confirming the ngrok process has exited; if shutdown cannot be confirmed, it retains the configuration and logs and reports the PID for inspection. The verifier uses FAB's isolated Python runtime and leaves no persistent cloud status.
 
 If the ngrok account requires a second reserved endpoint, supply it explicitly:
 

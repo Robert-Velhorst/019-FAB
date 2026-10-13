@@ -5,6 +5,7 @@ from src.validation.financial_consistency import (
     DEFAULT_VAT_MAX_TOTAL_RATIO,
     assess_record_date,
     assess_vat_amount,
+    finite_number,
     vat_issue_message,
 )
 
@@ -17,9 +18,11 @@ class ReceiptValidator:
             "vendor_name", "transaction_date", "total_amount"
         ])
         self.btw_number_pattern = self.config.get("btw_number_pattern", r"NL\d{9}B\d{2}")
-        self.required_field_confidence_threshold = float(
+        self.required_field_confidence_threshold = finite_number(
             self.config.get("receipt_required_field_confidence_threshold", 0.7)
         )
+        if self.required_field_confidence_threshold is None or not 0 <= self.required_field_confidence_threshold <= 1:
+            raise ValueError("receipt_required_field_confidence_threshold must be finite and between 0 and 1")
         try:
             self.vat_max_total_ratio = float(
                 self.config.get("vat_max_total_ratio", DEFAULT_VAT_MAX_TOTAL_RATIO)
@@ -49,14 +52,11 @@ class ReceiptValidator:
                 continue
             confidence = field_confidences.get(field)
             if confidence is not None:
-                try:
-                    if float(confidence) < self.required_field_confidence_threshold:
-                        errors.append(
-                            f"Low confidence for required field: {field} "
-                            f"({float(confidence):.2f})"
-                        )
-                except (TypeError, ValueError):
+                number = finite_number(confidence)
+                if number is None or not 0 <= number <= 1:
                     errors.append(f"Invalid confidence for required field: {field}")
+                elif number < self.required_field_confidence_threshold:
+                    errors.append(f"Low confidence for required field: {field} ({number:.2f})")
 
         if "vendor_name" in self.required_fields and not str(extracted_data.get("vendor_name") or "").strip():
             if "Missing required field: vendor_name" in errors:
@@ -89,8 +89,12 @@ class ReceiptValidator:
                     warnings.append(message)
 
         # 4. Basic amount consistency check (e.g., total > 0)
-        if extracted_data.get("total_amount") is not None and extracted_data["total_amount"] <= 0:
-            errors.append("Total amount is zero or negative.")
+        if extracted_data.get("total_amount") is not None:
+            total = finite_number(extracted_data["total_amount"])
+            if total is None:
+                errors.append("Total amount must be a finite numeric value.")
+            elif total <= 0:
+                errors.append("Total amount is zero or negative.")
 
         # 5. Date plausibility validation. The extractor normalizes to ISO, but
         # retained OCR can contain valid-looking years that are not credible.

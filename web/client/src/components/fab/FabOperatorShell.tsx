@@ -8,6 +8,7 @@ import {
   History,
   LayoutDashboard,
   Landmark,
+  LogOut,
   Menu,
   PanelLeftClose,
   PanelLeftOpen,
@@ -40,6 +41,7 @@ type FabOperatorShellProps = {
   connectionStatus: string;
   organization: string;
   operatorLabel: string;
+  managedOperator?: boolean;
   search: string;
   onSearchChange: (value: string) => void;
   onRefresh: () => void;
@@ -54,6 +56,7 @@ export function FabOperatorShell({
   connectionStatus,
   organization,
   operatorLabel,
+  managedOperator = false,
   search,
   onSearchChange,
   onRefresh,
@@ -138,6 +141,7 @@ export function FabOperatorShell({
         <div className="fab-sidebar-footer">
           <div className="fab-language-switch" aria-label={copy("Language", "Taal")}><button className={lang === "en" ? "is-active" : ""} onClick={() => setLang("en")} aria-pressed={lang === "en"}>EN</button><button className={lang === "nl" ? "is-active" : ""} onClick={() => setLang("nl")} aria-pressed={lang === "nl"}>NL</button></div>
           <button onClick={() => { setNavOpen(false); onOpenCommands(); }}><Settings2 aria-hidden="true" /><span>{copy("Safe commands", "Veilige opdrachten")}</span></button>
+          {managedOperator && <button onClick={() => { window.location.href = "/operator/logout"; }}><LogOut aria-hidden="true" /><span>{copy("Sign out", "Uitloggen")}</span></button>}
           <div className="fab-operator-id"><Activity aria-hidden="true" /><span><strong>{operatorLabel}</strong><small>{copy("Authenticated operator", "Geverifieerde operator")}</small></span></div>
         </div>
       </aside>

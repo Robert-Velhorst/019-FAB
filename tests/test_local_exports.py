@@ -26,6 +26,73 @@ class _FakeWaveExecutor:
 
 
 class TestLocalExportAttemptService(unittest.TestCase):
+    def test_source_processing_blocks_old_draft_approval_and_execution(self):
+        scenarios = [
+            (stage, status, expected)
+            for stage in ("approval", "execution", "deferred")
+            for status, expected in (
+                ("failed", "blocked_processing"),
+                ("duplicate", "blocked_duplicate"),
+                ("needs_review", "blocked_by_review"),
+            )
+        ]
+        for stage, status, expected in scenarios:
+            with self.subTest(stage=stage, status=status), tempfile.TemporaryDirectory() as temp_dir:
+                ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+                source_path = os.path.join(temp_dir, "receipt.txt")
+                source_bytes = b"Synthetic receipt evidence"
+                with open(source_path, "wb") as source:
+                    source.write(source_bytes)
+                document_id = ledger.register_document({
+                    "source": "scanner", "sourceDocumentId": "reprocessing-export",
+                    "originalFilename": "receipt.txt", "storagePath": source_path,
+                    "documentType": "receipt", "processingStatus": "reviewed",
+                    "vendorName": "Office Shop", "category": "Office Supplies",
+                    "transactionDate": "2026-06-28", "totalAmount": 42.5,
+                })
+                route = LocalRoutingService(ledger).prepare_document_route(document_id)
+                executor = _FakeWaveExecutor({"status": "success", "external_id": "must-not-send"})
+                service = LocalExportAttemptService(ledger, wave_executor=executor)
+                prepared = service.prepare_from_routing_attempt(route["routingAttemptId"])
+                attempt_id = prepared["exportAttemptId"]
+                original_payload = ledger.get_export_attempt(attempt_id)["payload"]
+                if stage != "approval":
+                    approved = service.approve_attempt(attempt_id, confirmation=EXPORT_APPROVAL_PHRASE)
+                    self.assertEqual(approved["status"], "approved")
+                if stage == "deferred":
+                    ledger.update_export_attempt(attempt_id, {"status": "deferred"})
+                # Do not refresh the normalized record: the final gate must read the source.
+                ledger.update_document(document_id, {"processingStatus": status})
+
+                result = (service.execute_attempt(attempt_id) if stage != "approval"
+                          else service.approve_attempt(attempt_id, confirmation=EXPORT_APPROVAL_PHRASE))
+
+                self.assertEqual(result["status"], expected)
+                self.assertFalse(result["success"])
+                self.assertEqual(result["externalSubmission"], "not_executed")
+                self.assertEqual(executor.calls, [])
+                attempt = ledger.get_export_attempt(attempt_id)
+                self.assertNotEqual(attempt["status"], "execution_in_progress")
+                self.assertNotIn(attempt["status"], {"approved", "deferred"})
+                self.assertEqual(attempt["payload"], original_payload)
+                record = ledger.get_bookkeeping_record_by_document(document_id)
+                self.assertEqual(record["export_status"], expected)
+                self.assertEqual(attempt["approval_required"], 1)
+                audit = [event for event in ledger.list_audit_events(limit=50)
+                         if event["action"] == "local_export_attempt.source_processing_blocked"]
+                self.assertEqual(len(audit), 1)
+                self.assertEqual(audit[0]["details"]["reason"], expected)
+                with open(source_path, "rb") as source:
+                    self.assertEqual(source.read(), source_bytes)
+                if stage == "execution" and status == "failed":
+                    ledger.update_document(document_id, {"processingStatus": "reviewed"})
+                    self.assertEqual(service.execute_attempt(attempt_id)["status"], "not_approved")
+                    self.assertEqual(executor.calls, [])
+                    reapproved = service.approve_attempt(attempt_id, confirmation=EXPORT_APPROVAL_PHRASE)
+                    self.assertEqual(reapproved["status"], "approved")
+                    self.assertEqual(service.execute_attempt(attempt_id)["status"], "executed")
+                    self.assertEqual(len(executor.calls), 1)
+
     def _register_mijngeldzaken_document(self, ledger):
         return ledger.register_document({
             "source": "scanner",

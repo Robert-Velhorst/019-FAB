@@ -9,6 +9,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, Iterable, List, Optional
 
 from src.operations.local_ledger import LocalOperationsLedger
+from src.validation.financial_consistency import finite_number
 
 
 FINAL_RECONCILIATION_STATUSES = {"approved", "reconciled", "ignored"}
@@ -152,6 +153,25 @@ class LocalBankTransactionImportService:
         source = str(source or "manual_json").strip()[:120] or "manual_json"
         filename = str(filename or "").strip()[:255] or None
         actor = str(actor or "local_bank_import").strip()[:200] or "local_bank_import"
+        with self.ledger.write_transaction():
+            return self._record_transaction_import(
+                transactions,
+                account_identifier=account_identifier,
+                source=source,
+                filename=filename,
+                format=format,
+                actor=actor,
+            )
+
+    def _record_transaction_import(
+        self,
+        transactions: List[Dict[str, Any]],
+        account_identifier: str,
+        source: str,
+        filename: Optional[str],
+        format: str,
+        actor: str,
+    ) -> Dict[str, Any]:
         import_id = self.ledger.create_bank_statement_import({
             "source": source,
             "accountIdentifier": account_identifier,
@@ -162,6 +182,8 @@ class LocalBankTransactionImportService:
         })
         imported = 0
         duplicates = 0
+        identity_conflicts = 0
+        identity_conflict_rows: List[Dict[str, Any]] = []
         skipped: List[Dict[str, Any]] = []
         bank_transaction_ids: List[int] = []
         generated_occurrences: Dict[str, int] = {}
@@ -187,17 +209,33 @@ class LocalBankTransactionImportService:
                 normalized["accountIdentifier"],
                 normalized["transactionId"],
             )
+            if existing:
+                if _same_imported_transaction(existing, normalized):
+                    duplicates += 1
+                    bank_transaction_ids.append(int(existing["id"]))
+                    continue
+                identity_conflicts += 1
+                conflict = {
+                    "row": index + 1,
+                    "transactionId": normalized["transactionId"],
+                    "bankTransactionId": int(existing["id"]),
+                }
+                if len(identity_conflict_rows) < 25:
+                    identity_conflict_rows.append(conflict)
+                skipped.append({"row": index, "reason": "transaction_identity_conflict"})
+                continue
             transaction_record_id = self.ledger.upsert_bank_transaction({
                 **normalized,
                 "importId": import_id,
             })
             bank_transaction_ids.append(transaction_record_id)
-            if existing:
-                duplicates += 1
-            else:
-                imported += 1
+            imported += 1
 
-        status = "completed" if imported or duplicates else "empty"
+        status = (
+            "needs_review"
+            if identity_conflicts
+            else "completed" if imported or duplicates else "empty"
+        )
         self.ledger.update_bank_statement_import(import_id, {
             "status": status,
             "rowsSeen": len(transactions),
@@ -207,6 +245,8 @@ class LocalBankTransactionImportService:
                 "skipped": skipped[:25],
                 "skippedCount": len(skipped),
                 "bankTransactionIds": bank_transaction_ids[:100],
+                "identityConflictRows": identity_conflict_rows,
+                "identityConflictsTruncated": identity_conflicts > len(identity_conflict_rows),
             },
         })
         summary = {
@@ -220,12 +260,19 @@ class LocalBankTransactionImportService:
             "rowsSeen": len(transactions),
             "rowsImported": imported,
             "duplicates": duplicates,
+            "identityConflicts": identity_conflicts,
+            "identityConflictRows": identity_conflict_rows,
+            "identityConflictsTruncated": identity_conflicts > len(identity_conflict_rows),
             "skipped": len(skipped),
             "bankTransactionIds": bank_transaction_ids,
             "externalSubmission": "not_executed",
         }
         self.ledger.record_audit_event({
-            "action": "local_bank_transactions.import_completed",
+            "action": (
+                "local_bank_transactions.import_needs_review"
+                if identity_conflicts
+                else "local_bank_transactions.import_completed"
+            ),
             "entityType": "bank_statement_import",
             "entityId": str(import_id),
             "details": {
@@ -236,6 +283,7 @@ class LocalBankTransactionImportService:
                 "rowsSeen": summary["rowsSeen"],
                 "rowsImported": imported,
                 "duplicates": duplicates,
+                "identityConflicts": identity_conflicts,
                 "skipped": len(skipped),
                 "externalSubmission": "not_executed",
             },
@@ -243,12 +291,34 @@ class LocalBankTransactionImportService:
         return summary
 
     def transactions_for_reconciliation(self, limit: int = 100) -> List[Dict[str, Any]]:
-        rows = [
-            row
-            for row in self.ledger.list_bank_transactions(limit=limit)
-            if row.get("reconciliation_status") not in FINAL_RECONCILIATION_STATUSES
-        ]
-        return [_transaction_for_reconciliation(row) for row in rows[: _bounded_limit(limit)]]
+        rows = self.ledger.list_bank_transactions(
+            reconciliation_status=OPEN_RECONCILIATION_STATUSES, limit=limit,
+        )
+        return [_transaction_for_reconciliation(row) for row in rows]
+
+
+def _same_imported_transaction(existing: Dict[str, Any], incoming: Dict[str, Any]) -> bool:
+    try:
+        existing_amount = Decimal(str(existing.get("amount")))
+        incoming_amount = Decimal(str(incoming.get("amount")))
+    except (InvalidOperation, TypeError, ValueError):
+        return False
+    if not existing_amount.is_finite() or not incoming_amount.is_finite():
+        return False
+    return (
+        existing.get("transaction_date") == incoming.get("transactionDate")
+        and existing_amount == incoming_amount
+        and str(existing.get("currency") or "EUR").strip().upper()
+        == str(incoming.get("currency") or "EUR").strip().upper()
+        and _normalized_import_text(existing.get("description"))
+        == _normalized_import_text(incoming.get("description"))
+        and _normalized_import_text(existing.get("counterparty"))
+        == _normalized_import_text(incoming.get("counterparty"))
+    )
+
+
+def _normalized_import_text(value: Any) -> str:
+    return " ".join(str(value or "").split()).casefold()
 
 
 def normalize_bank_transaction(
@@ -441,13 +511,15 @@ def _parse_mt940_61(line: str, sequence: int) -> Dict[str, Any]:
 
 
 def _parse_amount(lookup: _Lookup) -> Optional[float]:
-    amount = _parse_number(
-        lookup.first("amount", "transactionAmount", "transaction_amount", "bedrag", "value")
-    )
-    if amount is not None:
-        return amount
-    debit = _parse_number(lookup.first("debit", "af", "withdrawal"))
-    credit = _parse_number(lookup.first("credit", "bij", "deposit"))
+    value = lookup.first("amount", "transactionAmount", "transaction_amount", "bedrag", "value")
+    if value is not None:
+        return _parse_number(value)
+    debit_value = lookup.first("debit", "af", "withdrawal")
+    credit_value = lookup.first("credit", "bij", "deposit")
+    debit = _parse_number(debit_value)
+    credit = _parse_number(credit_value)
+    if (debit_value is not None and debit is None) or (credit_value is not None and credit is None):
+        return None
     if debit is None and credit is None:
         return None
     total = Decimal("0")
@@ -455,17 +527,21 @@ def _parse_amount(lookup: _Lookup) -> Optional[float]:
         total -= abs(Decimal(str(debit)))
     if credit is not None:
         total += abs(Decimal(str(credit)))
-    return float(total)
+    return finite_number(total)
 
 
 def _parse_number(value: Any) -> Optional[float]:
     if value is None or isinstance(value, bool):
         return None
     if isinstance(value, (int, float, Decimal)):
-        return float(value)
+        return finite_number(value)
     text = str(value).strip()
     if not text:
         return None
+    try:
+        return finite_number(Decimal(text))
+    except InvalidOperation:
+        pass
     negative = text.startswith("(") and text.endswith(")")
     text = re.sub(r"[^\d,.\-]", "", text)
     if not text or text in {"-", ".", ","}:
@@ -487,7 +563,7 @@ def _parse_number(value: Any) -> Optional[float]:
         return None
     if negative:
         number = -abs(number)
-    return float(number)
+    return finite_number(number)
 
 
 def _normalize_date(value: Any) -> Optional[str]:

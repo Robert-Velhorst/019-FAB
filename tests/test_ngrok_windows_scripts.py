@@ -1,3 +1,7 @@
+import os
+import shutil
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -6,6 +10,150 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class TestNgrokWindowsScripts(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "process inspection is Windows-specific")
+    def test_private_inspector_must_belong_to_managed_ngrok_process(self):
+        script = (ROOT / "Start-FAB-Ngrok.ps1").read_text(encoding="utf-8")
+        start = script.index("function Assert-FabNgrokInspectorOwned {")
+        end = script.index("\nfunction Test-CleanHttpsOrigin", start)
+        helper = script[start:end]
+        shell = shutil.which("pwsh") or shutil.which("powershell")
+        if not shell:
+            self.skipTest("PowerShell is unavailable")
+
+        command = f"""
+        $ErrorActionPreference = 'Stop'
+        {helper}
+        $script:connection = [pscustomobject]@{{ LocalAddress = '127.0.0.1'; OwningProcess = 2468 }}
+        function Get-NetTCPConnection {{ return $script:connection }}
+        Assert-FabNgrokInspectorOwned -Port 4041 -ProcessId 2468
+        $script:connection = [pscustomobject]@{{ LocalAddress = '127.0.0.1'; OwningProcess = 1357 }}
+        try {{
+            Assert-FabNgrokInspectorOwned -Port 4041 -ProcessId 2468
+            throw 'A foreign inspector process was accepted.'
+        }} catch {{
+            if ($_.Exception.Message -notlike '*not owned by the managed ngrok process*') {{ throw }}
+        }}
+        $script:connection = [pscustomobject]@{{ LocalAddress = '::1'; OwningProcess = 2468 }}
+        try {{
+            Assert-FabNgrokInspectorOwned -Port 4041 -ProcessId 2468
+            throw 'An IPv6 or non-loopback listener was accepted.'
+        }} catch {{
+            if ($_.Exception.Message -notlike '*not owned by the managed ngrok process*') {{ throw }}
+        }}
+        'verified'
+        """
+        result = subprocess.run([shell, "-NoProfile", "-NonInteractive", "-Command", command],
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "verified")
+
+    @unittest.skipUnless(os.name == "nt", "process launch flags are Windows-specific")
+    def test_failed_startup_uses_process_handle_and_confirms_exit(self):
+        script = (ROOT / "Start-FAB-Ngrok.ps1").read_text(encoding="utf-8")
+        start = script.index("function Stop-FabStartedNgrokProcess {")
+        end = script.index("\nif (-not (Test-Path -LiteralPath $fabRuntimePath))", start)
+        helper = script[start:end]
+        shell = shutil.which("pwsh") or shutil.which("powershell")
+        if not shell:
+            self.skipTest("PowerShell is unavailable")
+
+        command = f"""
+        $ErrorActionPreference = 'Stop'
+        {helper}
+        $shellPath = Join-Path $PSHOME ((Get-Process -Id $PID).ProcessName + '.exe')
+        $child = Start-Process -FilePath $shellPath -ArgumentList @('-NoProfile', '-NonInteractive', '-Command', 'Start-Sleep -Seconds 30') -WindowStyle Hidden -PassThru
+        if (-not (Stop-FabStartedNgrokProcess -Process $child)) {{ throw 'The started process was not confirmed stopped.' }}
+        if (-not $child.HasExited) {{ throw 'The process handle still reports a live process.' }}
+        $child.Dispose()
+        'verified'
+        """
+        result = subprocess.run([shell, "-NoProfile", "-NonInteractive", "-Command", command],
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "verified")
+
+    def test_verification_cleanup_retains_files_when_process_stop_is_unconfirmed(self):
+        script = (ROOT / "Test-FAB-Ngrok.ps1").read_text(encoding="utf-8")
+        start = script.index("function Stop-FabStartedNgrokProcess {")
+        end = script.index("\n$inspectionPort = Find-AvailableLoopbackPort", start)
+        helpers = script[start:end]
+        shell = shutil.which("pwsh") or shutil.which("powershell")
+        if not shell:
+            self.skipTest("PowerShell is unavailable")
+
+        command = f"""
+        $ErrorActionPreference = 'Stop'
+        {helpers}
+        function Stop-FabStartedNgrokProcess {{ return $false }}
+        $paths = @('verification-overlay.yml', 'verification.out.log', 'verification.err.log')
+        foreach ($path in $paths) {{ [System.IO.File]::WriteAllText($path, 'retained') }}
+        $child = [System.Diagnostics.Process]::new()
+        $result = Complete-FabNgrokVerificationCleanup -Process $child -Paths $paths
+        if ($result) {{ throw 'Cleanup must report an unconfirmed stop.' }}
+        if (@($paths | Where-Object {{ -not (Test-Path -LiteralPath $_) }}).Count -ne 0) {{ throw 'Cleanup removed files before confirming process exit.' }}
+        foreach ($path in $paths) {{ Remove-Item -LiteralPath $path -Force }}
+        'verified'
+        """
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = subprocess.run([shell, "-NoProfile", "-NonInteractive", "-Command", command],
+                                   cwd=temp_dir, capture_output=True, text=True, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip().splitlines()[-1], "verified")
+
+    def test_managed_stop_retains_ownership_when_tunnel_is_live_or_unverifiable(self):
+        script = (ROOT / "Stop-FAB-Ngrok.ps1").read_text(encoding="utf-8")
+        start = script.index("function Test-FabManagedNgrokProcess {")
+        end = script.index("\nif (-not (Test-Path -LiteralPath $runtimePath))", start)
+        helper = script[start:end]
+        shell = shutil.which("pwsh") or shutil.which("powershell")
+        if not shell:
+            self.skipTest("PowerShell is unavailable")
+
+        command = f"""
+        $ErrorActionPreference = 'Stop'
+        {helper}
+        $overlay = [System.IO.Path]::GetFullPath('fab-managed-overlay.yml')
+        $script:fakeProcess = [pscustomobject]@{{
+            Name = 'ngrok.exe'
+            CommandLine = 'ngrok.exe http 5001 --name fab-managed --config ' + $overlay
+        }}
+        $script:inspectionFails = $false
+        function Get-CimInstance {{
+            param($ClassName, $Filter, $ErrorAction)
+            if ($script:inspectionFails) {{ throw 'inspection unavailable' }}
+            return $script:fakeProcess
+        }}
+        if (-not (Test-FabManagedNgrokProcess -Process $script:fakeProcess -OverlayPath $overlay)) {{
+            throw "Synthetic process did not match managed ownership: $($script:fakeProcess.CommandLine)"
+        }}
+        try {{
+            Assert-FabNgrokProcessStopped -ProcessId 4321 -OverlayPath $overlay
+            throw 'Expected a live managed tunnel to retain ownership metadata.'
+        }} catch {{
+            if ($_.Exception.Message -notlike '*still running*') {{ throw }}
+        }}
+        $script:fakeProcess = $null
+        Assert-FabNgrokProcessStopped -ProcessId 4321 -OverlayPath $overlay
+        $script:fakeProcess = [pscustomobject]@{{ Name = 'ngrok.exe'; CommandLine = 'ngrok.exe http 5001' }}
+        Assert-FabNgrokProcessStopped -ProcessId 4321 -OverlayPath $overlay
+        $script:inspectionFails = $true
+        try {{
+            Assert-FabNgrokProcessStopped -ProcessId 4321 -OverlayPath $overlay
+            throw 'Expected process inspection failure to retain ownership metadata.'
+        }} catch {{
+            if ($_.Exception.Message -ne 'inspection unavailable') {{ throw }}
+        }}
+        'verified'
+        """
+        result = subprocess.run([shell, "-NoProfile", "-NonInteractive", "-Command", command],
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "verified")
+        self.assertLess(
+            script.index("Assert-FabNgrokProcessStopped -ProcessId"),
+            script.index("foreach ($path in @($runtime.overlayPath"),
+        )
+
     def test_managed_launcher_is_authenticated_isolated_and_non_pooling(self):
         script = (ROOT / "Start-FAB-Ngrok.ps1").read_text(encoding="utf-8")
 
@@ -15,8 +163,8 @@ class TestNgrokWindowsScripts(unittest.TestCase):
         self.assertIn('"--name", "fab-managed"', script)
         self.assertIn("/api/live", script)
         self.assertIn("/api/hai/manifest", script)
-        self.assertIn("get_or_create_runtime_secret('operator_api_token')", script)
-        self.assertIn("get_or_create_runtime_secret('hai_api_token')", script)
+        self.assertIn("-m src.security.windows_runtime_credentials", script)
+        self.assertNotIn("get_or_create_runtime_secret", script)
         self.assertIn('$haiHeaders = @{ Authorization = "Bearer $haiApiToken" }', script)
         self.assertIn('$publicUrl/api/health', script)
         self.assertIn('HAI credential escaped its route scope', script)
@@ -35,6 +183,7 @@ class TestNgrokWindowsScripts(unittest.TestCase):
         self.assertIn("fab-managed", script)
         self.assertIn("overlayMarker", script)
         self.assertIn("Test-OwnedManagedPath", script)
+        self.assertIn("Assert-FabNgrokProcessStopped", script)
         self.assertIn("Refusing to stop", script)
 
     def test_main_shutdown_stops_cloud_before_api_and_uses_isolated_python(self):
@@ -45,9 +194,12 @@ class TestNgrokWindowsScripts(unittest.TestCase):
             'Stop-FabProcessTree -ProcessId $ownedApiPid -CommandMarker "src.operations.local_api"'
         )
         self.assertLess(ngrok_stop, api_stop)
+        self.assertLess(ngrok_stop, script.index("Stop-FabRecordedProcess -Identity $entry.Value"))
         self.assertIn(".venv\\Scripts\\python.exe", script)
-        self.assertIn("name_prefix='hai_command:'", script)
-        self.assertIn("owned_hai_api_stopped", script)
+        cleanup = script.index("force_release_stopped_runtime_leases(actor='Stop-FAB.ps1')")
+        self.assertLess(api_stop, cleanup)
+        self.assertIn("with managed_worker_maintenance(Path.cwd()):", script)
+        self.assertNotIn("list_runtime_leases", script)
         self.assertNotIn("Get-Command python -ErrorAction Stop", script)
 
     def test_cmd_launchers_forward_operator_arguments(self):
@@ -67,8 +219,8 @@ class TestNgrokWindowsScripts(unittest.TestCase):
         self.assertIn("localLive.maintenanceMode", managed)
         self.assertIn("disabled during maintenance", verification)
         self.assertIn("localLive.maintenanceMode", verification)
-        self.assertIn("get_or_create_runtime_secret('operator_api_token')", verification)
-        self.assertIn("get_or_create_runtime_secret('hai_api_token')", verification)
+        self.assertIn("-m src.security.windows_runtime_credentials", verification)
+        self.assertNotIn("get_or_create_runtime_secret", verification)
         self.assertIn('Authorization = "Bearer $haiApiToken"', verification)
 
 

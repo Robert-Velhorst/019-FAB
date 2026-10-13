@@ -4,6 +4,8 @@ x-fab-python: &fab-python
   build:
     context: .
     dockerfile: Dockerfile
+    args:
+      FAB_ENABLE_ML: ${FAB_ENABLE_ML:-false}
   restart: unless-stopped
   environment: &fab-environment
     FAB_LOCAL_API_HOST: 0.0.0.0

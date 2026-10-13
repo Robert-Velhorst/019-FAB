@@ -8,6 +8,16 @@ from src.operations.local_reconciliation import LocalReconciliationService
 
 
 class TestLocalReconciliationService(unittest.TestCase):
+    def test_run_audit_event_records_actor(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+
+            LocalReconciliationService(ledger).run([], actor="fab_hai_api:hai")
+
+            event = ledger.list_audit_events()[0]
+            self.assertEqual(event["action"], "local_reconciliation.run_completed")
+            self.assertEqual(event["details"]["actor"], "fab_hai_api:hai")
+
     def test_run_records_candidate_and_review_item(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))

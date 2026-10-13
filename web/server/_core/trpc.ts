@@ -4,6 +4,7 @@ import superjson from "superjson";
 import type { TrpcContext } from "./context";
 import { ENV } from "./env";
 import { isLoopbackRequest } from "../lib/loopback";
+import { resolveFabOperatorAccess } from "../fabOperatorAccess";
 
 const t = initTRPC.context<TrpcContext>().create({
   transformer: superjson,
@@ -40,12 +41,11 @@ export function isLoopbackFabOperatorRequest(ctx: TrpcContext): boolean {
 export const fabOperatorProcedure = t.procedure.use(
   t.middleware(async opts => {
     const { ctx, next } = opts;
-    const adminUser = ctx.user?.role === "admin";
-    const localOperator = ENV.fabOperatorLocalMode && isLoopbackFabOperatorRequest(ctx);
-    if (!adminUser && !localOperator) {
+    const access = await resolveFabOperatorAccess(ctx.req, { authenticateRequest: async () => ctx.user });
+    if (!access.allowed || !access.mode) {
       throw new TRPCError({ code: "FORBIDDEN", message: NOT_ADMIN_ERR_MSG });
     }
-    return next({ ctx: { ...ctx, fabOperatorMode: adminUser ? "admin" as const : "local" as const } });
+    return next({ ctx: { ...ctx, fabOperatorMode: access.mode, fabOperatorActor: access.actor } });
   }),
 );
 

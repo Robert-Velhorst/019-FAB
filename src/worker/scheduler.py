@@ -91,7 +91,11 @@ class FabWorker:
 
     def __init__(self, config: Dict[str, Any]):
         self.config = config or {}
-        self.interval_seconds = int(self.config.get("worker_interval_seconds", 300))
+        self.interval_seconds = _bounded_positive_int(
+            self.config.get("worker_interval_seconds"),
+            default=300,
+            maximum=86400,
+        )
         self.run_once = _as_bool(self.config.get("worker_run_once", False))
         self.process_postings = _as_bool(self.config.get("worker_process_approved_postings", True))
         self.process_retries = _as_bool(self.config.get("worker_process_due_retries", True))
@@ -717,7 +721,7 @@ def _as_bool(value: Any) -> bool:
 def _bounded_positive_int(value: Any, default: int, maximum: int) -> int:
     try:
         parsed = int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         parsed = default
     return max(1, min(parsed, maximum))
 

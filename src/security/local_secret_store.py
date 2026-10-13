@@ -34,6 +34,14 @@ class LocalSecretStoreError(RuntimeError):
     pass
 
 
+def protect_with_current_user(content: bytes) -> bytes:
+    return _windows_crypt(content, protect=True)
+
+
+def unprotect_with_current_user(content: bytes) -> bytes:
+    return _windows_crypt(content, protect=False)
+
+
 class LocalSecretStore:
     """Encrypted local settings with a Windows-user-bound key where available."""
 
@@ -413,11 +421,11 @@ class _DataBlob(ctypes.Structure):
 
 
 def _windows_protect(content: bytes) -> bytes:
-    return _windows_crypt(content, protect=True)
+    return protect_with_current_user(content)
 
 
 def _windows_unprotect(content: bytes) -> bytes:
-    return _windows_crypt(content, protect=False)
+    return unprotect_with_current_user(content)
 
 
 def _windows_crypt(content: bytes, *, protect: bool) -> bytes:

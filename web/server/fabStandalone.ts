@@ -2,40 +2,29 @@ import "dotenv/config";
 import compression from "compression";
 import express from "express";
 import { createServer } from "http";
-import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { createFabContext } from "./fabContext";
 import { registerFabOperatorSessionRoutes } from "./fabOperatorSession";
 import { fabStandaloneRouter } from "./fabRouter";
 import { registerFabRuntimeRoute } from "./fabRuntime";
+import { registerFabManagedAuthRoutes } from "./fabManagedAuth";
 import { registerFabSourcePreviewRoutes } from "./fabSourcePreview";
 import { ENV } from "./_core/env";
 import { createFabSecurityMiddleware } from "./_core/security";
 import { serveStatic } from "./_core/static";
 import { sanitizeExternalMessage } from "./lib/errorSanitizer";
 import { relaxedLimiter } from "./lib/rateLimiter";
-
-function isPortAvailable(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const probe = net.createServer();
-    probe.listen(port, ENV.fabWebHost, () => probe.close(() => resolve(true)));
-    probe.on("error", () => resolve(false));
-  });
-}
-
-async function findAvailablePort(startPort: number): Promise<number> {
-  for (let port = startPort; port < startPort + 20; port += 1) {
-    if (await isPortAvailable(port)) return port;
-  }
-  throw new Error(`No available port found starting at ${startPort}`);
-}
+import { configureFabProxyTrust } from "./_core/deployment";
+import { createFabServerLifecycle, listenFabServer } from "./_core/lifecycle";
 
 export async function startFabStandaloneServer() {
   const app = express();
   const server = createServer(app);
-  app.set("trust proxy", 1);
+  const lifecycle = createFabServerLifecycle(server);
+  configureFabProxyTrust(app, ENV.fabOperatorTrustedProxyAddresses);
   app.use(...createFabSecurityMiddleware(ENV.isProduction));
   app.use(compression({ threshold: 1_024 }));
+  registerFabManagedAuthRoutes(app);
   app.use(express.json({ limit: "10mb" }));
   app.use(express.urlencoded({ limit: "10mb", extended: true }));
 
@@ -52,19 +41,13 @@ export async function startFabStandaloneServer() {
   );
   serveStatic(app);
 
-  const preferredPort = Number.parseInt(process.env.PORT || "3000", 10);
-  const port = await findAvailablePort(preferredPort);
-  await new Promise<void>((resolve) => {
-    server.listen(port, ENV.fabWebHost, resolve);
+  const port = await listenFabServer(server, {
+    host: ENV.fabWebHost,
+    port: ENV.fabWebPort,
+    allowPortFallback: ENV.fabAllowPortFallback,
   });
-
-  const shutdown = () => {
-    server.close(() => process.exit(0));
-    setTimeout(() => process.exit(1), 10_000).unref();
-  };
-  process.on("SIGTERM", shutdown);
-  process.on("SIGINT", shutdown);
-  return { app, port, server };
+  lifecycle.installSignalHandlers();
+  return { app, port, server, shutdown: lifecycle.shutdown };
 }
 
 if (process.env.NODE_ENV !== "test") {

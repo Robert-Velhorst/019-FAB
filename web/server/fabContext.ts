@@ -2,6 +2,7 @@ import type { CreateExpressContextOptions } from "@trpc/server/adapters/express"
 import type { User } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { isLoopbackRequest } from "./lib/loopback";
+import { authenticateFabManagedRequest, isFabManagedAuthEnabled } from "./fabManagedAuth";
 
 export type FabContext = {
   req: CreateExpressContextOptions["req"];
@@ -12,6 +13,9 @@ export type FabContext = {
 export async function createFabContext(
   options: CreateExpressContextOptions,
 ): Promise<FabContext> {
+  if (isFabManagedAuthEnabled()) {
+    return { req: options.req, res: options.res, user: await authenticateFabManagedRequest(options.req) };
+  }
   const localOperatorRequest = ENV.fabOperatorLocalMode && isLoopbackRequest(
     options.req,
     ENV.fabOperatorTrustedProxyAddresses,

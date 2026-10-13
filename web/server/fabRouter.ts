@@ -1,7 +1,9 @@
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { fabOperatorProcedure, publicProcedure, router } from "./_core/trpc";
+import { isFabManagedAuthEnabled, logoutFabManagedOperator } from "./fabManagedAuth";
 import {
   FAB_OPERATOR_COMMAND_IDS,
   createFabBackup,
@@ -21,7 +23,8 @@ import {
   validateFabWaveSetup,
 } from "./fabLocalGateway";
 
-function actor(ctx: { user?: { id?: number | string } | null }): string {
+function actor(ctx: { fabOperatorActor?: string | null; user?: { id?: number | string } | null }): string {
+  if (isFabManagedAuthEnabled() && ctx.fabOperatorActor) return ctx.fabOperatorActor;
   return ctx.user?.id
     ? `fab_dashboard:${ctx.user.id}`
     : "fab_dashboard:local_operator";
@@ -179,7 +182,13 @@ export const fabRouter = router({
 
 const fabStandaloneAuthRouter = router({
   me: publicProcedure.query(({ ctx }) => ctx.user),
-  logout: publicProcedure.mutation(({ ctx }) => {
+  logout: publicProcedure.mutation(async ({ ctx }) => {
+    if (isFabManagedAuthEnabled()) {
+      if (!await logoutFabManagedOperator(ctx.req, ctx.res)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "A same-origin HTTPS request is required" });
+      }
+      return { success: true } as const;
+    }
     const cookieOptions = getSessionCookieOptions(ctx.req);
     ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
     return { success: true } as const;

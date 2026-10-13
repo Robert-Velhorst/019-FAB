@@ -83,6 +83,7 @@ class TestDocumentProcessors(unittest.TestCase):
     def test_tesseract_processor(self, mock_image_open, mock_image_to_string):
         mock_image_to_string.return_value = "Tesseract OCR Text"
         mock_image_open.return_value = MagicMock()
+        mock_image_open.return_value.size = (100, 50)
 
         processor = TesseractProcessor(self.config)
         result = processor.process_document(self.dummy_image_path)
@@ -131,10 +132,13 @@ class TestDocumentProcessors(unittest.TestCase):
         common_ocr_variant = TesseractProcessor._extract_data_from_text("BIW 21% 2,10\nTotaal EUR 12,10")
         self.assertEqual(common_ocr_variant["vat_amount"], 2.1)
 
+    @patch("src.document_processors.tesseract_processor.pdfinfo_from_path")
     @patch("src.document_processors.tesseract_processor.convert_from_path")
     @patch("src.document_processors.tesseract_processor.pytesseract.image_to_string")
-    def test_tesseract_processor_renders_and_reads_pdf_pages(self, mock_image_to_string, mock_convert):
-        mock_convert.return_value = [MagicMock(), MagicMock()]
+    def test_tesseract_processor_renders_and_reads_pdf_pages(self, mock_image_to_string, mock_convert, mock_pdfinfo):
+        pages = [MagicMock(), MagicMock()]
+        mock_pdfinfo.return_value = {"Pages": 2}
+        mock_convert.side_effect = [[pages[0]], [pages[1]]]
         mock_image_to_string.side_effect = ["Page one", "Page two"]
         with open(os.path.join(self.temp_dir.name, "pdftoppm.exe"), "wb") as handle:
             handle.write(b"test")
@@ -144,13 +148,27 @@ class TestDocumentProcessors(unittest.TestCase):
 
         self.assertEqual(result["ocr_text"], "Page one\n\nPage two")
         self.assertEqual(mock_image_to_string.call_count, 2)
-        mock_convert.assert_called_once_with(
+        mock_pdfinfo.assert_called_once_with(
             self.dummy_pdf_path,
-            dpi=220,
-            first_page=1,
-            last_page=20,
             poppler_path=self.temp_dir.name,
+            timeout=30,
         )
+        self.assertEqual(mock_convert.call_count, 2)
+        for number, render_call in enumerate(mock_convert.call_args_list, 1):
+            self.assertEqual(render_call.args, (self.dummy_pdf_path,))
+            self.assertEqual(render_call.kwargs, {
+                "dpi": 220,
+                "first_page": number,
+                "last_page": number,
+                "poppler_path": self.temp_dir.name,
+                "size": 3000,
+                "timeout": 30,
+                "thread_count": 1,
+            })
+        for page in pages:
+            page.close.assert_called_once()
+        for ocr_call in mock_image_to_string.call_args_list:
+            self.assertEqual(ocr_call.kwargs["timeout"], 30)
 
     @patch("src.document_processors.dutch_ocr_processor.TesseractProcessor")
     def test_dutch_ocr_processor(self, MockTesseractProcessor):
@@ -178,10 +196,60 @@ class TestDocumentProcessors(unittest.TestCase):
             patch.object(handwritten_module, "np", fake_np),
             patch.object(handwritten_module, "Image", fake_image),
             patch.object(handwritten_module, "pytesseract", fake_pytesseract),
+            patch.object(handwritten_module, "validate_raster_path", return_value=(100, 100)),
         ):
             processor = HandwrittenRecognitionProcessor(self.config)
             result = processor.process_document(self.dummy_image_path)
         self.assertIn("Handwritten Text", result["ocr_text"])
+        self.assertEqual(fake_pytesseract.image_to_string.call_args.kwargs["timeout"], 30)
+
+    @unittest.skipIf(
+        any(value is None for value in (handwritten_module.cv2, handwritten_module.np, handwritten_module.Image, handwritten_module.pytesseract)),
+        "Handwriting OCR dependencies are optional in this test runtime",
+    )
+    def test_handwritten_processor_bounds_tesseract_runtime(self):
+        fake_cv2 = MagicMock()
+        fake_cv2.imread.return_value = MagicMock()
+        fake_pytesseract = MagicMock()
+        fake_pytesseract.image_to_string.side_effect = RuntimeError("Tesseract timed out")
+        with (
+            patch.object(handwritten_module, "cv2", fake_cv2),
+            patch.object(handwritten_module, "np", MagicMock()),
+            patch.object(handwritten_module, "Image", MagicMock()),
+            patch.object(handwritten_module, "pytesseract", fake_pytesseract),
+            patch.object(handwritten_module, "validate_raster_path", return_value=(100, 100)),
+        ):
+            result = HandwrittenRecognitionProcessor(self.config).process_document(self.dummy_image_path)
+
+        self.assertEqual(fake_pytesseract.image_to_string.call_args.kwargs["timeout"], 30)
+        self.assertIn("timed out", result["error"])
+
+    @unittest.skipIf(
+        any(value is None for value in (handwritten_module.cv2, handwritten_module.np, handwritten_module.Image, handwritten_module.pytesseract)),
+        "Handwriting OCR dependencies are optional in this test runtime",
+    )
+    def test_handwritten_processor_rejects_oversized_image_before_decode(self):
+        fake_cv2 = MagicMock()
+        with (
+            patch.object(handwritten_module, "cv2", fake_cv2),
+            patch.object(handwritten_module, "validate_raster_path", side_effect=ValueError("Image pixel limit")),
+        ):
+            result = HandwrittenRecognitionProcessor(self.config).process_document("oversized.png")
+
+        fake_cv2.imread.assert_not_called()
+        self.assertIn("pixel limit", result["error"])
+
+    @unittest.skipIf(enhanced_module.cv2 is None, "OpenCV is optional in this test runtime")
+    def test_enhanced_processor_rejects_oversized_image_before_decode(self):
+        processor = EnhancedProcessor({})
+        with (
+            patch.object(enhanced_module, "validate_raster_path", side_effect=ValueError("Image pixel limit")),
+            patch.object(enhanced_module.cv2, "imread") as decode,
+        ):
+            result = processor.process_document("oversized.png")
+
+        decode.assert_not_called()
+        self.assertEqual(result["preprocessing_reason"], "preprocessing_failed")
 
     def test_template_matching_processor(self):
         with open(self.config["vendor_templates_file"], "w", encoding="utf-8") as handle:

@@ -1,21 +1,23 @@
-FROM python:3.13-slim-bookworm
+FROM python:3.13-slim-bookworm@sha256:a1165e272e578941b84abc79e4ab38a0305cd12803a5c4247979ac7655f4d641
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
+
+ARG FAB_ENABLE_ML=false
 
 WORKDIR /app
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        libgl1 \
         poppler-utils \
         tesseract-ocr \
         tesseract-ocr-eng \
         tesseract-ocr-nld \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt ./requirements.txt
-RUN python -m pip install --no-cache-dir --disable-pip-version-check -r requirements.txt \
+COPY requirements.lock requirements-ml.lock ./
+RUN python -m pip install --no-cache-dir --disable-pip-version-check --require-hashes -r requirements.lock \
+    && if [ "$FAB_ENABLE_ML" = "true" ]; then python -m pip install --no-cache-dir --disable-pip-version-check --require-hashes -r requirements-ml.lock; fi \
     && rm -rf /var/lib/apt/lists/* /root/.cache/pip
 
 COPY src ./src
@@ -26,14 +28,14 @@ COPY config/config_template.ini ./config/config.ini
 
 RUN groupadd --system --gid 10001 fab \
     && useradd --system --uid 10001 --gid fab --home-dir /app fab \
-    && mkdir -p data downloads/sort-out logs output/support \
+    && mkdir -p data backups credentials tokens downloads/sort-out logs output/support \
     && chown -R fab:fab /app
 
 USER fab
 
 EXPOSE 5001
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD python -c "import os,urllib.request; t=os.environ.get('FAB_LOCAL_API_TOKEN',''); r=urllib.request.Request('http://127.0.0.1:5001/api/live',headers={'Authorization':'Bearer '+t} if t else {}); urllib.request.urlopen(r,timeout=3).read()"
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+  CMD ["python", "-m", "src.run_health_probe", "api"]
 
 CMD ["python", "-m", "src.operations.local_api"]

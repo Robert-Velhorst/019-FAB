@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional
 from src.document_processors.document_type_classifier import is_non_posting_document_type
 from src.operations.local_bookkeeping_records import LocalBookkeepingRecordService
 from src.operations.local_ledger import LocalOperationsLedger
-from src.operations.local_reconciliation import LocalReconciliationService
+from src.operations.local_reconciliation import FINAL_RECONCILIATION_STATUSES, LocalReconciliationService, _positive_reference_id
 from src.operations.local_targets import resolve_document_target_system
 from src.validation.financial_consistency import assess_vat_amount, vat_issue_message
 
@@ -27,6 +27,12 @@ CORRECTABLE_DOCUMENT_TYPES = {
 }
 
 
+class _ReconciliationDecisionRejected(Exception):
+    def __init__(self, result: Dict[str, Any]):
+        super().__init__(result.get("error") or "Reconciliation decision rejected")
+        self.result = result
+
+
 class LocalReviewService:
     """Apply manual review decisions to documents and local learning records."""
 
@@ -34,6 +40,25 @@ class LocalReviewService:
         self.ledger = ledger
 
     def resolve_review_item(
+        self,
+        review_item_id: int,
+        status: str = "resolved",
+        resolution: Optional[str] = None,
+        corrections: Optional[Dict[str, Any]] = None,
+        learn_rule: bool = True,
+        apply_to_matching_vendor: bool = False,
+    ) -> Dict[str, Any]:
+        try:
+            with self.ledger.write_transaction():
+                return self._resolve_review_item(
+                    review_item_id, status=status, resolution=resolution,
+                    corrections=corrections, learn_rule=learn_rule,
+                    apply_to_matching_vendor=apply_to_matching_vendor,
+                )
+        except _ReconciliationDecisionRejected as exc:
+            return {**exc.result, "success": False, "reviewItemId": review_item_id}
+
+    def _resolve_review_item(
         self,
         review_item_id: int,
         status: str = "resolved",
@@ -52,6 +77,41 @@ class LocalReviewService:
                 "status": "already_resolved",
                 "reviewItemId": review_item_id,
             }
+
+        if review_item.get("reason") in RECONCILIATION_REVIEW_REASONS:
+            match_id = _reconciliation_match_id(review_item)
+            match = self.ledger.get_reconciliation_match(match_id) if match_id else None
+            if not match or match.get("document_id") != review_item.get("document_id"):
+                return {
+                    "success": False, "status": "stale_evidence",
+                    "error": "Review reconciliation evidence is missing or mismatched; refresh before resolving.",
+                }
+            metadata = match.get("metadata") or {}
+            superseded = metadata.get("supersededBy") if isinstance(metadata, dict) else None
+            completed_candidate = (review_item.get("reason") == "reconciliation_candidate"
+                                   and match.get("status") in FINAL_RECONCILIATION_STATUSES and status == "approved")
+            superseded_missing = (review_item.get("reason") == "missing_receipt" and match.get("status") == "resolved"
+                                  and isinstance(superseded, dict) and status in APPLIED_REVIEW_STATUSES)
+            if completed_candidate or superseded_missing:
+                if corrections:
+                    return {"success": False, "status": "stale_evidence",
+                            "error": "Completed reconciliation cannot accept corrections during review repair."}
+                owner_id = match_id if completed_candidate else _positive_reference_id(superseded, ("reconciliationMatchId",))
+                owner = self.ledger.get_reconciliation_match(owner_id) if owner_id else None
+                if not owner or owner.get("status") not in FINAL_RECONCILIATION_STATUSES:
+                    return {"success": False, "status": "stale_evidence",
+                            "error": "Completed reconciliation owner is missing; review evidence before repair."}
+                result = LocalReconciliationService(self.ledger).resolve_match(owner_id, owner["status"])
+                if (not result.get("success")
+                        or self.ledger.get_review_item(review_item_id).get("status") != "resolved"):
+                    raise _ReconciliationDecisionRejected({"success": False, "status": "stale_evidence",
+                                                          "error": "Completed reconciliation review link cannot be verified."})
+                return {**result, "reviewItemId": review_item_id, "status": "resolved",
+                        "reconciliationResolution": result}
+            if _reconciliation_status_for_review(str(review_item["reason"]), status) == "approved":
+                validation = LocalReconciliationService(self.ledger).validate_approval(match_id)
+                if not validation.get("success"):
+                    return validation
 
         document = self.ledger.get_document(int(review_item["document_id"])) if review_item.get("document_id") else None
         raw_corrections = corrections or {}
@@ -163,6 +223,8 @@ class LocalReviewService:
             status=status,
             resolution=resolution,
             corrected_data={
+                **(review_item.get("corrected_data") or {}
+                   if review_item.get("reason") in RECONCILIATION_REVIEW_REASONS else {}),
                 "corrections": normalized_corrections,
                 "correctionId": correction_id,
                 "creditNoteEvidenceNormalization": credit_note_normalization,
@@ -750,6 +812,8 @@ class LocalReviewService:
             reconciliation_status,
             resolution or f"Review item #{review_item.get('id')} resolved as {review_status}.",
         )
+        if not result.get("success"):
+            raise _ReconciliationDecisionRejected(result)
         return {
             "reconciliationMatchId": reconciliation_match_id,
             "requestedReviewStatus": review_status,
@@ -1012,8 +1076,9 @@ def _batch_review_priority(review_item: Dict[str, Any]) -> int:
 
 def _reconciliation_match_id(review_item: Dict[str, Any]) -> Optional[int]:
     corrected_data = review_item.get("corrected_data") or {}
-    value = corrected_data.get("reconciliationMatchId") or corrected_data.get("reconciliation_match_id")
-    return _int(value)
+    if not isinstance(corrected_data, dict):
+        return None
+    return _positive_reference_id(corrected_data, ("reconciliationMatchId", "reconciliation_match_id"))
 
 
 def _reconciliation_status_for_review(reason: str, review_status: str) -> str:

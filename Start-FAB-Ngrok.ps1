@@ -56,6 +56,30 @@ function Find-AvailableLoopbackPort {
     throw "No free private ngrok inspection port is available."
 }
 
+function Assert-FabNgrokInspectorOwned {
+    param(
+        [Parameter(Mandatory = $true)][int]$Port,
+        [Parameter(Mandatory = $true)][int]$ProcessId
+    )
+
+    try {
+        $listeners = @(
+            Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction Stop |
+                Where-Object { [string]$_.LocalAddress -eq "127.0.0.1" }
+        )
+    }
+    catch {
+        throw "FAB could not verify ownership of the private ngrok inspector."
+    }
+
+    if (
+        $listeners.Count -ne 1 -or
+        [int]$listeners[0].OwningProcess -ne $ProcessId
+    ) {
+        throw "The private FAB ngrok inspector is not owned by the managed ngrok process."
+    }
+}
+
 function Test-CleanHttpsOrigin {
     param([Parameter(Mandatory = $true)][System.Uri]$Uri)
 
@@ -109,6 +133,25 @@ function Write-JsonAtomic {
     }
 }
 
+function Stop-FabStartedNgrokProcess {
+    param([Parameter(Mandatory = $true)][System.Diagnostics.Process]$Process)
+
+    try {
+        $Process.Refresh()
+        if (-not $Process.HasExited) {
+            $Process.Kill()
+            if (-not $Process.WaitForExit(10000)) {
+                return $false
+            }
+        }
+        $Process.Refresh()
+        return [bool]$Process.HasExited
+    }
+    catch {
+        return $false
+    }
+}
+
 if (-not (Test-Path -LiteralPath $fabRuntimePath)) {
     throw "FAB is not running. Start it with Start-FAB.cmd first."
 }
@@ -153,16 +196,22 @@ if ($Url) {
     $Url = $requestedUrl.GetLeftPart([System.UriPartial]::Authority)
 }
 
-$apiToken = & $venvPython -c "from src.config_loader import ConfigLoader; from src.security.local_secret_store import LocalSecretStore; c=ConfigLoader('config/config.ini').get_all_config(); print(LocalSecretStore(c).get_or_create_runtime_secret('operator_api_token'))"
-if ($LASTEXITCODE -ne 0 -or ([string]$apiToken).Length -lt 32) {
-    throw "FAB could not load its encrypted operator API credential."
+$credentialsJson = & $venvPython -m src.security.windows_runtime_credentials
+if ($LASTEXITCODE -ne 0) {
+    throw "FAB could not load its existing API/HAI credentials. Start FAB with the same configuration first."
 }
-$apiToken = [string]$apiToken
-$haiApiToken = & $venvPython -c "from src.config_loader import ConfigLoader; from src.security.local_secret_store import LocalSecretStore; c=ConfigLoader('config/config.ini').get_all_config(); print(LocalSecretStore(c).get_or_create_runtime_secret('hai_api_token'))"
-if ($LASTEXITCODE -ne 0 -or ([string]$haiApiToken).Length -lt 32) {
-    throw "FAB could not load its encrypted HAI API credential."
+try {
+    $credentials = $credentialsJson | ConvertFrom-Json
+    $apiToken = [string]$credentials.apiToken
+    $haiApiToken = [string]$credentials.haiToken
 }
-$haiApiToken = [string]$haiApiToken
+finally {
+    $credentialsJson = $null
+    $credentials = $null
+}
+if ($apiToken.Length -lt 32 -or $haiApiToken.Length -lt 32) {
+    throw "FAB requires existing API/HAI credentials of at least 32 characters."
+}
 if ([System.StringComparer]::Ordinal.Equals($apiToken, $haiApiToken)) {
     throw "FAB operator and HAI credentials must be different."
 }
@@ -225,6 +274,8 @@ $overlay = "version: 3`nagent:`n  web_addr: 127.0.0.1:$inspectionPort`n"
 )
 
 $process = $null
+$tunnel = $null
+$publicUrl = ""
 $started = $false
 try {
     & $ngrok.Source config check --config $mainConfig --config $overlayPath | Out-Null
@@ -253,7 +304,6 @@ try {
         -PassThru
 
     $deadline = (Get-Date).AddSeconds([Math]::Max(10, $TimeoutSeconds))
-    $tunnel = $null
     do {
         Start-Sleep -Milliseconds 500
         $process.Refresh()
@@ -295,6 +345,8 @@ try {
         }
         throw "FAB ngrok startup failed with code $exitCode`: $classified"
     }
+
+    Assert-FabNgrokInspectorOwned -Port $inspectionPort -ProcessId $process.Id
 
     $publicUrl = ([string]$tunnel.public_url).TrimEnd("/")
     $publicUri = [System.Uri]$publicUrl
@@ -354,13 +406,40 @@ finally {
     $apiToken = ""
     $haiApiToken = ""
     if (-not $started) {
-        if ($process -and -not $process.HasExited) {
-            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-            Wait-Process -Id $process.Id -Timeout 10 -ErrorAction SilentlyContinue
+        $processStopped = $true
+        if ($process) {
+            $processStopped = Stop-FabStartedNgrokProcess -Process $process
         }
-        foreach ($path in @($overlayPath, $stdoutPath, $stderrPath)) {
-            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        if ($processStopped) {
+            foreach ($path in @($overlayPath, $stdoutPath, $stderrPath)) {
+                Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+            }
+            Remove-Item -LiteralPath $cloudRuntimePath -Force -ErrorAction SilentlyContinue
         }
-        Remove-Item -LiteralPath $cloudRuntimePath -Force -ErrorAction SilentlyContinue
+        else {
+            $cleanupRuntime = [ordered]@{
+                version = 1
+                service = "fab-ngrok-tunnel"
+                instanceRoot = $root
+                instanceId = $expectedInstanceId
+                processId = $process.Id
+                inspectorPort = $inspectionPort
+                publicUrl = $publicUrl
+                localApiBaseUrl = $apiBaseUrl
+                status = "cleanup_required"
+                authRequired = $true
+                haiManifestUrl = if ($publicUrl) { "$publicUrl/api/hai/manifest" } else { "" }
+                overlayPath = $overlayPath
+                stdoutPath = $stdoutPath
+                stderrPath = $stderrPath
+            }
+            try {
+                Write-JsonAtomic -Value $cleanupRuntime -Path $cloudRuntimePath
+                Write-Warning "FAB could not confirm that the failed ngrok startup stopped. Ownership metadata and agent logs were retained; run Stop-FAB-Ngrok.cmd to retry cleanup."
+            }
+            catch {
+                Write-Warning "FAB could not confirm that ngrok stopped or persist its cleanup record. Agent files were retained under $managedRoot; inspect PID $($process.Id) before removing them."
+            }
+        }
     }
 }

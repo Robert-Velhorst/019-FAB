@@ -37,11 +37,11 @@ def assess_vat_amount(
     *,
     max_ratio: float = DEFAULT_VAT_MAX_TOTAL_RATIO,
 ) -> Dict[str, Any]:
-    vat = _number(vat_amount)
-    total = _number(total_amount)
+    vat = finite_number(vat_amount)
+    total = finite_number(total_amount)
     ratio_limit = _ratio(max_ratio)
     result = {
-        "present": vat is not None,
+        "present": vat_amount is not None and vat_amount != "",
         "valid": True,
         "reason": None,
         "vatAmount": vat,
@@ -50,6 +50,8 @@ def assess_vat_amount(
         "maxAbsoluteRatio": ratio_limit,
     }
     if vat is None:
+        if result["present"]:
+            result.update({"valid": False, "reason": "invalid_vat_amount"})
         return result
     if vat == 0:
         return result
@@ -78,6 +80,8 @@ def valid_vat_amount(
 
 def vat_issue_message(assessment: Dict[str, Any]) -> str:
     reason = str(assessment.get("reason") or "")
+    if reason == "invalid_vat_amount":
+        return "VAT amount must be a finite numeric value."
     if reason == "vat_without_nonzero_total":
         return "VAT amount cannot be verified without a non-zero total amount."
     if reason == "vat_total_sign_mismatch":
@@ -88,12 +92,12 @@ def vat_issue_message(assessment: Dict[str, Any]) -> str:
     return "VAT amount failed financial consistency validation."
 
 
-def _number(value: Any) -> Optional[float]:
-    if value in (None, ""):
+def finite_number(value: Any) -> Optional[float]:
+    if value is None or isinstance(value, bool) or value == "":
         return None
     try:
         number = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
     return number if math.isfinite(number) else None
 

@@ -1,0 +1,45 @@
+{
+  "operation": "AutomatedReconciliation.reconcile",
+  "command": ".venv\\Scripts\\python.exe scripts/benchmark_reconciliation.py",
+  "syntheticOnly": true,
+  "python": "3.13.14",
+  "bankRows": 500,
+  "documentRows": 100,
+  "warmupRuns": 1,
+  "timingSamplesPerCaseAndVariant": 3,
+  "memoryMetric": "tracemalloc Python allocation peak in a separate run; not process RAM",
+  "timingCaveat": "Shared-host wall time varies; compare identical inputs in each paired measurement. No whole-app speed or RAM claim.",
+  "measurements": [
+    {
+      "phase": "before_application_edits",
+      "cases": [
+        {"case": "different_amounts", "unpreparedMedianSeconds": 0.1619284, "defaultMedianSeconds": 0.1011605, "unpreparedPeakBytes": 163424, "defaultPeakBytes": 163424},
+        {"case": "same_amount_ties", "unpreparedMedianSeconds": 0.1628474, "defaultMedianSeconds": 0.3045165, "unpreparedPeakBytes": 169952, "defaultPeakBytes": 169952}
+      ],
+      "note": "Both paths were still unprepared; timing differences are noise, not an improvement."
+    },
+    {
+      "phase": "prepared_features_only",
+      "cases": [
+        {"case": "different_amounts", "unpreparedMedianSeconds": 0.1161802, "defaultMedianSeconds": 0.0363152, "unpreparedPeakBytes": 163536, "defaultPeakBytes": 191779},
+        {"case": "same_amount_ties", "unpreparedMedianSeconds": 0.1305865, "defaultMedianSeconds": 0.1271725, "unpreparedPeakBytes": 170064, "defaultPeakBytes": 199638}
+      ]
+    },
+    {
+      "phase": "prepared_features_and_exact_vendor_fast_path",
+      "cases": [
+        {"case": "different_amounts", "unpreparedSamplesSeconds": [0.1083329, 0.1064169, 0.1191732], "defaultSamplesSeconds": [0.0324994, 0.0322740, 0.0306831], "unpreparedMedianSeconds": 0.1083329, "defaultMedianSeconds": 0.0322740, "unpreparedPeakBytes": 163536, "defaultPeakBytes": 191779},
+        {"case": "same_amount_ties", "unpreparedSamplesSeconds": [0.1685702, 0.1672578, 0.1696615], "defaultSamplesSeconds": [0.0166733, 0.0209341, 0.0221934], "unpreparedMedianSeconds": 0.1685702, "defaultMedianSeconds": 0.0209341, "unpreparedPeakBytes": 170088, "defaultPeakBytes": 199454}
+      ],
+      "resultsIdentical": true
+    },
+    {
+      "phase": "final_variant_repeat",
+      "cases": [
+        {"case": "different_amounts", "unpreparedSamplesSeconds": [0.2089256, 0.2107336, 0.1911559], "defaultSamplesSeconds": [0.0657856, 0.0829533, 0.0805185], "unpreparedMedianSeconds": 0.2089256, "defaultMedianSeconds": 0.0805185, "unpreparedPeakBytes": 163536, "defaultPeakBytes": 191779},
+        {"case": "same_amount_ties", "unpreparedSamplesSeconds": [0.4151573, 0.3875830, 0.3202526], "defaultSamplesSeconds": [0.0316389, 0.0500436, 0.0485251], "unpreparedMedianSeconds": 0.3875830, "defaultMedianSeconds": 0.0485251, "unpreparedPeakBytes": 170088, "defaultPeakBytes": 199454}
+      ],
+      "resultsIdentical": true
+    }
+  ]
+}

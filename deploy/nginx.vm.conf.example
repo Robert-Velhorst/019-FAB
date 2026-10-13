@@ -1,0 +1,40 @@
+# Install after replacing server names/certificate paths with your owned values.
+# FAB_TRUSTED_PROXY_ADDRESSES must contain the actual TCP peer seen by Node
+# (typically the Docker bridge gateway for a host nginx instance).
+server {
+    listen 443 ssl;
+    server_name fab.example.org;
+    ssl_certificate /etc/ssl/fab/fullchain.pem;
+    ssl_certificate_key /etc/ssl/fab/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    client_max_body_size 10m;
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header Forwarded "";
+        proxy_read_timeout 120s;
+    }
+}
+
+server {
+    listen 443 ssl;
+    server_name ledger.example.org;
+    ssl_certificate /etc/ssl/fab/fullchain.pem;
+    ssl_certificate_key /etc/ssl/fab/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    client_max_body_size 101m;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    # Handoff tickets appear in the query string. Never log that query string.
+    access_log off;
+    location / {
+        proxy_pass http://127.0.0.1:5001;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header Forwarded "";
+        proxy_read_timeout 120s;
+    }
+}

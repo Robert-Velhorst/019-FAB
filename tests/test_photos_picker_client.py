@@ -1,8 +1,10 @@
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from src.document_fetchers.photos_picker_client import GooglePhotosPickerClient
+from src.document_fetchers.photos_picker_client import PICKER_SCOPE
 
 
 class _Credentials:
@@ -138,6 +140,31 @@ class TestGooglePhotosPickerClient(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "must use JSON"):
             client._load_credentials()
+
+    @patch("src.document_fetchers.photos_picker_client.GoogleOAuthTokenStore")
+    @patch("src.document_fetchers.photos_picker_client.Credentials", new=object)
+    def test_token_load_and_save_use_shared_oauth_store(self, token_store):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            token_path = os.path.join(temp_dir, "photos-picker.json")
+            client = GooglePhotosPickerClient({
+                "google_photos_picker_token_file": token_path,
+            })
+            with open(token_path, "w", encoding="utf-8") as handle:
+                handle.write("{}")
+            store = token_store.return_value
+            store.load.return_value = "loaded-credentials"
+
+            self.assertEqual(client._load_credentials(), "loaded-credentials")
+            client._save_credentials("refreshed-credentials")
+
+            token_store.assert_called_with(
+                token_path,
+                [PICKER_SCOPE],
+                credentials_type=object,
+            )
+            self.assertEqual(token_store.call_count, 2)
+            store.load.assert_called_once_with()
+            store.save.assert_called_once_with("refreshed-credentials")
 
     def test_untrusted_media_url_is_rejected_before_bearer_token_is_sent(self):
         http = _Http([])

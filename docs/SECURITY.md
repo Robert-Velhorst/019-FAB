@@ -8,6 +8,7 @@ FAB is local-first, but it processes high-risk financial and health-related evid
 
 - API exposure defaults to loopback. Non-loopback access without a token is a readiness blocker.
 - Google connectors require owner OAuth consent and read only configured sources.
+- Google user OAuth token JSON is protected with current-user Windows DPAPI in the Windows profile; existing plaintext JSON tokens are migrated atomically on first load. The Photos Picker uses the same token store. OAuth client-credential files and non-Windows token files remain subject to their configured filesystem and deployment controls.
 - Wave tokens are stored through the local encrypted secret store; environment values may override local storage.
 - Readiness and support APIs return configuration state, never secret values.
 - External operations distinguish prepared, approved, executed, verified, ambiguous, and failed state.

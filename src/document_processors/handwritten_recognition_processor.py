@@ -18,12 +18,15 @@ except ImportError:
     pytesseract = None
 
 from src.document_processors.base import BaseProcessor
+from src.document_processors.image_resource_limits import validate_raster_path
 from src.document_processors.tesseract_processor import TesseractProcessor
 from src.utils.tesseract_runtime import (
     configured_tesseract_languages,
     resolve_tesseract_command,
     tesseract_cli_config,
 )
+
+HANDWRITTEN_OCR_TIMEOUT_SECONDS = 30
 
 
 class HandwrittenRecognitionProcessor(BaseProcessor):
@@ -49,6 +52,7 @@ class HandwrittenRecognitionProcessor(BaseProcessor):
             }
 
         try:
+            validate_raster_path(document_path)
             image = cv2.imread(document_path)
             if image is None:
                 raise ValueError(f"Could not load image from {document_path}")
@@ -64,7 +68,12 @@ class HandwrittenRecognitionProcessor(BaseProcessor):
             kernel = np.ones((2, 2), np.uint8)
             prepared = Image.fromarray(cv2.dilate(threshold, kernel, iterations=1))
             config = tesseract_cli_config(self.config, f"--psm {self.psm} --oem 3")
-            full_text = pytesseract.image_to_string(prepared, lang=self.ocr_lang, config=config)
+            full_text = pytesseract.image_to_string(
+                prepared,
+                lang=self.ocr_lang,
+                config=config,
+                timeout=HANDWRITTEN_OCR_TIMEOUT_SECONDS,
+            )
             return {
                 "ocr_text": full_text,
                 "extracted_data": self._extract_data_from_text(full_text),
