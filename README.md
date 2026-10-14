@@ -131,22 +131,12 @@ The tracked-source-only builder fails closed on dirty tracked files, forbidden r
 
 The workflow publishes separate GitHub Container Registry images for the Python API/worker and React dashboard:
 
-    ghcr.io/robert-velhorst/fab-api:<release-tag>
-    ghcr.io/robert-velhorst/fab-dashboard:<release-tag>
+    ghcr.io/robert-velhorst/019-fab-api:<release-tag>
+    ghcr.io/robert-velhorst/019-fab-dashboard:<release-tag>
 
-Both images target `linux/amd64`. Because this repository is public, the first packages must be created privately before the workflow can publish. From a clean checkout of the release tag, create a classic PAT scoped only to `write:packages`, authenticate at Docker's hidden password prompt, then build and push both images:
+Both images target `linux/amd64`. The existing preview is `v0.1.0-preview.1`; its immutable source release is published from the commit named on the GitHub release page. The packages are already private and linked to this repository. GitHub Actions has package `Write` access on these two packages only. Keep them private: because this repository is public, Actions workflows triggered by forks may be able to use package access. Review workflow triggers and fork permissions before adding workflows that consume these images.
 
-    git clone https://github.com/Robert-Velhorst/019-FAB.git FAB-ghcr-bootstrap
-    Set-Location FAB-ghcr-bootstrap
-    git checkout v0.1.0-preview.1
-    docker login ghcr.io -u Robert-Velhorst
-    $tag = "v0.1.0-preview.1"
-    docker build --tag "ghcr.io/robert-velhorst/fab-api:$tag" .
-    docker build --tag "ghcr.io/robert-velhorst/fab-dashboard:$tag" ./web
-    docker push "ghcr.io/robert-velhorst/fab-api:$tag"
-    docker push "ghcr.io/robert-velhorst/fab-dashboard:$tag"
-
-Do not add repository-source labels during this bootstrap. The CLI-created packages start unlinked and private. In each package's GitHub settings, verify visibility is `private`, use granular permissions rather than inheriting access from this public repository, and grant the `019-FAB` repository Actions access with write permission. Never make either package public. The release workflow checks that each package exists and is private before pushing; it fails closed otherwise. After merging the workflow, manually run it on the existing `v0.1.0-preview.1` tag with the private-package confirmation. Future `v*` tags publish automatically. Use only `read:packages` tokens to pull.
+After this workflow is merged, run **Publish FAB container packages** manually from `main`, select `v0.1.0-preview.1`, and confirm the private-package check. This publishes the existing release commit under the release tag to the correct package names. Future `v*` release tags publish automatically. The workflow refuses non-private or missing packages and publishes the mutable `edge` alias only after both release images succeed. Use a token with only `read:packages` to pull; authenticate with `docker login ghcr.io -u Robert-Velhorst` and enter the token at Docker's password prompt. Never make either package public.
 
 The workflow attaches SBOM and provenance attestations, but images are not cryptographically signed. Verify the source and tag; use checksum-manifested ZIPs when you need source bundles. Immutable release tags are published first; the mutable `edge` aliases are promoted only after both component images succeed. Release runs are serialized to prevent interleaved promotions.
 

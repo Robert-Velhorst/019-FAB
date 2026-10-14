@@ -80,7 +80,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          for package in fab-api fab-dashboard; do
+          for package in 019-fab-api 019-fab-dashboard; do
             visibility="$(gh api "/users/${GITHUB_REPOSITORY_OWNER}/packages/container/$package" --jq '.visibility')"
             if [[ "$visibility" != "private" ]]; then
               echo "::error::GHCR package $package must already exist and be private. No image was published."
@@ -101,11 +101,11 @@ jobs:
       matrix:
         include:
           - component: api
-            image: fab-api
+            image: 019-fab-api
             context: .
             dockerfile: Dockerfile
           - component: dashboard
-            image: fab-dashboard
+            image: 019-fab-dashboard
             context: ./web
             dockerfile: Dockerfile
     steps:
@@ -152,7 +152,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        image: [fab-api, fab-dashboard]
+        image: [019-fab-api, 019-fab-dashboard]
     steps:
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3

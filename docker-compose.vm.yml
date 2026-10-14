@@ -16,7 +16,7 @@ x-runtime: &runtime
 
 x-python: &python
   <<: *runtime
-  image: ghcr.io/robert-velhorst/fab-api:${FAB_IMAGE_TAG:-edge}
+  image: ghcr.io/robert-velhorst/019-fab-api:${FAB_IMAGE_TAG:-edge}
   pull_policy: missing
   build:
     context: .
@@ -75,7 +75,7 @@ services:
 
   web:
     <<: *runtime
-    image: ghcr.io/robert-velhorst/fab-dashboard:${FAB_IMAGE_TAG:-edge}
+    image: ghcr.io/robert-velhorst/019-fab-dashboard:${FAB_IMAGE_TAG:-edge}
     pull_policy: missing
     build:
       context: ./web
