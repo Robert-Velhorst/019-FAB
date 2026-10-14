@@ -1,7 +1,7 @@
 FROM node:26.11.1-bookworm-slim@sha256:86f07bc9c5dce4578cf37e5a418b7bfc7f817cda25cde66e2b66e95ed86c4567 AS build
 
 WORKDIR /app
-RUN corepack enable && corepack prepare pnpm@11.20.0 --activate
+RUN npm install --global pnpm@11.20.0
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY patches ./patches
