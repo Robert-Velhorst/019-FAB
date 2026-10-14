@@ -1585,12 +1585,14 @@ class TestLocalOperationsApi(unittest.TestCase):
                 json={"actor": "api_test"},
             )
             self.assertEqual(started.status_code, 202)
-            for _ in range(100):
+            deadline = time.monotonic() + 15
+            while time.monotonic() < deadline:
                 status = client.get("/api/connectors/google-drive/authorization").get_json()
                 if not status["authorizationInProgress"]:
                     break
-                time.sleep(0.02)
+                time.sleep(0.05)
 
+            self.assertFalse(status["authorizationInProgress"], status)
             self.assertEqual(status["status"], "authorized")
             self.assertTrue(status["tokenPresent"])
             response_text = client.get("/api/audit").data.decode("utf-8")

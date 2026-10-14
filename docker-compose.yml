@@ -1,6 +1,8 @@
 name: fab
 
 x-fab-python: &fab-python
+  image: ghcr.io/robert-velhorst/019-fab-api:${FAB_IMAGE_TAG:-edge}
+  pull_policy: missing
   build:
     context: .
     dockerfile: Dockerfile
@@ -55,6 +57,8 @@ services:
       - fab-local
 
   web:
+    image: ghcr.io/robert-velhorst/019-fab-dashboard:${FAB_IMAGE_TAG:-edge}
+    pull_policy: missing
     build:
       context: ./web
       dockerfile: Dockerfile

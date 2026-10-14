@@ -44,6 +44,18 @@ The standard Compose profile runs the Python API, recurring worker, and producti
     $env:FAB_WEB_JWT_SECRET = "<long random secret>"
     docker compose up --build
 
+The release images are private. To pull them, authenticate with a GitHub personal access token (classic) that has only `read:packages`; enter it at Docker's password prompt, never as a command-line argument:
+
+    docker login ghcr.io -u Robert-Velhorst
+
+Then set `FAB_IMAGE_TAG` to a published release tag and run:
+
+    $env:FAB_IMAGE_TAG = "v0.1.0-preview.1"
+    docker compose pull
+    docker compose up -d --no-build
+
+The VM profile uses the same tags. Confirm you have package read access before pulling. The images contain no credentials or financial data; verify the tag and release notes before deployment.
+
 Published ports bind to loopback by default. State is in persistent Compose volumes and configured mounts. Remote deployment additionally needs reviewed TLS/reverse-proxy configuration, managed secrets, access controls, monitoring, backup/restore drills, and provider acceptance. See the VM deployment and deployment guidance. A successful Compose config check does not certify a host deployment.
 
 ## How the Workflow Works
@@ -116,6 +128,17 @@ From a clean, committed checkout, build both source distributions:
     python package.py --target all
 
 The tracked-source-only builder fails closed on dirty tracked files, forbidden runtime/secret paths, unsafe links, missing required files, or size limits. Each ZIP contains RELEASE-MANIFEST.json with per-file SHA-256 values and a .zip.sha256 archive checksum. The builder verifies each archive and member before success; compare the sidecar after downloading. These are source bundles, not signed installers or prebuilt images.
+
+The workflow publishes separate GitHub Container Registry images for the Python API/worker and React dashboard:
+
+    ghcr.io/robert-velhorst/019-fab-api:<release-tag>
+    ghcr.io/robert-velhorst/019-fab-dashboard:<release-tag>
+
+Both images target `linux/amd64`. The existing preview is `v0.1.0-preview.1`; its immutable source release is published from the commit named on the GitHub release page. The packages are already private and linked to this repository. GitHub Actions has package `Write` access on these two packages only. Keep them private: because this repository is public, Actions workflows triggered by forks may be able to use package access. Review workflow triggers and fork permissions before adding workflows that consume these images.
+
+After this workflow is merged, run **Publish FAB container packages** manually from `main`, select `v0.1.0-preview.1`, and confirm the private-package check. This publishes the existing release commit under the release tag to the correct package names. Future `v*` release tags publish automatically. The workflow refuses non-private or missing packages and publishes the mutable `edge` alias only after both release images succeed. Use a token with only `read:packages` to pull; authenticate with `docker login ghcr.io -u Robert-Velhorst` and enter the token at Docker's password prompt. Never make either package public.
+
+The workflow attaches SBOM and provenance attestations, but images are not cryptographically signed. Verify the source and tag; use checksum-manifested ZIPs when you need source bundles. Immutable release tags are published first; the mutable `edge` aliases are promoted only after both component images succeed. Release runs are serialized to prevent interleaved promotions.
 
 ## Security and Privacy
 
