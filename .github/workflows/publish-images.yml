@@ -48,6 +48,10 @@ jobs:
           CONFIRM_PRIVATE_PACKAGES: ${{ inputs.confirm_private_packages }}
         run: |
           set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" && "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "::error::Manual image publishing must be dispatched from main."
+            exit 1
+          fi
           if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" && "$CONFIRM_PRIVATE_PACKAGES" != "true" ]]; then
             echo "::error::Manual publishing requires explicit confirmation that both GHCR packages are private."
             exit 1
