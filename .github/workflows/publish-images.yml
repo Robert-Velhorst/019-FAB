@@ -3,13 +3,6 @@ name: Publish FAB container packages
 on:
   push:
     tags: ["v*"]
-  workflow_dispatch:
-    inputs:
-      confirm_private_packages:
-        description: "Confirm both GHCR packages were pre-created with private, granular access"
-        required: true
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -42,16 +35,6 @@ jobs:
           fi
           git fetch --no-tags origin main
           git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD
-
-      - name: Require explicit confirmation for manual dispatch
-        if: github.event_name == 'workflow_dispatch'
-        env:
-          CONFIRM_PRIVATE_PACKAGES: ${{ inputs.confirm_private_packages }}
-        run: |
-          if [ "$CONFIRM_PRIVATE_PACKAGES" != "true" ]; then
-            echo "::error::Confirm that both GHCR packages are private before publishing."
-            exit 1
-          fi
 
       - name: Verify both GHCR packages exist and are private
         env:
