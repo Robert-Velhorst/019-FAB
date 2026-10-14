@@ -30,7 +30,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: "3.13"
+          python-version: "3.15.0"
           cache: pip
           cache-dependency-path: requirements-test.lock
       - name: Install Python dependencies
@@ -64,7 +64,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: "3.13"
+          python-version: "3.15.0"
           cache: pip
           cache-dependency-path: requirements-test.lock
       - name: Create checkout-local Python runtime
@@ -97,7 +97,7 @@ jobs:
         if: matrix.shard == 1
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: "22"
+          node-version: "26.11.1"
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
       - name: Install and build Windows dashboard
@@ -126,7 +126,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: "22"
+          node-version: "26.11.1"
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
       - name: Install frontend dependencies
@@ -146,7 +146,7 @@ jobs:
       - name: Set up Python for Linux stack rehearsal
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: "3.13"
+          python-version: "3.15.0"
           cache: pip
           cache-dependency-path: requirements.lock
       - name: Install API dependencies for Linux stack rehearsal
