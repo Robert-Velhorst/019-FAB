@@ -148,7 +148,7 @@ Both images target `linux/amd64`. Because this repository is public, the first p
 
 Do not add repository-source labels during this bootstrap. The CLI-created packages start unlinked and private. In each package's GitHub settings, verify visibility is `private`, use granular permissions rather than inheriting access from this public repository, and grant the `019-FAB` repository Actions access with write permission. Never make either package public. The release workflow checks that each package exists and is private before pushing; it fails closed otherwise. After merging the workflow, manually run it on the existing `v0.1.0-preview.1` tag with the private-package confirmation. Future `v*` tags publish automatically. Use only `read:packages` tokens to pull.
 
-The workflow attaches SBOM and provenance attestations, but images are not cryptographically signed. Verify the source and tag; use checksum-manifested ZIPs when you need source bundles. The mutable `edge` tag follows the newest published release tag, including a release candidate.
+The workflow attaches SBOM and provenance attestations, but images are not cryptographically signed. Verify the source and tag; use checksum-manifested ZIPs when you need source bundles. Immutable release tags are published first; the mutable `edge` aliases are promoted only after both component images succeed. Release runs are serialized to prevent interleaved promotions.
 
 ## Security and Privacy
 
