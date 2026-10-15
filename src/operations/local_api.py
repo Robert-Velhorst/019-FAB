@@ -5497,14 +5497,25 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             actor=str(payload.get("actor") or "local_api"),
         )
         if result.get("success"):
-            return jsonify(result), 200
-        failure = {
-            key: result[key]
-            for key in ("success", "status", "auditEventId", "externalSubmission")
-            if key in result
-        }
-        failure["reasons"] = ["Archive did not complete. Review the audit record."]
-        return jsonify(failure), 409
+            response = {
+                "success": True,
+                "status": "archived",
+                "documentId": document_id,
+                "postMoveVerified": True,
+                "externalSubmission": "executed",
+                "deletion": "not_performed",
+            }
+            audit_event_id = result.get("auditEventId")
+            if isinstance(audit_event_id, int) and not isinstance(audit_event_id, bool):
+                response["auditEventId"] = audit_event_id
+            return jsonify(response), 200
+        return jsonify({
+            "success": False,
+            "status": "blocked",
+            "documentId": document_id,
+            "reasons": ["Archive did not complete. Review the audit record."],
+            "externalSubmission": "not_executed",
+        }), 409
 
     @app.get("/api/workflows")
     def workflow_runs_api():

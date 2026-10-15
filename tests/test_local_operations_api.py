@@ -3757,6 +3757,32 @@ class TestLocalOperationsApi(unittest.TestCase):
                 "Archive did not complete. Review the audit record.",
             )
 
+    def test_drive_archive_success_response_keeps_only_verified_fields(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = create_app({
+                "fab_local_ledger_path": os.path.join(temp_dir, "fab.sqlite3"),
+            })
+            with patch(
+                "src.operations.local_api.DriveWaveDeliveryService.archive_document",
+                return_value={
+                    "success": True,
+                    "status": "archived",
+                    "documentId": 1,
+                    "postMoveVerified": True,
+                    "auditEventId": 73,
+                    "internalDiagnostic": f"Traceback in {temp_dir}\\private\\provider.py",
+                },
+            ):
+                response = app.test_client().post("/api/drive-wave/documents/1/archive", json={})
+
+            self.assertEqual(response.status_code, 200)
+            payload = response.get_json()
+            self.assertTrue(payload["success"])
+            self.assertTrue(payload["postMoveVerified"])
+            self.assertEqual(payload["auditEventId"], 73)
+            self.assertNotIn("internalDiagnostic", payload)
+            self.assertNotIn(temp_dir, response.get_data(as_text=True))
+
     def test_api_rescans_configured_intake_folder(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             intake_dir = os.path.join(temp_dir, "sort-out")
