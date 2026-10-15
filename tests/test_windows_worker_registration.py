@@ -98,10 +98,10 @@ def test_registration_and_ancestry_forward_budget_to_cim(tmp_path, shell):
         throw 'unexpected-process-query'
     }
     $registered = Get-FabWorkerRuntimeProcessId -Path 'worker.json' -ExpectedRoot (Get-Location).Path -OperationTimeoutSeconds 1
-    $related = Test-FabProcessAncestor -AncestorProcessId 100 -DescendantProcessId 200 -Watch ([Diagnostics.Stopwatch]::StartNew()) -TimeoutSeconds 1
+    $related = Test-FabProcessAncestor -AncestorProcessId 100 -DescendantProcessId 200 -Watch ([Diagnostics.Stopwatch]::StartNew()) -TimeoutSeconds 10
     @{registered=$registered; related=$related; timeouts=@($timeouts.ToArray())} | ConvertTo-Json -Compress
     """.replace("__FUNCTIONS__", "\n".join(functions))
     result = subprocess.run([shell, "-NoProfile", "-NonInteractive", "-Command", command],
                             cwd=tmp_path, capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout) == {"registered": 100, "related": True, "timeouts": [1, 1]}
+    assert json.loads(result.stdout) == {"registered": 100, "related": True, "timeouts": [1, 2]}

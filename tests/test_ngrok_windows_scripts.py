@@ -192,7 +192,6 @@ class TestNgrokWindowsScripts(unittest.TestCase):
             }), encoding="utf-8")
 
             escaped_script = str(script).replace("'", "''")
-            escaped_overlay = str(overlay).replace("'", "''")
             harness = f"""
 $ErrorActionPreference = 'Stop'
 $fixtureRoot = Split-Path -Parent '{escaped_script}'
@@ -206,13 +205,14 @@ $runtime = Get-Content -LiteralPath '{runtime_path}' -Raw | ConvertFrom-Json
 $runtime.instanceRoot = [System.IO.Path]::GetFullPath($fixtureRoot).TrimEnd("\\", "/")
 $runtime.instanceId = $instanceId
 $runtime | ConvertTo-Json -Compress | Set-Content -LiteralPath '{runtime_path}'
+$overlayMarker = [System.IO.Path]::GetFullPath([string]$runtime.overlayPath).Replace("\\", "/").ToLowerInvariant()
 function Get-CimInstance {{
     [CmdletBinding()]
     param([string]$ClassName, [string]$Filter, [string[]]$Property)
     [pscustomobject]@{{
         ProcessId = 52341
         Name = 'ngrok.exe'
-        CommandLine = 'ngrok.exe start fab-managed --config "{escaped_overlay}"'
+        CommandLine = "ngrok.exe start fab-managed --config $overlayMarker"
     }}
 }}
 function Stop-Process {{ [CmdletBinding()] param([int]$Id, [switch]$Force) }}
