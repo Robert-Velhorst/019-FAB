@@ -91,8 +91,10 @@ class WaveappsBusinessHandler(BaseDataEntryHandler):
                 "action_plan": plan_wave_action(destination["target_surface"], action_id, action_payload),
             }
 
-        operation = (result.get("data") or {}).get("moneyTransactionCreate") or {}
-        if operation.get("didSucceed") and (operation.get("transaction") or {}).get("id"):
+        data_result = result.get("data") if isinstance(result, dict) else None
+        operation_result = data_result.get("moneyTransactionCreate") if isinstance(data_result, dict) else None
+        operation = operation_result if isinstance(operation_result, dict) else {}
+        if operation.get("didSucceed") is True and (operation.get("transaction") or {}).get("id"):
             transaction_id = operation["transaction"]["id"]
             return {
                 "status": "success",
@@ -101,7 +103,22 @@ class WaveappsBusinessHandler(BaseDataEntryHandler):
                 "target_surface": destination["target_surface"],
                 "action_plan": plan_wave_action(destination["target_surface"], action_id, action_payload, allow_write=True),
             }
-        return _failure(destination, action_id, action_payload, "Wave rejected the transaction. Review the provider response in Wave before retrying.")
+        input_errors = operation.get("inputErrors")
+        if operation.get("didSucceed") is False and isinstance(input_errors, list) and input_errors:
+            return _failure(
+                destination,
+                action_id,
+                action_payload,
+                "Wave rejected the transaction. Review the provider response in Wave before retrying.",
+            )
+        return {
+            "status": "outcome_unknown",
+            "message": "Wave did not return a verifiable transaction result. Check Wave before taking further action.",
+            "requires_manual_review": True,
+            "review_reason": "wave_api_outcome_unknown",
+            "target_surface": destination["fallback_surface"],
+            "action_plan": plan_wave_action(destination["target_surface"], action_id, action_payload),
+        }
 
     def _generate_csv_fallback(self, data: Dict[str, Any], filename: str) -> str:
         csv_dir = self.config.get("temp_dir") or tempfile.gettempdir()

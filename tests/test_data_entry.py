@@ -196,6 +196,60 @@ class TestDataEntry(unittest.TestCase):
         self.assertNotIn("private-receipt", result["message"])
 
     @patch("src.data_entry.waveapps_business_handler.requests.post")
+    def test_waveapps_incomplete_graphql_mutation_response_is_unknown(self, mock_post):
+        response = MagicMock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "errors": [{"message": "response interrupted after execution"}],
+            "data": {"moneyTransactionCreate": None},
+        }
+        mock_post.return_value = response
+        data = {**self.dummy_processed_data, "category": "Business"}
+
+        result = WaveappsBusinessHandler(self.config).enter_data(data)
+
+        self.assertEqual(result["status"], "outcome_unknown")
+        self.assertEqual(result["review_reason"], "wave_api_outcome_unknown")
+        self.assertTrue(result["requires_manual_review"])
+        self.assertNotIn("response interrupted", result["message"])
+
+    @patch("src.data_entry.waveapps_business_handler.requests.post")
+    def test_waveapps_graphql_response_without_mutation_result_is_unknown(self, mock_post):
+        response = MagicMock()
+        response.raise_for_status.return_value = None
+        mock_post.return_value = response
+        data = {**self.dummy_processed_data, "category": "Business"}
+
+        incomplete_results = [
+            {"data": {}},
+            {"data": {"moneyTransactionCreate": {"didSucceed": False, "inputErrors": []}}},
+            {"data": {"moneyTransactionCreate": {"didSucceed": True, "transaction": None}}},
+        ]
+        for payload in incomplete_results:
+            with self.subTest(payload=payload):
+                reset_all_limiters()
+                response.json.return_value = payload
+                result = WaveappsBusinessHandler(self.config).enter_data(data)
+
+                self.assertEqual(result["status"], "outcome_unknown")
+                self.assertEqual(result["review_reason"], "wave_api_outcome_unknown")
+                self.assertTrue(result["requires_manual_review"])
+
+    @patch("src.data_entry.waveapps_business_handler.requests.post")
+    def test_waveapps_non_object_response_body_is_unknown(self, mock_post):
+        response = MagicMock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = None
+        mock_post.return_value = response
+        data = {**self.dummy_processed_data, "category": "Business"}
+
+        result = WaveappsBusinessHandler(self.config).enter_data(data)
+
+        self.assertEqual(result["status"], "outcome_unknown")
+        self.assertEqual(result["review_reason"], "wave_api_outcome_unknown")
+        self.assertTrue(result["requires_manual_review"])
+
+    @patch("src.data_entry.waveapps_business_handler.requests.post")
     def test_waveapps_business_credit_note_posts_a_deposit(self, mock_post):
         response = MagicMock()
         response.raise_for_status.return_value = None
