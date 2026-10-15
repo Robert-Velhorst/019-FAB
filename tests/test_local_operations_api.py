@@ -3713,7 +3713,10 @@ class TestLocalOperationsApi(unittest.TestCase):
                 response = client.get("/api/backups/inspect?backupFilename=missing.zip")
             self.assertEqual(response.status_code, 400)
             self.assertNotIn(temp_dir, response.get_data(as_text=True))
-            self.assertIn("Internal details were withheld", response.get_json()["error"])
+            self.assertEqual(
+                response.get_json()["error"],
+                "The backup could not be inspected. Verify that it is listed and try again.",
+            )
 
             with patch(
                 "src.operations.local_api.LocalBackupService.plan_restore",
@@ -3749,7 +3752,10 @@ class TestLocalOperationsApi(unittest.TestCase):
 
             self.assertEqual(response.status_code, 409)
             self.assertNotIn(temp_dir, response.get_data(as_text=True))
-            self.assertIn("Internal details were withheld", response.get_json()["reasons"][0])
+            self.assertEqual(
+                response.get_json()["reasons"][0],
+                "Archive did not complete. Review the audit record.",
+            )
 
     def test_api_rescans_configured_intake_folder(self):
         with tempfile.TemporaryDirectory() as temp_dir:

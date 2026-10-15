@@ -5496,7 +5496,15 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             document_id,
             actor=str(payload.get("actor") or "local_api"),
         )
-        return jsonify(_sanitize_public_diagnostics(result)), 200 if result.get("success") else 409
+        if result.get("success"):
+            return jsonify(result), 200
+        failure = {
+            key: result[key]
+            for key in ("success", "status", "auditEventId", "externalSubmission")
+            if key in result
+        }
+        failure["reasons"] = ["Archive did not complete. Review the audit record."]
+        return jsonify(failure), 409
 
     @app.get("/api/workflows")
     def workflow_runs_api():
@@ -5729,8 +5737,12 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         close_pack_path = request.args.get("closePackPath") or request.args.get("closePackFilename")
         try:
             return jsonify(LocalClosePackService(ledger, config).inspect_pack(str(close_pack_path or "")))
-        except ValueError as exc:
-            return jsonify({"success": False, "status": "invalid", "error": _public_api_diagnostic(str(exc))}), 400
+        except ValueError:
+            return jsonify({
+                "success": False,
+                "status": "invalid",
+                "error": "The close pack could not be inspected. Verify the selected file and try again.",
+            }), 400
         except Exception as exc:
             error = _log_unexpected_api_error(app, "inspect_close_pack", exc)
             return jsonify({"success": False, "status": "failed", "error": error}), 500
@@ -7986,8 +7998,12 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         backup_path = request.args.get("backupPath") or request.args.get("backupFilename")
         try:
             return jsonify(LocalBackupService(ledger, config).inspect_backup(str(backup_path or "")))
-        except ValueError as exc:
-            return jsonify({"success": False, "status": "invalid", "error": _public_api_diagnostic(str(exc))}), 400
+        except ValueError:
+            return jsonify({
+                "success": False,
+                "status": "invalid",
+                "error": "The backup could not be inspected. Verify that it is listed and try again.",
+            }), 400
         except Exception as exc:
             error = _log_unexpected_api_error(app, "inspect_backup", exc)
             return jsonify({"success": False, "status": "failed", "error": error}), 500
@@ -8000,11 +8016,11 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
                 str(backup_path or ""),
                 restore_mode=str(request.args.get("restoreMode") or RESTORE_MODE_LEDGER_ONLY),
             ))
-        except ValueError as exc:
+        except ValueError:
             return jsonify({
                 "success": False,
                 "status": "invalid",
-                "error": _public_api_diagnostic(str(exc)),
+                "error": "The restore plan could not be prepared. Verify the selected backup and try again.",
                 "externalSubmission": "not_executed",
             }), 400
         except Exception as exc:
@@ -8026,8 +8042,12 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
                 restore_mode=str(payload.get("restoreMode") or RESTORE_MODE_LEDGER_ONLY),
                 actor=str(payload.get("actor") or "fab_local_api")[:200],
             )
-        except ValueError as exc:
-            return jsonify({"success": False, "status": "failed", "error": _public_api_diagnostic(str(exc))}), 400
+        except ValueError:
+            return jsonify({
+                "success": False,
+                "status": "failed",
+                "error": "The restore request was rejected. Check the restore plan and confirmation, then try again.",
+            }), 400
         except Exception as exc:
             error = _log_unexpected_api_error(app, "restore_backup", exc)
             return jsonify({"success": False, "status": "failed", "error": error}), 500
