@@ -1,5 +1,21 @@
 # Codex Worklog
 
+## 2026-10-15 - Remove pandas from the bookkeeping runtime
+
+- Replaced pandas CSV loading with the existing delimiter-aware standard-library
+  reader, added read-only streaming `.xlsx` import through openpyxl, and removed
+  the unsupported `.xls` file claim from the local importer.
+- Reimplemented expense summaries, monthly trend aggregation, and forecasts
+  without pandas; reports retain JSON-friendly `YYYY-MM` trend keys.
+- Removed pandas from the runtime requirements and regenerated both hash
+  locks. Each lock is 72 lines shorter; no OCR, Google, API, or provider
+  functionality was removed.
+- Focused verification after the day-first parser regression: 28 passed,
+  2 skipped, 3 subtests; dependency-lock verification passed. The complete
+  backend suite passed immediately before that parser-only addition
+  (`1,932 passed`, `6 skipped`, `159 subtests`). Production image size
+  verification remains pending.
+
 ## 2026-10-15 - Bound raster OCR memory and verify package workflow access
 
 - Added shared raster edge/pixel limits before OpenCV decoding and bounded

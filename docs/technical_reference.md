@@ -197,7 +197,7 @@ The scanner profile replaces the Gmail-to-Drive Apps Script from `Noodzakelijk-O
 ### 2.16. `src/document_processors/line_item_extractor.py` (`LineItemExtractor`)
 
 *   **Purpose**: Extracts individual line items (e.g., product, quantity, price) from invoices or receipts.
-*   **Dependencies**: (Potentially `re` for regex, `pandas` for data structuring).
+*   **Dependencies**: Python standard library.
 
 ### 2.17. `src/document_processors/enhanced_processor.py` (`EnhancedProcessor`)
 
@@ -348,6 +348,10 @@ The interactive placeholder migration wizard was removed. Supported historical i
 *   **Purpose**: Generates financial reports and provides insights based on processed and categorized data.
 *   **Key Methods**:
     *   `generate_report(transactions)`: Creates a summary report of income, expenses, and other financial metrics.
+    *   `generate_expense_report(transactions, group_by)`: Aggregates document totals by category or vendor.
+    *   `cash_flow_forecast(transactions, forecast_months)`: Projects average monthly outflow using calendar-month buckets.
+    *   `analyze_trend(transactions, category)`: Returns category-filtered totals keyed by JSON-friendly `YYYY-MM` values.
+*   **Dependencies**: Standard library and the existing `python-dateutil` dependency; pandas is not required.
 
 ### 2.51. `src/backup/backup_manager.py` (`BackupManager`)
 

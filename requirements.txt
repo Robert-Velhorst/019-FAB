@@ -9,8 +9,7 @@ opencv-python-headless # For image processing in some processors
 pdf2image # For PDF-to-image conversion before OCR
 langdetect # For BilingualProcessor
 python-dateutil # Windows-compatible IANA timezone data for local scheduling
-pandas # For DataMigration and FinancialAnalyzer
-openpyxl # For reading .xlsx files with pandas
+openpyxl # For streaming local .xlsx bank exports
 Flask>=3.1,<4 # Authenticated local operations API and retained compatibility dashboard
 waitress # Production WSGI server for the local FAB API
 cryptography # For SecurityManager

@@ -156,7 +156,7 @@ Audit date: 2026-08-13
 | Priority | Item | Required action |
 | --- | --- | --- |
 | High | Live provider acceptance | Reauthorize Google, validate the Wave business/token/mapping, and run a synthetic receipt through attachment readback before enabling archival. |
-| Medium | Image optimization | The OCR/PDF-capable API image is 1.52 GB; consider a separate lightweight API image and an OCR worker image if registry transfer or cold-start cost becomes material. |
+| Medium | Image optimization | The OCR/PDF-capable API image baseline is 1.52 GB. Pandas has now been removed after replacing its runtime uses; rebuild and measure before claiming an image-size reduction. A separate API/OCR worker image remains a candidate if transfer or cold-start cost is still material. |
 | Medium | Performance baseline | Run sustained idle-host and concurrent-refresh tests, and track cold backup-integrity scan time separately from warm bounded-health latency and payload size. |
 | Medium | Recovery rehearsal | Exercise the documented schema rollback and full source-evidence recovery process on a production-sized copy before unattended upgrades. |
 | Medium | Legacy compatibility retirement | External and internal duplicate workflow entrypoints and placeholder helpers are retired. Continue removing retained `posting_attempts` compatibility only after any deployed pre-ledger database has been migrated. |
