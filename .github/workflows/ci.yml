@@ -30,7 +30,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: "3.13"
+          python-version: "3.15.0"
           cache: pip
           cache-dependency-path: requirements-test.lock
       - name: Install Python dependencies
@@ -97,7 +97,7 @@ jobs:
         if: matrix.shard == 1
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: "22"
+          node-version: "26.12.0"
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
       - name: Install and build Windows dashboard
@@ -126,7 +126,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: "22"
+          node-version: "26.12.0"
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
       - name: Install frontend dependencies
@@ -146,10 +146,30 @@ jobs:
       - name: Set up Python for Linux stack rehearsal
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: "3.13"
+          python-version: "3.15.0"
           cache: pip
           cache-dependency-path: requirements.lock
       - name: Install API dependencies for Linux stack rehearsal
         run: python -m pip install --disable-pip-version-check --require-hashes -r requirements.lock
       - name: Rehearse Linux dashboard API and ledger
         run: python scripts/run_stack_rehearsal.py
+
+  container-build-api:
+    name: Container build (api)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Build API image
+        run: docker build --pull --file Dockerfile --tag fab-api:ci .
+
+  container-build-dashboard:
+    name: Container build (dashboard)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Build dashboard image
+        run: docker build --pull --file web/Dockerfile --tag fab-dashboard:ci web
