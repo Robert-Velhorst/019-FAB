@@ -43,6 +43,46 @@ LEDGER_SCHEMA_MIGRATIONS = {
 }
 
 
+def _redact_url_userinfo(value: str) -> str:
+    """Redact URL userinfo in one linear pass, without backtracking regexes."""
+    output = []
+    cursor = 0
+    index = 0
+    while index < len(value):
+        if index and (
+            value[index - 1].isascii()
+            and (value[index - 1].isalnum() or value[index - 1] in "+.-")
+        ):
+            index += 1
+            continue
+        if not value[index].isascii() or not value[index].isalpha():
+            index += 1
+            continue
+
+        scheme_end = index + 1
+        while scheme_end < len(value):
+            character = value[scheme_end]
+            if not character.isascii() or not (character.isalnum() or character in "+.-"):
+                break
+            scheme_end += 1
+        if value[scheme_end:scheme_end + 3] != "://":
+            index = scheme_end
+            continue
+
+        authority_start = scheme_end + 3
+        authority_end = authority_start
+        while authority_end < len(value) and value[authority_end] not in "/?# \t\r\n":
+            authority_end += 1
+        userinfo_end = value.rfind("@", authority_start, authority_end)
+        if userinfo_end > authority_start:
+            output.append(value[cursor:authority_start])
+            output.append("[REDACTED]@")
+            cursor = userinfo_end + 1
+        index = authority_end
+    output.append(value[cursor:])
+    return "".join(output)
+
+
 def default_ledger_path() -> str:
     """Return a Windows-friendly local FAB ledger path without using the repo."""
     base_dir = (
@@ -6694,11 +6734,7 @@ class LocalOperationsLedger:
         if isinstance(value, tuple):
             return [cls._redact_sensitive(item) for item in value]
         if isinstance(value, str):
-            value = re.sub(
-                r"(?i)(?<![a-z0-9+.-])([a-z][a-z0-9+.-]*://)[^/@\s]+@",
-                r"\1[REDACTED]@",
-                value,
-            )
+            value = _redact_url_userinfo(value)
             value = re.sub(
                 r'''(?i)(["'](?:access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|api[_-]?key|apikey|secret|password|passwd|token|database[_-]?url|connection[_-]?string|dsn)["']\s*:\s*)(?:"[^"]*"|'[^']*'|[^,}\s]+)''',
                 r'\1"[REDACTED]"',

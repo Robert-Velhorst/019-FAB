@@ -18,12 +18,20 @@ class TestLocalOperationsLedger(unittest.TestCase):
         )
         self.assertEqual(secret_url, "https://[REDACTED]@example.test/path")
 
-        adversarial = "a" * 20_000
+        adversarial = "a" * 20_000 + "://" + "a" * 20_000
         started = time.perf_counter()
         redacted = LocalOperationsLedger._redact_sensitive(adversarial)
         elapsed = time.perf_counter() - started
 
         self.assertEqual(redacted, adversarial)
+        self.assertLess(elapsed, 1.0)
+
+        long_userinfo = "https://" + ("a" * 20_000) + "@example.test/resource"
+        started = time.perf_counter()
+        redacted_userinfo = LocalOperationsLedger._redact_sensitive(long_userinfo)
+        elapsed = time.perf_counter() - started
+
+        self.assertEqual(redacted_userinfo, "https://[REDACTED]@example.test/resource")
         self.assertLess(elapsed, 1.0)
 
     def test_error_redaction_bounds_untrusted_diagnostic_input(self):

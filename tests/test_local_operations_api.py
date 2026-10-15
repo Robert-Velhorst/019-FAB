@@ -3697,6 +3697,60 @@ class TestLocalOperationsApi(unittest.TestCase):
             self.assertIn("backup-error-002", captured.output[0])
             self.assertNotIn(private_detail, captured.output[0])
 
+    def test_backup_and_close_pack_validation_errors_do_not_disclose_paths(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = create_app({
+                "fab_local_ledger_path": os.path.join(temp_dir, "fab.sqlite3"),
+                "fab_local_backup_dir": os.path.join(temp_dir, "backups"),
+            })
+            client = app.test_client()
+            path_error = f"Backup not found: {temp_dir}\\private\\ledger.zip"
+
+            with patch(
+                "src.operations.local_api.LocalBackupService.inspect_backup",
+                side_effect=ValueError(path_error),
+            ):
+                response = client.get("/api/backups/inspect?backupFilename=missing.zip")
+            self.assertEqual(response.status_code, 400)
+            self.assertNotIn(temp_dir, response.get_data(as_text=True))
+            self.assertIn("Internal details were withheld", response.get_json()["error"])
+
+            with patch(
+                "src.operations.local_api.LocalBackupService.plan_restore",
+                side_effect=ValueError(path_error),
+            ):
+                response = client.get("/api/backups/restore-plan?backupFilename=missing.zip")
+            self.assertEqual(response.status_code, 400)
+            self.assertNotIn(temp_dir, response.get_data(as_text=True))
+
+            with patch(
+                "src.operations.local_api.LocalClosePackService.inspect_pack",
+                side_effect=ValueError(f"Close pack not found: {temp_dir}\\private\\close-pack.zip"),
+            ):
+                response = client.get("/api/close-packs/inspect?closePackFilename=missing.zip")
+            self.assertEqual(response.status_code, 400)
+            self.assertNotIn(temp_dir, response.get_data(as_text=True))
+
+    def test_drive_archive_failure_reason_is_sanitized_before_json_response(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = create_app({
+                "fab_local_ledger_path": os.path.join(temp_dir, "fab.sqlite3"),
+            })
+            with patch(
+                "src.operations.local_api.DriveWaveDeliveryService.archive_document",
+                return_value={
+                    "success": False,
+                    "status": "blocked",
+                    "reasons": [f"Provider failed while reading {temp_dir}\\private\\credential.json"],
+                    "externalSubmission": "not_executed",
+                },
+            ):
+                response = app.test_client().post("/api/drive-wave/documents/1/archive", json={})
+
+            self.assertEqual(response.status_code, 409)
+            self.assertNotIn(temp_dir, response.get_data(as_text=True))
+            self.assertIn("Internal details were withheld", response.get_json()["reasons"][0])
+
     def test_api_rescans_configured_intake_folder(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             intake_dir = os.path.join(temp_dir, "sort-out")

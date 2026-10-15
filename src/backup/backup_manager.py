@@ -9,6 +9,7 @@ import tempfile
 import uuid
 import zipfile
 from pathlib import Path
+from werkzeug.utils import safe_join
 
 MAX_BACKUP_SOURCES = 100
 MAX_RESTORE_MEMBERS = 20_000
@@ -106,13 +107,17 @@ class BackupManager:
         for path in paths_to_backup:
             if not isinstance(path, (str, os.PathLike)) or not os.fspath(path).strip():
                 return {"status": "failure", "message": "Backup sources must be configured filesystem paths."}
-            resolved = _canonical_path(path)
-            configured = any(
-                resolved == root
-                or (os.path.isdir(root) and _path_is_within(resolved, root))
-                for root in allowed_paths
-            )
-            if not configured or _path_is_within(resolved, self.backup_base_dir):
+            candidate = _canonical_path(path)
+            resolved = None
+            for root in allowed_paths:
+                if os.path.normcase(candidate) == os.path.normcase(root):
+                    resolved = root
+                    break
+                if os.path.isdir(root) and _path_is_within(candidate, root):
+                    relative = os.path.relpath(candidate, root).replace(os.path.sep, "/")
+                    resolved = safe_join(root, relative)
+                    break
+            if resolved is None or _path_is_within(resolved, self.backup_base_dir):
                 return {"status": "failure", "message": "A requested backup source is not configured."}
             if not os.path.exists(resolved) or not (os.path.isfile(resolved) or os.path.isdir(resolved)):
                 return {"status": "failure", "message": "A requested backup source does not exist."}
@@ -235,20 +240,52 @@ class BackupManager:
             return {"status": "failure", "message": "allow_overwrite must be a boolean."}
         try:
             backup_value = os.fspath(backup_file_path)
-            if not isinstance(backup_value, str) or os.path.islink(backup_value):
+            if not isinstance(backup_value, str) or not backup_value.strip():
                 return {"status": "failure", "message": "Backup archive path must be a regular file path."}
-            backup_path = _canonical_path(backup_file_path)
+            backup_candidate = os.path.normcase(
+                os.path.abspath(os.path.expanduser(backup_value))
+            )
+            backup_path = next(
+                (
+                    backup["path"]
+                    for backup in self.list_backups()
+                    if backup_candidate == os.path.normcase(backup["path"])
+                    or backup_value == backup["filename"]
+                ),
+                None,
+            )
+            if backup_path is None:
+                return {"status": "failure", "message": "The backup archive must be a listed file in the configured backup directory."}
             restore_value = os.fspath(restore_dir)
             if not isinstance(restore_value, str) or not restore_value.strip():
                 return {"status": "failure", "message": "Restore destination must be a non-empty path."}
-            requested_restore = (
+            restore_candidate = os.path.abspath(
                 restore_value
                 if os.path.isabs(restore_value)
                 else os.path.join(self.restore_base_dir, restore_value)
             )
-            if os.path.islink(requested_restore):
+            relative_restore = os.path.relpath(restore_candidate, self.restore_base_dir)
+            relative_restore = relative_restore.replace(os.path.sep, "/")
+            restore_parts = relative_restore.split("/")
+            if (
+                not _path_is_within(restore_candidate, self.restore_base_dir)
+                or not restore_parts
+                or any(
+                    not part
+                    or part in {".", ".."}
+                    or ":" in part
+                    or "\x00" in part
+                    or part.endswith((" ", "."))
+                    or WINDOWS_RESERVED_NAME.fullmatch(part)
+                    for part in restore_parts
+                )
+            ):
+                return {"status": "failure", "message": "Restore destination must be a safe folder inside the configured restore directory."}
+            restore_root = safe_join(self.restore_base_dir, relative_restore)
+            if restore_root is None or not _path_is_within(_canonical_path(restore_root), self.restore_base_dir):
+                return {"status": "failure", "message": "Restore destination must be inside the configured restore directory."}
+            if os.path.islink(restore_root):
                 return {"status": "failure", "message": "Restore destination cannot be a symbolic link."}
-            restore_root = _canonical_path(requested_restore)
         except (TypeError, ValueError, OSError):
             return {"status": "failure", "message": "Invalid backup or restore path."}
         if not _path_is_within(backup_path, self.backup_base_dir) or backup_path == self.backup_base_dir:
@@ -292,7 +329,7 @@ class BackupManager:
                             for part in parts
                         )
                     ):
-                        return {"status": "failure", "message": f"Unsafe path in backup: {member}"}
+                        return {"status": "failure", "message": "Unsafe path in backup archive."}
                     if stat.S_ISLNK(info.external_attr >> 16):
                         return {"status": "failure", "message": "Symbolic links are not allowed in backups."}
                     relative_path = "/".join(parts)
@@ -305,7 +342,7 @@ class BackupManager:
                         return {"status": "failure", "message": "Backup archive exceeds the restore size limit."}
                     target_path = _canonical_path(os.path.join(restore_root, *parts))
                     if not _path_is_within(target_path, restore_root):
-                        return {"status": "failure", "message": f"Unsafe path in backup: {member}"}
+                        return {"status": "failure", "message": "Unsafe path in backup archive."}
                 for key, is_directory in entries.items():
                     if is_directory:
                         continue

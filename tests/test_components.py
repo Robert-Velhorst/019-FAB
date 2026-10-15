@@ -140,7 +140,7 @@ class TestComponents(unittest.TestCase):
         self.assertEqual(backup_result["status"], "success")
         self.assertTrue(os.path.exists(backup_result["path"]))
 
-        restore_dir = os.path.join(self.temp_dir.name, "restore-root", "restore_test")
+        restore_dir = os.path.join(self.temp_dir.name, "restore-root", "restore test")
         self.config["backup_restore_dir"] = os.path.dirname(restore_dir)
         manager = BackupManager(self.config)
         restore_result = manager.restore_backup(backup_result["path"], restore_dir)
@@ -299,6 +299,29 @@ class TestComponents(unittest.TestCase):
 
         self.assertEqual(result["status"], "success")
         self.assertTrue(os.path.isfile(result["path"]))
+        with zipfile.ZipFile(result["path"]) as archive:
+            self.assertIn("nested.txt", archive.namelist())
+
+    def test_backup_manager_rejects_source_outside_configured_root(self):
+        source_dir = os.path.join(self.temp_dir.name, "configured-data")
+        outside_dir = os.path.join(self.temp_dir.name, "outside-data")
+        os.makedirs(source_dir)
+        os.makedirs(outside_dir)
+        source_file = os.path.join(source_dir, "nested.txt")
+        with open(source_file, "w", encoding="utf-8") as handle:
+            handle.write("configured content")
+        outside_file = os.path.join(outside_dir, "other.txt")
+        with open(outside_file, "w", encoding="utf-8") as handle:
+            handle.write("unconfigured content")
+        manager = BackupManager({
+            "backup_base_dir": os.path.join(self.temp_dir.name, "backup-output"),
+            "backup_paths": [source_dir],
+        })
+
+        result = manager.perform_backup([outside_file])
+
+        self.assertEqual(result["status"], "failure")
+        self.assertEqual(manager.list_backups(), [])
 
     def test_failed_restore_preserves_existing_destination(self):
         manager = BackupManager({

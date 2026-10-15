@@ -375,9 +375,15 @@ def _sanitize_public_diagnostics(value: Any) -> Any:
         sanitized = {}
         for key, item in value.items():
             if isinstance(item, str) and str(key).casefold() in {
-                "error", "message", "error_message", "errormessage",
+                "error", "message", "reason", "error_message", "errormessage",
             }:
                 sanitized[key] = _public_api_diagnostic(item)
+            elif isinstance(item, list) and str(key).casefold() == "reasons":
+                sanitized[key] = [
+                    _public_api_diagnostic(value) if isinstance(value, str)
+                    else _sanitize_public_diagnostics(value)
+                    for value in item
+                ]
             else:
                 sanitized[key] = _sanitize_public_diagnostics(item)
         return sanitized
@@ -5490,7 +5496,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             document_id,
             actor=str(payload.get("actor") or "local_api"),
         )
-        return jsonify(result), 200 if result.get("success") else 409
+        return jsonify(_sanitize_public_diagnostics(result)), 200 if result.get("success") else 409
 
     @app.get("/api/workflows")
     def workflow_runs_api():
@@ -5724,7 +5730,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         try:
             return jsonify(LocalClosePackService(ledger, config).inspect_pack(str(close_pack_path or "")))
         except ValueError as exc:
-            return jsonify({"success": False, "status": "invalid", "error": str(exc)}), 400
+            return jsonify({"success": False, "status": "invalid", "error": _public_api_diagnostic(str(exc))}), 400
         except Exception as exc:
             error = _log_unexpected_api_error(app, "inspect_close_pack", exc)
             return jsonify({"success": False, "status": "failed", "error": error}), 500
@@ -7981,7 +7987,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         try:
             return jsonify(LocalBackupService(ledger, config).inspect_backup(str(backup_path or "")))
         except ValueError as exc:
-            return jsonify({"success": False, "status": "invalid", "error": str(exc)}), 400
+            return jsonify({"success": False, "status": "invalid", "error": _public_api_diagnostic(str(exc))}), 400
         except Exception as exc:
             error = _log_unexpected_api_error(app, "inspect_backup", exc)
             return jsonify({"success": False, "status": "failed", "error": error}), 500
@@ -7998,7 +8004,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             return jsonify({
                 "success": False,
                 "status": "invalid",
-                "error": str(exc),
+                "error": _public_api_diagnostic(str(exc)),
                 "externalSubmission": "not_executed",
             }), 400
         except Exception as exc:
@@ -8021,7 +8027,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
                 actor=str(payload.get("actor") or "fab_local_api")[:200],
             )
         except ValueError as exc:
-            return jsonify({"success": False, "status": "failed", "error": str(exc)}), 400
+            return jsonify({"success": False, "status": "failed", "error": _public_api_diagnostic(str(exc))}), 400
         except Exception as exc:
             error = _log_unexpected_api_error(app, "restore_backup", exc)
             return jsonify({"success": False, "status": "failed", "error": error}), 500
