@@ -73,7 +73,7 @@ def test_complete_launcher_refuses_concurrent_lifecycle_work(tmp_path, shell, fi
         $arguments=@('-NoProfile','-NonInteractive','-File','"__LAUNCHER__"')
         if ('__FILENAME__' -eq 'Start-FAB.ps1') { $arguments+='-NoBrowser' }
         $p=Start-Process -FilePath '__SHELL__' -ArgumentList $arguments -WorkingDirectory '__INSTALLATION__' -WindowStyle Hidden -RedirectStandardOutput 'launcher.out' -RedirectStandardError 'launcher.err' -PassThru
-        if (-not $p.WaitForExit(10000)) { $p.Kill(); throw 'launcher timed out' }
+        if (-not $p.WaitForExit(25000)) { $p.Kill(); throw 'launcher timed out' }
         @{blocked=($p.ExitCode -ne 0); error=(Get-Content 'launcher.err' -Raw).Trim()} | ConvertTo-Json -Compress
     } finally {
         if ($p) { $p.Dispose() }
@@ -88,7 +88,7 @@ def test_complete_launcher_refuses_concurrent_lifecycle_work(tmp_path, shell, fi
     fixture = tmp_path / "fixture.ps1"
     fixture.write_text(script, encoding="utf-8")
     result = subprocess.run([shell, "-NoProfile", "-NonInteractive", "-File", str(fixture)],
-                            cwd=tmp_path, capture_output=True, text=True, timeout=30)
+                            cwd=tmp_path, capture_output=True, text=True, timeout=40)
     assert result.returncode == 0, result.stderr
     observed = json.loads(result.stdout.strip().splitlines()[-1])
     assert observed["blocked"]

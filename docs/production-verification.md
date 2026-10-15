@@ -2254,3 +2254,46 @@ remain inspectable. The backup, restore, API, autonomy and component suites
 passed **193 tests with one platform skip**. This bounds central-directory
 metadata allocation; it does not add an overall time or process-memory limit to
 deep checksum reads or SQLite integrity checks.
+## Sparse Reconciliation Candidate Index (2026-10-15)
+
+Added a per-call sorted index of valid document amounts. The default matcher
+queries only rows within the configured amount tolerance on sparse workloads,
+then restores original document order before scoring so first-in-order ties and
+duplicate-ID behavior remain unchanged. Dense candidate ranges and custom score
+overrides keep their previous full-scan behavior. When the combined Decimal
+exponent/precision range could round the query bounds, matching also falls back
+to the full scan. A large exact-decimal regression was found by comparing the
+new path to the old prepared scorer and is now covered.
+
+Focused reconciliation, financial-boundary, and component tests passed **65
+passed**. The full Windows Python suite then passed **1,887 passed, 7 skipped,
+137 subtests** in 965.55 seconds.
+
+The synthetic benchmark compared identical complete result lists against the
+unprepared scorer. Median times: 500x100 different amounts, 4.17 ms indexed vs
+86.27 ms unprepared; 500x100 dense ties, 14.64 ms vs 107.11 ms; 2,000x400
+sparse rows, 33.79 ms vs 1.91 seconds. `tracemalloc` peak increased by about
+193 KB for the larger case; it is Python allocation measurement, not process
+RSS. These fixtures do not establish a whole-application speed or memory
+improvement, production latency SLA, or provider behavior. Whitespace checks
+passed for the changed matcher, test, and benchmark files. No live ledger,
+provider, tunnel, service, commit, or deployment was changed.
+
+## Web MySQL Migration and Transaction Gate (2026-10-15)
+
+Added a dedicated CI job using an ephemeral MySQL 8.4 service. It applies the
+tracked Drizzle migration journal before running integration tests for
+idempotent source-document registration, workflow metadata compare-and-swap,
+dashboard tRPC registration through MySQL, review status/audit persistence,
+and rollback when an audit insert collides. The test refuses a non-loopback
+host or a database other than `fab_test`.
+
+Local verification passed direct TypeScript checking and 13 focused mocked
+database tests; all five real-MySQL cases correctly skipped without an opt-in
+database URL. The earlier full **448 web tests**, production Vite/server build
+and size budgets, and synthetic Windows frontend-to-Python-API-to-SQLite
+rehearsal passed before the new tRPC integration case. The CI YAML parsed and
+formatting and whitespace checks passed. No local MySQL listener was
+available, so these changes have not yet been exercised against a real MySQL
+server; the first hosted CI run remains the acceptance gate. No live or user
+database was used.

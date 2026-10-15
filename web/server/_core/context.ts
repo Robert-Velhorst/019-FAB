@@ -3,6 +3,7 @@ import type { User } from "../../drizzle/schema";
 import { isLoopbackRequest } from "../lib/loopback";
 import { ENV } from "./env";
 import { sdk } from "./sdk";
+import { authenticateFabManagedRequest, isFabManagedAuthEnabled } from "../fabManagedAuth";
 
 export type TrpcContext = {
   req: CreateExpressContextOptions["req"];
@@ -22,7 +23,9 @@ export async function createContext(
   );
   if (!localOperatorRequest) {
     try {
-      user = await sdk.authenticateRequest(opts.req);
+      user = isFabManagedAuthEnabled()
+        ? await authenticateFabManagedRequest(opts.req)
+        : await sdk.authenticateRequest(opts.req);
     } catch (error) {
       // Authentication is optional for public procedures.
       user = null;

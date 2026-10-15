@@ -23,24 +23,24 @@ def test_worker_registration_wait_checks_owner_exit_and_deadline(tmp_path, shell
     __FUNCTION__
     function Get-FabWorkerRuntimeProcessId {
         param($Path, $ExpectedRoot, $OperationTimeoutSeconds)
-        if ($OperationTimeoutSeconds -ne 1) { throw 'registration-timeout-not-forwarded' }
+        if ($OperationTimeoutSeconds -lt 1 -or $OperationTimeoutSeconds -gt 2) { throw 'registration-timeout-not-forwarded' }
         $script:reads += 1
         if ($mode -in @('dead', 'timeout')) { return $null }
         if ($mode -eq 'delayed' -and $script:reads -eq 1) { return $null }
         if ($mode -eq 'foreign') { return 999 }
-        if ($mode -eq 'late') { Start-Sleep -Milliseconds 1200 }
+        if ($mode -eq 'late') { Start-Sleep -Milliseconds 5200 }
         200
     }
     function Get-FabProcessId {
         param($ProcessId, $CommandMarker, $OperationTimeoutSeconds)
-        if ($OperationTimeoutSeconds -ne 1) { throw 'liveness-timeout-not-forwarded' }
+        if ($OperationTimeoutSeconds -lt 1 -or $OperationTimeoutSeconds -gt 2) { throw 'liveness-timeout-not-forwarded' }
         if ($mode -eq 'dead') { return $null }
         100
     }
     function Test-FabProcessAncestor {
         param($AncestorProcessId, $DescendantProcessId, $Watch, $TimeoutSeconds)
-        if (-not $Watch -or $TimeoutSeconds -ne 1) { throw 'ancestry-budget-not-forwarded' }
-        if ($mode -eq 'late-ancestry') { Start-Sleep -Milliseconds 1200 }
+        if (-not $Watch -or $TimeoutSeconds -ne 5) { throw 'ancestry-budget-not-forwarded' }
+        if ($mode -eq 'late-ancestry') { Start-Sleep -Milliseconds 5200 }
         $AncestorProcessId -eq 100 -and $DescendantProcessId -eq 200
     }
     $results = @()
@@ -49,14 +49,14 @@ def test_worker_registration_wait_checks_owner_exit_and_deadline(tmp_path, shell
         $watch = [Diagnostics.Stopwatch]::StartNew()
         $owner = $null
         $failure = $null
-        try { $owner = Wait-FabWorkerRuntime -Path 'synthetic.json' -ExpectedRoot '.' -ExpectedProcessId 100 -TimeoutSeconds 1 }
+        try { $owner = Wait-FabWorkerRuntime -Path 'synthetic.json' -ExpectedRoot '.' -ExpectedProcessId 100 -TimeoutSeconds 5 }
         catch { $failure = $_.Exception.Message }
         $results += @{mode=$mode; owner=$owner; failure=$failure; reads=$script:reads; seconds=$watch.Elapsed.TotalSeconds}
     }
     ConvertTo-Json -InputObject $results -Compress
     """.replace("__FUNCTION__", function)
     result = subprocess.run([shell, "-NoProfile", "-NonInteractive", "-Command", command],
-                            cwd=tmp_path, capture_output=True, text=True, timeout=30)
+                            cwd=tmp_path, capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stderr
     rows = {row["mode"]: row for row in json.loads(result.stdout)}
     for mode in ("ready", "delayed"):

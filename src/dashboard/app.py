@@ -3,7 +3,10 @@ import html
 import hmac
 import json
 import secrets
-from datetime import timedelta
+import threading
+import time
+from collections import OrderedDict
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from typing import Any, Dict
 
@@ -18,6 +21,10 @@ from src.reports.reporting_service import ReportingService
 from src.storage.database import Database
 from src.storage.schema_extender import SchemaExtender
 
+LOGIN_FAILURE_WINDOW_SECONDS = 15 * 60
+MAX_LOGIN_FAILURES_PER_CLIENT = 5
+MAX_TRACKED_LOGIN_CLIENTS = 4096
+
 
 def create_app(config: Dict[str, Any] = None) -> Flask:
     config = config or {}
@@ -29,6 +36,7 @@ def create_app(config: Dict[str, Any] = None) -> Flask:
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
         SESSION_COOKIE_SECURE=secure_cookie,
+        MAX_CONTENT_LENGTH=2 * 1024 * 1024,
     )
     app.permanent_session_lifetime = timedelta(hours=8)
     database = Database(config)
@@ -45,14 +53,44 @@ def create_app(config: Dict[str, Any] = None) -> Flask:
         if isinstance(dashboard_token, str) and dashboard_token
         else ""
     )
+    login_failures: OrderedDict[str, tuple[int, float]] = OrderedDict()
+    login_failures_lock = threading.Lock()
+
+    def login_lockout_seconds(client_key: str, now: float) -> int:
+        with login_failures_lock:
+            state = login_failures.get(client_key)
+            if state is None:
+                return 0
+            attempts, expires_at = state
+            if expires_at <= now:
+                login_failures.pop(client_key, None)
+                return 0
+            login_failures.move_to_end(client_key)
+            return max(1, int(expires_at - now + 0.999)) if attempts >= MAX_LOGIN_FAILURES_PER_CLIENT else 0
+
+    def record_login_failure(client_key: str, now: float) -> None:
+        with login_failures_lock:
+            attempts, expires_at = login_failures.get(client_key, (0, now + LOGIN_FAILURE_WINDOW_SECONDS))
+            if expires_at <= now:
+                attempts, expires_at = 0, now + LOGIN_FAILURE_WINDOW_SECONDS
+            login_failures[client_key] = (attempts + 1, expires_at)
+            login_failures.move_to_end(client_key)
+            while len(login_failures) > MAX_TRACKED_LOGIN_CLIENTS:
+                login_failures.popitem(last=False)
 
     def has_authenticated_session() -> bool:
         stored_fingerprint = session.get("dashboard_token_fingerprint", "")
-        return bool(
+        session_id = session.get("dashboard_session_id", "")
+        if not (
             token_fingerprint
             and isinstance(stored_fingerprint, str)
             and hmac.compare_digest(stored_fingerprint, token_fingerprint)
-        )
+            and isinstance(session_id, str)
+            and 32 <= len(session_id) <= 128
+        ):
+            return False
+        session_hash = hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+        return database.dashboard_session_is_active(session_hash)
 
     @app.before_request
     def reject_query_string_credentials():
@@ -85,6 +123,43 @@ def create_app(config: Dict[str, Any] = None) -> Flask:
                     abort(403, description="A valid CSRF token is required for session-authenticated changes.")
             return func(*args, **kwargs)
         return wrapper
+
+    def json_object_payload() -> Dict[str, Any]:
+        raw_body = request.get_data(cache=True)
+        if not raw_body.strip():
+            return {}
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            abort(400, description="A JSON object is required.")
+        return payload
+
+    def bounded_text(value: Any, field: str, maximum: int, *, allow_empty: bool = False) -> str:
+        if (
+            not isinstance(value, str)
+            or len(value) > maximum
+            or (not allow_empty and not value.strip())
+        ):
+            qualifier = "text" if allow_empty else "non-empty text"
+            abort(400, description=f"{field} must be {qualifier} of at most {maximum} characters.")
+        return value
+
+    def document_correction_payload(payload: Dict[str, Any], default_explanation: str):
+        correction = payload.get("correction", payload)
+        if not isinstance(correction, dict):
+            abort(400, description="correction must be an object.")
+        if not isinstance(correction.get("extracted_data", {}), dict):
+            abort(400, description="correction.extracted_data must be an object.")
+        for field in ("vendor_name", "category", "vendor_alias", "correction_type"):
+            value = correction.get(field)
+            if value is not None and (not isinstance(value, str) or len(value) > 500):
+                abort(400, description=f"correction.{field} must be text of at most 500 characters.")
+        category_path = correction.get("category_path", [])
+        if not isinstance(category_path, list) or any(not isinstance(part, str) for part in category_path):
+            abort(400, description="correction.category_path must be an array of text values.")
+        explanation = payload.get("explanation", default_explanation)
+        if not isinstance(explanation, str) or not explanation.strip() or len(explanation) > 2000:
+            abort(400, description="explanation must be a non-empty string of at most 2000 characters.")
+        return correction, explanation
 
     @app.get("/health")
     def health():
@@ -139,12 +214,28 @@ def create_app(config: Dict[str, Any] = None) -> Flask:
     def login():
         if not dashboard_token:
             abort(503, description="Dashboard token is not configured.")
+        client_key = request.remote_addr or "unknown"
+        retry_after = login_lockout_seconds(client_key, time.monotonic())
+        if retry_after:
+            response = jsonify({"error": "Too many failed login attempts. Try again later."})
+            response.status_code = 429
+            response.headers["Retry-After"] = str(retry_after)
+            response.headers["Cache-Control"] = "no-store"
+            return response
         provided = request.form.get("token", "")
         if not provided or not hmac.compare_digest(provided, dashboard_token):
+            record_login_failure(client_key, time.monotonic())
             abort(401, description="Invalid dashboard access token.")
+        with login_failures_lock:
+            login_failures.pop(client_key, None)
+        session_id = secrets.token_urlsafe(32)
+        session_hash = hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+        expires_at = (datetime.now(timezone.utc) + app.permanent_session_lifetime).isoformat()
+        database.register_dashboard_session(session_hash, expires_at)
         session.clear()
         session.permanent = True
         session["dashboard_token_fingerprint"] = token_fingerprint
+        session["dashboard_session_id"] = session_id
         session["dashboard_csrf_token"] = secrets.token_urlsafe(32)
         return redirect("/ui", code=303)
 
@@ -156,6 +247,9 @@ def create_app(config: Dict[str, Any] = None) -> Flask:
             abort(401, description="Not signed in.")
         if not expected_csrf or not provided_csrf or not hmac.compare_digest(provided_csrf, expected_csrf):
             abort(403, description="A valid CSRF token is required to sign out.")
+        session_id = session.get("dashboard_session_id", "")
+        if isinstance(session_id, str) and 32 <= len(session_id) <= 128:
+            database.revoke_dashboard_session(hashlib.sha256(session_id.encode("utf-8")).hexdigest())
         session.clear()
         return redirect("/ui", code=303)
 
@@ -190,9 +284,8 @@ def create_app(config: Dict[str, Any] = None) -> Flask:
     @app.post("/documents/<document_id>/corrections")
     @require_auth
     def apply_document_correction(document_id: str):
-        payload = request.get_json(silent=True) or {}
-        correction = payload.get("correction") or payload
-        explanation = payload.get("explanation", "Manual correction from dashboard")
+        payload = json_object_payload()
+        correction, explanation = document_correction_payload(payload, "Manual correction from dashboard")
         return jsonify(correction_learning.apply_document_correction(document_id, correction, explanation))
 
     @app.get("/manual-review")
@@ -204,12 +297,37 @@ def create_app(config: Dict[str, Any] = None) -> Flask:
     @app.post("/manual-review/<int:item_id>/resolve")
     @require_auth
     def resolve_manual_review(item_id: int):
-        payload = request.get_json(silent=True) or {}
+        payload = json_object_payload()
         resolution = payload.get("resolution", "resolved")
-        new_status = payload.get("status", "resolved")
+        requested_status = payload.get("status", "resolved")
+        if not isinstance(resolution, str) or not resolution.strip() or len(resolution) > 2000:
+            abort(400, description="resolution must be a non-empty string of at most 2000 characters.")
+        if requested_status != "resolved":
+            abort(400, description="A manual review can only be marked resolved on this route.")
+        review = database.fetch_one(
+            "SELECT id, document_id, status FROM manual_review_items WHERE id = ?",
+            (item_id,),
+        )
+        if not review:
+            abort(404, description="Manual review item not found.")
+        if review["status"] != "pending":
+            abort(409, description="Manual review item is no longer pending.")
         with database.connect() as connection:
-            connection.execute("UPDATE manual_review_items SET status = ?, resolution = ?, resolved_at = ? WHERE id = ?", (new_status, resolution, database.now(), item_id))
-        database.add_audit_log("manual_review_item", str(item_id), "resolved", None, payload, resolution, "user")
+            cursor = connection.execute(
+                "UPDATE manual_review_items SET status = 'resolved', resolution = ?, resolved_at = ? WHERE id = ? AND status = 'pending'",
+                (resolution, database.now(), item_id),
+            )
+            if cursor.rowcount != 1:
+                abort(409, description="Manual review item changed during resolution.")
+        database.add_audit_log(
+            "manual_review_item",
+            str(item_id),
+            "resolved",
+            review,
+            {"status": "resolved", "resolution": resolution},
+            resolution,
+            "user",
+        )
         return jsonify({"status": "resolved", "item_id": item_id})
 
     @app.post("/manual-review/<int:item_id>/apply-correction")
@@ -218,9 +336,8 @@ def create_app(config: Dict[str, Any] = None) -> Flask:
         review = database.fetch_one("SELECT * FROM manual_review_items WHERE id = ?", (item_id,))
         if not review:
             abort(404, description="Manual review item not found")
-        payload = request.get_json(silent=True) or {}
-        correction = payload.get("correction") or payload
-        explanation = payload.get("explanation", "Manual review correction applied")
+        payload = json_object_payload()
+        correction, explanation = document_correction_payload(payload, "Manual review correction applied")
         result = correction_learning.apply_document_correction(review["document_id"], correction, explanation)
         with database.connect() as connection:
             connection.execute("UPDATE manual_review_items SET status = 'resolved', resolution = ?, resolved_at = ? WHERE id = ?", (explanation, database.now(), item_id))
@@ -240,26 +357,41 @@ def create_app(config: Dict[str, Any] = None) -> Flask:
     @app.post("/posting-attempts/<int:attempt_id>/approve")
     @require_auth
     def approve_posting_attempt(attempt_id: int):
-        payload = request.get_json(silent=True) or {}
-        return jsonify(posting_approval.approve_attempt(attempt_id, reason=payload.get("reason", "Approved from dashboard")))
+        payload = json_object_payload()
+        reason = bounded_text(payload.get("reason", "Approved from dashboard"), "reason", 2000, allow_empty=True)
+        return jsonify(posting_approval.approve_attempt(attempt_id, reason=reason))
 
     @app.post("/posting-attempts/<int:attempt_id>/reject")
     @require_auth
     def reject_posting_attempt(attempt_id: int):
-        payload = request.get_json(silent=True) or {}
-        return jsonify(posting_approval.reject_attempt(attempt_id, reason=payload.get("reason", "Rejected from dashboard")))
+        payload = json_object_payload()
+        reason = bounded_text(payload.get("reason", "Rejected from dashboard"), "reason", 2000, allow_empty=True)
+        return jsonify(posting_approval.reject_attempt(attempt_id, reason=reason))
 
     @app.post("/posting-attempts/<int:attempt_id>/complete-supervised")
     @require_auth
     def complete_supervised_posting_attempt(attempt_id: int):
-        payload = request.get_json(silent=True) or {}
+        payload = json_object_payload()
+        confirmation = bounded_text(payload.get("confirmation", ""), "confirmation", 100, allow_empty=True)
+        external_id = payload.get("external_id")
+        if external_id is not None:
+            external_id = bounded_text(external_id, "external_id", 500, allow_empty=True)
+        evidence = payload.get("evidence", {})
+        if not isinstance(evidence, dict):
+            abort(400, description="evidence must be an object.")
+        reason = bounded_text(
+            payload.get("reason", "Supervised external submission completed from dashboard"),
+            "reason",
+            2000,
+            allow_empty=True,
+        )
         return jsonify(posting_approval.complete_supervised_attempt(
             attempt_id,
-            confirmation=str(payload.get("confirmation") or ""),
+            confirmation=confirmation,
             completed_by="dashboard_user",
-            external_id=payload.get("external_id"),
-            evidence=payload.get("evidence") if isinstance(payload.get("evidence"), dict) else {},
-            reason=payload.get("reason", "Supervised external submission completed from dashboard"),
+            external_id=external_id,
+            evidence=evidence,
+            reason=reason,
         ))
 
     @app.get("/reconciliation-results")
@@ -282,24 +414,33 @@ def create_app(config: Dict[str, Any] = None) -> Flask:
     @require_auth
     def exceptions():
         active = request.args.get("active", "1")
+        if active not in {"0", "1"}:
+            abort(400, description="active must be 0 or 1.")
         return jsonify(database.fetch_all("SELECT * FROM exceptions WHERE active = ? ORDER BY created_at DESC LIMIT 300", (int(active),)))
 
     @app.post("/exceptions")
     @require_auth
     def approve_exception():
-        payload = request.get_json(silent=True) or {}
+        payload = json_object_payload()
         exception_type = payload.get("exception_type")
-        context = payload.get("context") or {}
+        context = payload.get("context", {})
         explanation = payload.get("explanation")
-        if not exception_type or not explanation:
-            abort(400, description="exception_type and explanation are required")
+        exception_type = bounded_text(exception_type, "exception_type", 200)
+        explanation = bounded_text(explanation, "explanation", 2000)
+        if not isinstance(context, dict):
+            abort(400, description="context must be an object.")
         return jsonify(exception_memory.approve_exception(exception_type, context, explanation))
 
     @app.post("/exceptions/<fingerprint>/deactivate")
     @require_auth
     def deactivate_exception(fingerprint: str):
-        payload = request.get_json(silent=True) or {}
-        reason = payload.get("reason", "Exception deactivated from dashboard")
+        payload = json_object_payload()
+        reason = bounded_text(
+            payload.get("reason", "Exception deactivated from dashboard"),
+            "reason",
+            2000,
+            allow_empty=True,
+        )
         status = "deactivated" if exception_memory.deactivate_exception(fingerprint, reason) else "not_found"
         return jsonify({"status": status})
 
@@ -312,15 +453,15 @@ def create_app(config: Dict[str, Any] = None) -> Flask:
     @app.post("/outreach-reminders/<transaction_id>/complete")
     @require_auth
     def complete_outreach(transaction_id: str):
-        payload = request.get_json(silent=True) or {}
-        reason = payload.get("reason", "Receipt received and processed")
+        payload = json_object_payload()
+        reason = bounded_text(payload.get("reason", "Receipt received and processed"), "reason", 2000, allow_empty=True)
         return jsonify({"completed": follow_up_manager.mark_completed(transaction_id, reason)})
 
     @app.post("/outreach-reminders/<transaction_id>/stop")
     @require_auth
     def stop_outreach(transaction_id: str):
-        payload = request.get_json(silent=True) or {}
-        reason = payload.get("reason", "Stopped from dashboard")
+        payload = json_object_payload()
+        reason = bounded_text(payload.get("reason", "Stopped from dashboard"), "reason", 2000, allow_empty=True)
         return jsonify({"stopped": follow_up_manager.stop_follow_up(transaction_id, reason)})
 
     @app.get("/outreach-reminders/due")
@@ -346,8 +487,20 @@ def create_app(config: Dict[str, Any] = None) -> Flask:
     @app.post("/category-rules")
     @require_auth
     def create_category_rule():
-        payload = request.get_json(silent=True) or {}
-        return jsonify(correction_learning.create_category_rule(payload.get("rule_name"), payload.get("category"), payload.get("pattern"), payload.get("rule_type", "text_contains")))
+        payload = json_object_payload()
+        fields = {key: payload.get(key) for key in ("rule_name", "category", "pattern")}
+        for key, value in fields.items():
+            if not isinstance(value, str) or not value.strip() or len(value) > 500:
+                abort(400, description=f"{key} must be a non-empty string of at most 500 characters.")
+        rule_type = payload.get("rule_type", "text_contains")
+        if not isinstance(rule_type, str) or not rule_type.strip() or len(rule_type) > 64:
+            abort(400, description="rule_type must be a non-empty string of at most 64 characters.")
+        return jsonify(correction_learning.create_category_rule(
+            fields["rule_name"].strip(),
+            fields["category"].strip(),
+            fields["pattern"].strip(),
+            rule_type.strip(),
+        ))
 
     @app.get("/document-corrections")
     @require_auth
@@ -387,24 +540,46 @@ def create_app(config: Dict[str, Any] = None) -> Flask:
     @app.post("/backups")
     @require_auth
     def create_backup():
-        payload = request.get_json(silent=True) or {}
+        payload = json_object_payload()
         paths = payload.get("paths")
         backup_config = payload.get("backup_config", {"type": "zip"})
+        if paths is not None and not isinstance(paths, list):
+            abort(400, description="paths must be an array.")
+        if not isinstance(backup_config, dict):
+            abort(400, description="backup_config must be an object.")
         result = backup_manager.perform_backup(paths, backup_config)
-        database.add_audit_log("backup", result.get("path", "unknown"), "backup_created", None, result, result.get("status", "unknown"), "user")
+        raw_status = result.get("status")
+        status = raw_status if raw_status in ("success", "failure") else "unknown"
+        audit_result = {"status": status}
+        if status == "success":
+            included_paths = result.get("included_paths")
+            audit_result["included_source_count"] = len(included_paths) if isinstance(included_paths, list) else 0
+        database.add_audit_log(
+            "backup", "archive", "backup_created", None, audit_result,
+            "Backup attempt succeeded." if status == "success" else "Backup attempt failed.", "user"
+        )
         return jsonify(result)
 
     @app.post("/backups/restore")
     @require_auth
     def restore_backup():
-        payload = request.get_json(silent=True) or {}
+        payload = json_object_payload()
         backup_path = payload.get("backup_path")
         restore_dir = payload.get("restore_dir", "restore_preview")
-        allow_overwrite = bool(payload.get("allow_overwrite", False))
-        if not backup_path:
-            abort(400, description="backup_path is required")
+        allow_overwrite = payload.get("allow_overwrite", False)
+        if not isinstance(backup_path, str) or not backup_path.strip():
+            abort(400, description="backup_path must be a non-empty path.")
+        if not isinstance(restore_dir, str) or not restore_dir.strip():
+            abort(400, description="restore_dir must be a non-empty path.")
+        if not isinstance(allow_overwrite, bool):
+            abort(400, description="allow_overwrite must be a boolean.")
         result = backup_manager.restore_backup(backup_path, restore_dir, allow_overwrite=allow_overwrite)
-        database.add_audit_log("backup", backup_path, "backup_restore_requested", None, result, result.get("status", "unknown"), "user")
+        raw_status = result.get("status")
+        status = raw_status if raw_status in ("success", "failure") else "unknown"
+        database.add_audit_log(
+            "backup", "restore", "backup_restore_requested", None, {"status": status},
+            "Restore attempt succeeded." if status == "success" else "Restore attempt failed.", "user"
+        )
         return jsonify(result)
 
     return app

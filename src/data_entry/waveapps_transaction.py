@@ -157,20 +157,28 @@ def _expense_line_items(
     return line_items, missing
 
 
-def wave_error_messages(payload: Any) -> str:
-    if not isinstance(payload, dict):
-        return "Wave returned an invalid response."
-    operation = ((payload.get("data") or {}).get("moneyTransactionCreate") or {})
-    errors = operation.get("inputErrors") or payload.get("errors") or []
-    messages = []
-    for error in errors:
-        if isinstance(error, dict):
-            message = error.get("message") or error.get("code")
-        else:
-            message = error
-        if message:
-            messages.append(str(message))
-    return "; ".join(messages) or "Wave rejected the money transaction without a detailed error."
+def wave_request_failure(exc: Exception) -> Dict[str, Any]:
+    """Return a safe result without claiming that an unverified write did not happen."""
+    response = getattr(exc, "response", None)
+    status_code = getattr(response, "status_code", None)
+    definitive_rejection = (
+        isinstance(status_code, int)
+        and 400 <= status_code < 500
+        and status_code not in {408, 409, 425, 429}
+    )
+    if definitive_rejection:
+        return {
+            "status": "failure",
+            "message": "Wave rejected the transaction request. Review the provider setup before trying again.",
+            "review_reason": "wave_api_request_rejected",
+            "requires_manual_review": True,
+        }
+    return {
+        "status": "outcome_unknown",
+        "message": "Wave did not return a verifiable result. Check Wave for this transaction before taking further action.",
+        "review_reason": "wave_api_outcome_unknown",
+        "requires_manual_review": True,
+    }
 
 
 def _as_mapping(value: Any) -> Dict[str, Any]:

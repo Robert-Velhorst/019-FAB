@@ -113,10 +113,11 @@ def wait_for_ready(child, root):
     raise RuntimeError("Synthetic API startup timed out")
 
 
-def rehearse(node):
+def rehearse(node, bundle_dir=None):
     import requests
 
-    bundle = ROOT / "web" / "dist" / "fab-standalone.js"
+    bundle_dir = Path(bundle_dir).resolve() if bundle_dir else ROOT / "web" / "dist"
+    bundle = bundle_dir / "fab-standalone.js"
     preload = ROOT / "web" / "scripts" / "production-env.mjs"
     require(bundle.is_file() and preload.is_file(), "Build the production web bundles before rehearsal")
     node = node or shutil.which("node")
@@ -238,8 +239,20 @@ def rehearse(node):
                     return response.json()["result"]["data"]["json"]
 
                 center = rpc("controlCenter")
-                check(center["connection"]["connected"] and center["metrics"]["documents"] == 1,
-                      "dashboard_reads_real_ledger")
+                connected_to_ledger = (
+                    center["connection"]["connected"] and center["metrics"]["documents"] == 1
+                )
+                ledger_detail = json.dumps({
+                    "connected": center["connection"]["connected"],
+                    "documents": center["metrics"]["documents"],
+                    "liveness": center["resourceStates"]["liveness"],
+                    "metrics": center["resourceStates"]["metrics"],
+                }, sort_keys=True)
+                check(
+                    connected_to_ledger,
+                    "dashboard_reads_real_ledger" if connected_to_ledger
+                    else f"dashboard_reads_real_ledger: {ledger_detail}",
+                )
                 check(center["resourceStates"]["metrics"]["state"] == "live", "ledger_metrics_are_live")
                 check(center["reviews"]["summary"]["reviewItems"] == 1, "synthetic_review_is_visible")
                 source_path = f"/api/fab/source/{ready['documentId']}"
@@ -594,13 +607,14 @@ def rehearse(node):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--node", help="Node.js executable (defaults to PATH)")
+    parser.add_argument("--bundle-dir", help="Production bundle directory (defaults to web/dist)")
     parser.add_argument("--fixture-api", help=argparse.SUPPRESS)
     parser.add_argument("--web-port", type=int, help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.fixture_api:
         fixture_api(args.fixture_api, args.web_port)
     else:
-        print(json.dumps(rehearse(args.node)))
+        print(json.dumps(rehearse(args.node, args.bundle_dir)))
 
 
 if __name__ == "__main__":

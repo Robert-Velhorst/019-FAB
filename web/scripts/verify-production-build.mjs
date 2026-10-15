@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const publicRoot = path.resolve(import.meta.dirname, "../dist/public");
+const publicRoot = path.resolve(process.argv[2] ?? path.resolve(import.meta.dirname, "../dist/public"));
 const indexPath = path.join(publicRoot, "index.html");
 const assetsPath = path.join(publicRoot, "assets");
 const MAX_INDEX_BYTES = 32 * 1024;

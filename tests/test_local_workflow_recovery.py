@@ -61,7 +61,7 @@ class TestLocalWorkflowRecovery(unittest.TestCase):
                     dry_run=True,
                 )
 
-            with self.assertRaisesRegex(ValueError, "unsafe autonomous action"):
+            with self.assertRaisesRegex(ValueError, "Unsupported autonomous action"):
                 service.run_cycle(
                     allowed_action_ids=["execute_approved_exports"],
                     recovery_mode=True,

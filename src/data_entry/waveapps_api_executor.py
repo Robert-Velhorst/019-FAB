@@ -89,12 +89,12 @@ class WaveappsApiExecutor:
         handler = self.handlers.get(target) or self._build_handler(target)
         try:
             result = handler.enter_data(categorized_data)
-        except Exception as exc:
+        except Exception:
             return {
-                "status": "failure",
-                "message": f"Wave API executor failed before a verified result was recorded: {exc}",
+                "status": "outcome_unknown",
+                "message": "Wave did not return a verifiable result. Check Wave for this transaction before taking further action.",
                 "requires_manual_review": True,
-                "review_reason": "wave_api_execution_failed",
+                "review_reason": "wave_api_outcome_unknown",
                 "target_system": target,
                 "action_id": normalized_action,
             }

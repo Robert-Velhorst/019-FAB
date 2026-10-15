@@ -18,6 +18,7 @@ import { ENV } from "./env";
 import { createFabSecurityMiddleware } from "./security";
 import { configureFabProxyTrust } from "./deployment";
 import { createFabServerLifecycle, listenFabServer } from "./lifecycle";
+import { closeDb } from "../db";
 
 const log = createLogger("Server");
 
@@ -102,7 +103,14 @@ async function startServer() {
     port: preferredPort,
     allowPortFallback: ENV.fabAllowPortFallback,
   });
-  lifecycle.installSignalHandlers();
+  lifecycle.installSignalHandlers(process, undefined, async () => {
+    try {
+      await closeDb();
+    } catch (error) {
+      log.error("Database pool shutdown failed", {}, error instanceof Error ? error : new Error(String(error)));
+      throw error;
+    }
+  });
 
   if (port !== preferredPort) {
     log.info(`Port ${preferredPort} is busy, using port ${port} instead`);

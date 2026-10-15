@@ -8,6 +8,45 @@ from src.operations.local_ledger import LocalOperationsLedger
 
 
 class TestLocalFolderIntake(unittest.TestCase):
+    def test_fetched_document_requires_an_explicit_source_root(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            document_path = os.path.join(temp_dir, "receipt.pdf")
+            with open(document_path, "wb") as handle:
+                handle.write(b"receipt bytes")
+
+            result = LocalFolderIntake(ledger).register_fetched_document({
+                "local_path": document_path,
+                "original_filename": "receipt.pdf",
+            })
+
+            self.assertEqual(result["skipped"]["reason"], "source_root_missing")
+            self.assertEqual(ledger.list_documents(), [])
+
+    def test_fetched_document_rejects_symlink_outside_source_root(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            source_root = os.path.join(temp_dir, "downloads")
+            outside_root = os.path.join(temp_dir, "outside")
+            os.makedirs(source_root)
+            os.makedirs(outside_root)
+            outside_path = os.path.join(outside_root, "receipt.pdf")
+            with open(outside_path, "wb") as handle:
+                handle.write(b"must not be read")
+            linked_path = os.path.join(source_root, "receipt.pdf")
+            try:
+                os.symlink(outside_path, linked_path)
+            except (OSError, NotImplementedError):
+                self.skipTest("File symlinks are unavailable in this environment")
+
+            result = LocalFolderIntake(ledger).register_fetched_document(
+                {"local_path": linked_path, "original_filename": "receipt.pdf"},
+                root=source_root,
+            )
+
+            self.assertEqual(result["skipped"]["reason"], "path_outside_source_root")
+            self.assertEqual(ledger.list_documents(), [])
+
     def test_rescan_imports_documents_flags_duplicates_and_is_idempotent(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))

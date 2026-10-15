@@ -128,7 +128,7 @@ export const blogPosts = mysqlTable(
 export type BlogPost = typeof blogPosts.$inferSelect;
 export type InsertBlogPost = typeof blogPosts.$inferInsert;
 
-export const documentTypeEnum = mysqlEnum("document_type", [
+export const documentTypeEnum = mysqlEnum("documentType", [
   "receipt",
   "invoice",
   "order_confirmation",
@@ -137,7 +137,7 @@ export const documentTypeEnum = mysqlEnum("document_type", [
   "unknown",
 ]);
 
-export const processingStatusEnum = mysqlEnum("processing_status", [
+export const processingStatusEnum = mysqlEnum("processingStatus", [
   "imported",
   "processing",
   "extracted",
@@ -150,7 +150,7 @@ export const processingStatusEnum = mysqlEnum("processing_status", [
   "archived",
 ]);
 
-export const reviewStatusEnum = mysqlEnum("review_status", [
+export const reviewStatusEnum = mysqlEnum("status", [
   "pending",
   "in_review",
   "approved",
@@ -158,7 +158,7 @@ export const reviewStatusEnum = mysqlEnum("review_status", [
   "resolved",
 ]);
 
-export const workflowStatusEnum = mysqlEnum("workflow_status", [
+export const workflowStatusEnum = mysqlEnum("status", [
   "queued",
   "running",
   "completed",
@@ -167,7 +167,7 @@ export const workflowStatusEnum = mysqlEnum("workflow_status", [
   "cancelled",
 ]);
 
-export const routeTargetEnum = mysqlEnum("route_target", [
+export const routeTargetEnum = mysqlEnum("routeTarget", [
   "mijngeldzaken",
   "waveapps_business",
   "waveapps_personal",
@@ -175,7 +175,15 @@ export const routeTargetEnum = mysqlEnum("route_target", [
   "none",
 ]);
 
-export const routeStatusEnum = mysqlEnum("route_status", [
+const routingTargetEnum = mysqlEnum("target", [
+  "mijngeldzaken",
+  "waveapps_business",
+  "waveapps_personal",
+  "manual_review",
+  "none",
+]);
+
+export const routeStatusEnum = mysqlEnum("status", [
   "pending",
   "submitted",
   "success",
@@ -324,7 +332,7 @@ export const routingAttempts = mysqlTable(
     documentId: int("documentId"),
     bookkeepingRecordId: int("bookkeepingRecordId"),
     workflowRunId: int("workflowRunId"),
-    target: routeTargetEnum.notNull(),
+    target: routingTargetEnum.notNull(),
     status: routeStatusEnum.default("pending").notNull(),
     externalId: varchar("externalId", { length: 255 }),
     message: text("message"),
@@ -348,7 +356,7 @@ export const reconciliationMatches = mysqlTable(
     id: int("id").autoincrement().primaryKey(),
     documentId: int("documentId"),
     bankTransactionId: varchar("bankTransactionId", { length: 255 }).notNull(),
-    status: mysqlEnum("reconciliation_status", ["matched", "unmatched", "partial", "review"]).default("review").notNull(),
+    status: mysqlEnum("status", ["matched", "unmatched", "partial", "review"]).default("review").notNull(),
     confidenceScore: decimal("confidenceScore", { precision: 5, scale: 4 }),
     amountDifference: decimal("amountDifference", { precision: 12, scale: 2 }),
     matchedAt: timestamp("matchedAt"),

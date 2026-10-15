@@ -55,6 +55,7 @@ class TestCorrectionLearningAndBackup(unittest.TestCase):
         with open(data_file, "w", encoding="utf-8") as handle:
             handle.write("important")
 
+        self.config["backup_paths"] = [data_file]
         manager = BackupManager(self.config)
         result = manager.perform_backup([data_file], {"type": "zip"})
         self.assertEqual(result["status"], "success")

@@ -21,6 +21,7 @@ x-fab-python: &fab-python
     FAB_SUPPORT_BUNDLE_DIR: /app/output/support
   volumes:
     - fab-data:/app/data
+    - fab-credentials:/app/credentials
     - fab-output:/app/output
     - ./downloads/sort-out:/app/downloads/sort-out:ro
 
@@ -86,4 +87,5 @@ networks:
 
 volumes:
   fab-data:
+  fab-credentials:
   fab-output:

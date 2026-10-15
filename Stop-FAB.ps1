@@ -71,7 +71,13 @@ function Test-FabRuntimeContainmentCoverage {
         foreach ($field in @('rootPid', 'startedAtTicks', 'jobName')) {
             if (-not $identity.Value.PSObject.Properties[$field]) { return $false }
         }
-        if ([int]$identity.Value.rootPid -ne [int]$pidProperty.Value) { return $false }
+        $expectedRootPid = if ($service -eq 'worker' -and $Runtime.PSObject.Properties['workerProcessRootPid'] -and $Runtime.workerProcessRootPid) {
+            [int]$Runtime.workerProcessRootPid
+        }
+        else {
+            [int]$pidProperty.Value
+        }
+        if ([int]$identity.Value.rootPid -ne $expectedRootPid) { return $false }
     }
     return $true
 }
@@ -559,9 +565,16 @@ if ($runtime) {
                     throw 'Unknown or empty service containment identity. It will not be terminated.'
                 }
                 $expectedPid = $runtime.PSObject.Properties[$entry.Name + 'Pid']
+                $expectedRootPid = 0
+                if ($entry.Name -eq 'worker' -and $runtime.PSObject.Properties['workerProcessRootPid'] -and $runtime.workerProcessRootPid) {
+                    $expectedRootPid = [int]$runtime.workerProcessRootPid
+                }
+                elseif ($expectedPid -and $expectedPid.Value) {
+                    $expectedRootPid = [int]$expectedPid.Value
+                }
                 if (-not $expectedPid -or -not $expectedPid.Value -or
                     -not $entry.Value.PSObject.Properties['rootPid'] -or
-                    [int]$entry.Value.rootPid -ne [int]$expectedPid.Value) {
+                    [int]$entry.Value.rootPid -ne $expectedRootPid) {
                     throw 'Recorded process group does not match its service root. It will not be terminated.'
                 }
                 Stop-FabRecordedProcess -Identity $entry.Value

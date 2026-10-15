@@ -3,6 +3,7 @@ import json
 import os
 import sqlite3
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -11,6 +12,49 @@ from src.operations.local_ledger import LocalOperationsLedger
 
 
 class TestLocalOperationsLedger(unittest.TestCase):
+    def test_credential_url_redaction_is_linear_for_long_scheme_like_text(self):
+        secret_url = LocalOperationsLedger._redact_sensitive(
+            "https://operator:secret@example.test/path"
+        )
+        self.assertEqual(secret_url, "https://[REDACTED]@example.test/path")
+
+        adversarial = "a" * 20_000
+        started = time.perf_counter()
+        redacted = LocalOperationsLedger._redact_sensitive(adversarial)
+        elapsed = time.perf_counter() - started
+
+        self.assertEqual(redacted, adversarial)
+        self.assertLess(elapsed, 1.0)
+
+    def test_error_redaction_bounds_untrusted_diagnostic_input(self):
+        with patch.object(
+            LocalOperationsLedger,
+            "_redact_sensitive",
+            side_effect=lambda value: value,
+        ) as redact:
+            result = LocalOperationsLedger._redact_error_message("x" * 100_000)
+
+        self.assertEqual(len(redact.call_args.args[0]), 16_384)
+        self.assertEqual(len(result), 2_000)
+
+    def test_sqlite_sync_mode_matches_deployment_durability_profile(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+
+            for profile, expected in (("local", 1), ("windows", 2), ("vm", 2)):
+                with self.subTest(profile=profile), patch.dict(
+                    os.environ,
+                    {"FAB_DEPLOYMENT_PROFILE": profile},
+                ):
+                    connection = ledger._connect()
+                    try:
+                        self.assertEqual(
+                            connection.execute("PRAGMA synchronous").fetchone()[0],
+                            expected,
+                        )
+                    finally:
+                        connection.close()
+
     def test_persisted_diagnostics_redact_embedded_credentials(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
@@ -862,6 +906,18 @@ class TestLocalOperationsLedger(unittest.TestCase):
                     "audit_events": 1,
                 },
             )
+
+    def test_dashboard_counts_unknown_wave_outcomes_as_attention(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            ledger.upsert_export_attempt({
+                "targetSystem": "waveapps_business",
+                "status": "failed",
+                "externalSubmission": "unknown",
+                "message": "Provider outcome is unknown.",
+            })
+
+            self.assertEqual(ledger.dashboard_metrics()["attention_export_attempts"], 1)
 
     def test_bookkeeping_records_are_upserted_and_filterable(self):
         with tempfile.TemporaryDirectory() as temp_dir:

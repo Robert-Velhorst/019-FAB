@@ -330,11 +330,11 @@ function Test-FabWebBuildCurrent {
         (Join-Path $ExpectedWebRoot "shared")
     )
     $sourceFiles = @(
-        Get-ChildItem -LiteralPath $sourcePaths -Recurse -File -ErrorAction SilentlyContinue
-        Get-Item -LiteralPath (Join-Path $ExpectedWebRoot "package.json")
-        Get-Item -LiteralPath (Join-Path $ExpectedWebRoot "pnpm-lock.yaml")
-        Get-Item -LiteralPath (Join-Path $ExpectedWebRoot "vite.config.ts")
-        Get-Item -LiteralPath (Join-Path $ExpectedWebRoot "tsconfig.json")
+        Get-ChildItem -LiteralPath $sourcePaths -Recurse -File -Force -ErrorAction SilentlyContinue
+        Get-Item -LiteralPath (Join-Path $ExpectedWebRoot "package.json") -Force
+        Get-Item -LiteralPath (Join-Path $ExpectedWebRoot "pnpm-lock.yaml") -Force
+        Get-Item -LiteralPath (Join-Path $ExpectedWebRoot "vite.config.ts") -Force
+        Get-Item -LiteralPath (Join-Path $ExpectedWebRoot "tsconfig.json") -Force
     )
     $latestSourceTime = $sourceFiles |
         Sort-Object LastWriteTimeUtc -Descending |
@@ -847,6 +847,7 @@ $apiProcess = $null
 $workerProcess = $null
 $webProcess = $null
 $workerPid = $null
+$workerProcessRootPid = $null
 $webPid = $null
 $webListenerPid = $null
 $webMode = $null
@@ -859,6 +860,13 @@ $webStartedThisRun = $false
 if ($savedRuntime) {
     $apiPid = Get-FabProcessId -ProcessId $savedRuntime.apiPid -CommandMarker "src.operations.local_api"
     $workerPid = Get-FabProcessId -ProcessId $savedRuntime.workerPid -CommandMarker "src.run_worker"
+    if ($savedRuntime.PSObject.Properties['workerProcessRootPid'] -and $savedRuntime.workerProcessRootPid) {
+        $workerProcessRootPid = [int]$savedRuntime.workerProcessRootPid
+    }
+    elseif ($savedRuntime.PSObject.Properties['processes'] -and $savedRuntime.processes -and
+        $savedRuntime.processes.PSObject.Properties['worker'] -and $savedRuntime.processes.worker.PSObject.Properties['rootPid']) {
+        $workerProcessRootPid = [int]$savedRuntime.processes.worker.rootPid
+    }
     if ($apiPid -and $savedRuntime.apiUrl -and (Test-FabEndpoint -Url $savedRuntime.apiUrl -ExpectedService "fab-ledger-api" -ApiToken $apiToken -ExpectedInstanceRoot $root -ExpectedMaintenanceMode $requestedMaintenanceMode)) {
         $apiUrl = [string]$savedRuntime.apiUrl
     }
@@ -893,12 +901,16 @@ if ($requestedMaintenanceMode -and $managedWorkerPid) {
 }
 if (-not $requestedMaintenanceMode -and $managedWorkerPid) {
     $workerPid = $managedWorkerPid
+    if (-not $workerProcessRootPid) {
+        $workerProcessRootPid = $managedWorkerPid
+    }
 }
 elseif (Test-Path -LiteralPath $workerRuntimePath) {
     $workerPid = $null
 }
 if ($requestedMaintenanceMode) {
     $workerPid = $null
+    $workerProcessRootPid = $null
 }
 
 if ($deploymentProfile -ne "local") {
@@ -1171,6 +1183,7 @@ if (-not $requestedMaintenanceMode -and -not $workerPid) {
         $workerProcess = Invoke-FabWithServiceCredentials -ApiToken $apiToken -HaiApiToken $haiApiToken -Action {
             Start-FabContainedProcess -FilePath $python.Source -ArgumentList @("-m", "src.run_worker") -WorkingDirectory $root -RedirectStandardOutput (Join-Path $logsRoot "worker.out.log") -RedirectStandardError (Join-Path $logsRoot "worker.err.log")
         }
+        $workerProcessRootPid = $workerProcess.Id
         $workerPid = $workerProcess.Id
         $workerStartedThisRun = $true
     }
@@ -1230,6 +1243,7 @@ $runtimeMetadata = [ordered]@{
     root = $root
     apiPid = $apiPid
     workerPid = $workerPid
+    workerProcessRootPid = $workerProcessRootPid
     webPid = $webPid
     webListenerPid = $webListenerPid
     webMode = $webMode
@@ -1253,9 +1267,15 @@ if ($savedRuntime -and $savedRuntime.PSObject.Properties['root']) {
 }
 if ($savedIdentitiesOwned -and $savedRuntime.PSObject.Properties['processes'] -and $null -ne $savedRuntime.processes) {
     foreach ($entry in $savedRuntime.processes.PSObject.Properties) {
+        $expectedRootPid = if ($entry.Name -eq 'worker' -and $runtimeMetadata.workerProcessRootPid) {
+            [int]$runtimeMetadata.workerProcessRootPid
+        }
+        else {
+            [int]$runtimeMetadata[$entry.Name + 'Pid']
+        }
         if ($entry.Name -in @('api', 'web', 'worker') -and $null -ne $entry.Value -and
             $entry.Value.PSObject.Properties['rootPid'] -and
-            [int]$entry.Value.rootPid -eq [int]$runtimeMetadata[$entry.Name + 'Pid']) {
+            [int]$entry.Value.rootPid -eq $expectedRootPid) {
             $processIdentities[$entry.Name] = $entry.Value
         }
     }

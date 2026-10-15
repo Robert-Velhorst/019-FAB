@@ -1,5 +1,6 @@
+from bisect import bisect_left, bisect_right
 from datetime import date, datetime
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, getcontext
 from difflib import SequenceMatcher
 import re
 from typing import Dict, Any, List, Optional, Tuple
@@ -182,11 +183,55 @@ class AutomatedReconciliation:
                    and bool(bank_transactions) and bool(processed_documents))
         prepared_documents = [self._prepare_document(doc) for doc in processed_documents] if prepare else []
         prepared_document_ids = [self._document_id(doc) for doc in processed_documents] if prepare else []
+        amount_index = []
+        document_min_exponent = 0
+        document_max_adjusted = 0
+        if prepare:
+            document_amounts = [features[0] for features in prepared_documents if features[0] is not None]
+            if document_amounts:
+                document_min_exponent = min(amount.as_tuple().exponent for amount in document_amounts)
+                document_max_adjusted = max(amount.adjusted() for amount in document_amounts)
+            amount_index = [
+                (abs(features[0]) if self.use_absolute_amounts else features[0], index)
+                for index, features in enumerate(prepared_documents)
+                if features[0] is not None
+            ]
+            amount_index.sort()
 
         for bt in bank_transactions:
             best_match = None
             bank_features = self._prepare_bank(bt) if prepare else None
-            for index, doc in enumerate(processed_documents):
+            if prepare and bank_features[0] is not None:
+                comparable_amount = abs(bank_features[0]) if self.use_absolute_amounts else bank_features[0]
+                min_exponent = min(
+                    comparable_amount.as_tuple().exponent,
+                    self.amount_tolerance.as_tuple().exponent,
+                    document_min_exponent,
+                )
+                max_adjusted = max(
+                    comparable_amount.adjusted(),
+                    self.amount_tolerance.adjusted(),
+                    document_max_adjusted,
+                )
+                exact_range = max_adjusted - min_exponent + 2 <= getcontext().prec
+                if not exact_range:
+                    candidate_indexes = range(len(processed_documents))
+                else:
+                    first = bisect_left(amount_index, (comparable_amount - self.amount_tolerance, -1))
+                    last = bisect_right(amount_index, (comparable_amount + self.amount_tolerance,
+                                                        len(processed_documents)))
+                    candidate_count = last - first
+                    if candidate_count >= max(1, int(len(processed_documents) * 0.75)):
+                        candidate_indexes = range(len(processed_documents))
+                    else:
+                        candidate_indexes = sorted(index for _, index in amount_index[first:last])
+            elif prepare:
+                candidate_indexes = ()
+            else:
+                candidate_indexes = range(len(processed_documents))
+
+            for index in candidate_indexes:
+                doc = processed_documents[index]
                 document_id = prepared_document_ids[index] if prepare else self._document_id(doc)
                 if document_id in matched_doc_ids:
                     continue

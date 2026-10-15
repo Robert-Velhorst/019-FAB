@@ -111,6 +111,7 @@ class TestWindowsLauncher(unittest.TestCase):
         . '__HELPER__'
         $env:FAB_LOCAL_API_TOKEN = 'original-api'
         $env:FAB_LOCAL_API_TOKEN_FILE = 'original-file'
+        $env:FAB_OPERATIONS_SERVICE_TOKEN_FILE = 'original-operations-file'
         $env:FAB_HAI_API_TOKEN = 'original-hai'
         $env:FAB_HAI_API_TOKEN_FILE = 'original-hai-file'
         $env:JWT_SECRET = 'original-jwt'
@@ -120,19 +121,28 @@ class TestWindowsLauncher(unittest.TestCase):
                 if ($env:FAB_LOCAL_API_TOKEN -ne 'synthetic-api') { throw 'wrong-api' }
                 if ($env:FAB_HAI_API_TOKEN -ne 'synthetic-hai') { throw 'wrong-hai' }
                 if ($env:FAB_LOCAL_API_TOKEN_FILE -or $env:FAB_HAI_API_TOKEN_FILE) { throw 'file-conflict' }
+                $environment = [Environment]::GetEnvironmentVariables('Process')
+                foreach ($name in @('FAB_LOCAL_API_TOKEN_FILE', 'FAB_OPERATIONS_SERVICE_TOKEN_FILE', 'FAB_HAI_API_TOKEN_FILE', 'JWT_SECRET_FILE')) {
+                    if ($environment.Contains($name)) { throw "file-variable-present:$name" }
+                }
                 if ($env:JWT_SECRET -ne 'synthetic-jwt' -or $env:JWT_SECRET_FILE) { throw 'jwt-file-conflict' }
                 throw 'expected-failure'
             }
         } catch { if ($_.Exception.Message -ne 'expected-failure') { throw } }
         if ($env:FAB_LOCAL_API_TOKEN -ne 'original-api') { throw 'leaked-api' }
         if ($env:FAB_LOCAL_API_TOKEN_FILE -ne 'original-file') { throw 'lost-file' }
+        if ($env:FAB_OPERATIONS_SERVICE_TOKEN_FILE -ne 'original-operations-file') { throw 'lost-operations-file' }
         if ($env:FAB_HAI_API_TOKEN -ne 'original-hai') { throw 'leaked-hai' }
         if ($env:FAB_HAI_API_TOKEN_FILE -ne 'original-hai-file') { throw 'lost-hai-file' }
         if ($env:JWT_SECRET -ne 'original-jwt' -or $env:JWT_SECRET_FILE -ne 'original-jwt-file') { throw 'lost-jwt' }
         Remove-Item Env:JWT_SECRET, Env:JWT_SECRET_FILE
-        Remove-Item Env:FAB_LOCAL_API_TOKEN, Env:FAB_LOCAL_API_TOKEN_FILE, Env:FAB_HAI_API_TOKEN, Env:FAB_HAI_API_TOKEN_FILE
+        Remove-Item Env:FAB_LOCAL_API_TOKEN, Env:FAB_LOCAL_API_TOKEN_FILE, Env:FAB_OPERATIONS_SERVICE_TOKEN_FILE, Env:FAB_HAI_API_TOKEN, Env:FAB_HAI_API_TOKEN_FILE
         $result = Invoke-FabWithServiceCredentials -ApiToken 'synthetic-api' -HaiApiToken 'synthetic-hai' -JwtSecret 'synthetic-jwt' -Action { 'ok' }
         if ($result -ne 'ok' -or $env:FAB_LOCAL_API_TOKEN -or $env:FAB_HAI_API_TOKEN -or $env:JWT_SECRET) { throw 'scope-not-clean' }
+        $environment = [Environment]::GetEnvironmentVariables('Process')
+        foreach ($name in @('FAB_LOCAL_API_TOKEN_FILE', 'FAB_OPERATIONS_SERVICE_TOKEN_FILE', 'FAB_HAI_API_TOKEN_FILE', 'JWT_SECRET_FILE')) {
+            if ($environment.Contains($name)) { throw "file-variable-left-empty:$name" }
+        }
         'verified'
         """.replace("__HELPER__", str(helper).replace("'", "''"))
         result = subprocess.run([shell, "-NoProfile", "-NonInteractive", "-Command", command], capture_output=True, text=True, timeout=30)
@@ -160,6 +170,7 @@ class TestWindowsLauncher(unittest.TestCase):
         self.assertIn("$env:FAB_INSTANCE_ROOT = $root", script)
         self.assertIn("$previousApiInstanceRoot = $env:FAB_INSTANCE_ROOT", script)
         self.assertIn("$previousWorkerInstanceRoot = $env:FAB_INSTANCE_ROOT", script)
+        self.assertIn("workerProcessRootPid = $workerProcessRootPid", script)
         self.assertIn("$previousWebInstanceRoot = $env:FAB_INSTANCE_ROOT", script)
         self.assertIn("Remove-Item Env:FAB_INSTANCE_ROOT", script)
         self.assertIn('dist\\fab-standalone.js', script)
@@ -300,6 +311,7 @@ def test_real_startup_preflight_rejects_bad_windows_settings_without_services(tm
     environment.update(PYTHONPATH=str(ROOT), PORT="3000", FAB_DEPLOYMENT_PROFILE="windows",
                        FAB_LOCAL_LEDGER_PATH=str(tmp_path / "external" / "ledger.sqlite3"),
                        FAB_LOCAL_BACKUP_DIR=str(tmp_path / "external-backups"),
+                       FAB_STORAGE_ENCRYPTION_CONFIRMED="true",
                        FAB_LOCAL_API_TOKEN="synthetic-A7b9C2d4E6f8G0h1J3k5L7m9",
                        FAB_HAI_API_TOKEN="synthetic-N8p0Q2r4S6t8U0v2W4x6Y8z0")
     environment["JWT_SECRET"] = "synthetic-R7e5W3q1T9y7U5i3O1p9A7s5"
@@ -317,6 +329,7 @@ def test_real_startup_preflight_rejects_bad_windows_settings_without_services(tm
         ({"FAB_LOCAL_BACKUP_DIR": str(ROOT / "backups")}, False),
         ({"FAB_LOCAL_API_HOST": "0.0.0.0"}, False),
         ({"FAB_LOCAL_API_PORT": "65536"}, False),
+        ({"FAB_STORAGE_ENCRYPTION_CONFIRMED": "false"}, False),
         ({"PORT": "5001"}, False),
         ({"FAB_LOCAL_API_TOKEN_FILE": str(secret_file)}, False),
         ({"FAB_LOCAL_API_TOKEN": "", "FAB_LOCAL_API_TOKEN_FILE": str(secret_file)}, True),

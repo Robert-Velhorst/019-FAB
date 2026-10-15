@@ -242,6 +242,11 @@ class LocalHaiConnector:
             or self.config.get("fab_operations_api_token")
             or self.config.get("operations_api_token")
         )
+        self.hai_token_configured = bool(
+            self.config.get("fab_hai_api_token")
+            or self.config.get("operations_hai_api_token")
+            or self.config.get("hai_api_token")
+        )
         self.allowed_command_ids = _allowed_commands(self.config.get("fab_hai_allowed_commands"))
         self._commands = {command.command_id: command for command in HAI_COMMANDS}
 
@@ -259,6 +264,15 @@ class LocalHaiConnector:
             ),
             "transport": "authenticated_local_http" if self.api_token_configured else "loopback_local_http",
             "authentication": "bearer_token" if self.api_token_configured else "loopback_origin_controls",
+            "haiAuthentication": (
+                "dedicated_bearer_token"
+                if self.hai_token_configured
+                else "operator_bearer_token"
+                if self.api_token_configured
+                else "loopback_origin_controls"
+            ),
+            "dedicatedHaiTokenConfigured": self.hai_token_configured,
+            "remoteAuthenticationConfigured": self.api_token_configured and self.hai_token_configured,
             "sourceOfTruth": "fab_local_ledger",
             "idempotencyField": "requestId",
             "idempotencyPolicy": "single_execution_fail_closed",
@@ -368,6 +382,9 @@ class LocalHaiConnector:
             "status": manifest["status"],
             "allowedCommandIds": sorted(self.allowed_command_ids) if self.enabled else [],
             "availableExecutors": sorted(self.executors),
+            "haiAuthentication": manifest["haiAuthentication"],
+            "dedicatedHaiTokenConfigured": self.hai_token_configured,
+            "remoteAuthenticationConfigured": self.api_token_configured and self.hai_token_configured,
             "commandCount": len(manifest["commands"]),
             "resourceCount": len(manifest["resources"]),
             "externalSubmission": "not_executed",
@@ -813,12 +830,18 @@ def _normalize_payload(command_id: str, payload: Dict[str, Any]) -> Dict[str, An
         normalized["sources"] = normalized_sources
     for field in ("fromDate", "toDate", "targetSystem"):
         if field in payload:
-            value = str(payload[field] or "").strip()
+            if not isinstance(payload[field], str):
+                raise ValueError(f"{field} must be a string.")
+            value = payload[field].strip()
             if not value:
+                if field in {"fromDate", "toDate"}:
+                    raise ValueError(f"{field} must be an ISO date in YYYY-MM-DD format.")
                 continue
             if len(value) > 100:
                 raise ValueError(f"{field} must be at most 100 characters.")
             if field in {"fromDate", "toDate"}:
+                if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+                    raise ValueError(f"{field} must be an ISO date in YYYY-MM-DD format.")
                 try:
                     date.fromisoformat(value)
                 except ValueError:

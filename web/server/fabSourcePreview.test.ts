@@ -26,6 +26,20 @@ async function startTestServer(
 }
 
 describe("FAB source preview proxy", () => {
+  it("rate-limits repeated source preview requests from one connection", async () => {
+    const server = await startTestServer({ localOperatorMode: true });
+    try {
+      for (let count = 0; count < 60; count++) {
+        expect((await fetch(`${server.baseUrl}/api/fab/source/invalid`)).status).toBe(400);
+      }
+      const limited = await fetch(`${server.baseUrl}/api/fab/source/invalid`);
+      expect(limited.status).toBe(429);
+      expect(limited.headers.get("retry-after")).toBeTruthy();
+    } finally {
+      await server.close();
+    }
+  });
+
   it("keeps a slot occupied until a deferred source response finishes", async () => {
     const bytes = new TextEncoder().encode("verified receipt");
     const digest = createHash("sha256").update(bytes).digest("hex");

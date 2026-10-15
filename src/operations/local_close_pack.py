@@ -190,7 +190,7 @@ class LocalClosePackService:
         value = _config_value(self.config, "fab_local_close_pack_dir", "operations_close_pack_dir")
         if not value:
             value = os.path.join(os.path.dirname(self.ledger_path), "close_packs")
-        return os.path.abspath(os.path.expanduser(str(value)))
+        return os.path.realpath(os.path.abspath(os.path.expanduser(str(value))))
 
     def _resolve_pack_path(self, close_pack_path: str) -> str:
         if not close_pack_path:
@@ -198,8 +198,13 @@ class LocalClosePackService:
         candidate = os.path.expanduser(str(close_pack_path))
         if not os.path.isabs(candidate):
             candidate = os.path.join(self.close_pack_dir, candidate)
-        candidate = os.path.abspath(candidate)
-        if os.path.commonpath([candidate, self.close_pack_dir]) != self.close_pack_dir:
+        candidate = os.path.realpath(os.path.abspath(candidate))
+        close_pack_dir = os.path.normcase(os.path.realpath(os.path.abspath(self.close_pack_dir)))
+        try:
+            common_path = os.path.commonpath([os.path.normcase(candidate), close_pack_dir])
+        except ValueError as exc:
+            raise ValueError("Close pack path must be inside the configured FAB close pack directory") from exc
+        if common_path != close_pack_dir:
             raise ValueError("Close pack path must be inside the configured FAB close pack directory")
         return candidate
 

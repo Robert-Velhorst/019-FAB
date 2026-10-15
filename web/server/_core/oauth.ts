@@ -74,6 +74,15 @@ export function registerOAuthRoutes(app: Express) {
     standardHeaders: "draft-7", legacyHeaders: false,
     message: { error: "Too many sign-in attempts. Try again later." },
   });
+  const callbackLimiter = rateLimit({
+    windowMs: TRANSACTION_TTL_MS,
+    limit: 20,
+    standardHeaders: "draft-7",
+    legacyHeaders: false,
+    keyGenerator: req => req.socket.remoteAddress || "unknown",
+    validate: false,
+    message: { error: "Too many sign-in callbacks. Try again later." },
+  });
   app.get("/api/oauth/start", startLimiter, (req, res) => {
     res.set({ "cache-control": "no-store", "referrer-policy": "no-referrer" });
     if (isFabManagedAuthEnabled()) { res.redirect(303, "/operator/login"); return; }
@@ -109,7 +118,7 @@ export function registerOAuthRoutes(app: Express) {
     res.redirect(302, url.href);
   });
 
-  app.get("/api/oauth/callback", async (req: Request, res: Response) => {
+  app.get("/api/oauth/callback", callbackLimiter, async (req: Request, res: Response) => {
     res.set({ "cache-control": "no-store", "referrer-policy": "no-referrer" });
     if (isFabManagedAuthEnabled()) {
       res.setHeader("cache-control", "no-store");

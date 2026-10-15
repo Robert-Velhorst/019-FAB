@@ -86,6 +86,7 @@ export function FabConnections({ connections, search, commandPending, resource, 
           const connectorProfile = connection.connectorProfile && typeof connection.connectorProfile === "object"
             ? connection.connectorProfile as FabRecord
             : null;
+          const cloudDashboardUrl = id === "ngrok_cloud" ? cleanHttpsOrigin(connection.dashboardUrl) : null;
           const connectionDetails = id === "freshdesk" && connection.enabled === true && connectorProfile?.enabled === true
             ? copy(
                 "Read-only financial tickets, verified PDF evidence, and unchanged source tickets.",
@@ -104,6 +105,10 @@ export function FabConnections({ connections, search, commandPending, resource, 
                 <button className="fab-icon-button" type="button" onClick={() => onSetupConnection(id)} disabled={commandPending} aria-label={copy(`Set up ${text(connection.label, compactHumanize(id))}`, `${text(connection.label, compactHumanize(id))} instellen`)} title={copy(`Set up ${text(connection.label, compactHumanize(id))}`, `${text(connection.label, compactHumanize(id))} instellen`)}><Settings2 aria-hidden="true" /></button>
               ) : ready && ["local_folder", "tesseract_ocr"].includes(id) ? (
                 <span className="fab-connection-static tone-good" title="This local capability is ready"><CheckCircle2 aria-hidden="true" /></span>
+              ) : cloudDashboardUrl ? (
+                <a className="fab-icon-button" href={cloudDashboardUrl} target="_blank" rel="noreferrer" aria-label={copy("Open remote FAB dashboard", "FAB-dashboard op afstand openen")} title={copy("Open remote FAB dashboard", "FAB-dashboard op afstand openen")}>
+                  <ArrowUpRight aria-hidden="true" />
+                </a>
               ) : (
                 <a className="fab-icon-button" href={setupTarget} target="_blank" rel="noreferrer" aria-label={`Review ${text(connection.label, id)} setup`} title={`Review ${text(connection.label, id)} setup`}>
                   {ready ? <ArrowUpRight aria-hidden="true" /> : <Settings2 aria-hidden="true" />}
@@ -117,6 +122,19 @@ export function FabConnections({ connections, search, commandPending, resource, 
       </div>
     </section>
   );
+}
+
+function cleanHttpsOrigin(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" || url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
+      return null;
+    }
+    return url.origin;
+  } catch {
+    return null;
+  }
 }
 
 function connectionSetupTarget(id: string): string {

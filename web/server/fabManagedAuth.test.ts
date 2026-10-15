@@ -113,6 +113,29 @@ it("binds ledger handoffs to the managed session and revokes status on logout", 
   expect(await (await status(`Bearer ${credential}`)).json()).toEqual({ active: false });
 });
 
+it("rate-limits managed authentication pages and backend session status checks", async () => {
+  const { request } = await fixture();
+  for (let attempt = 0; attempt < 60; attempt++) {
+    expect((await request("/operator/login")).status).toBe(200);
+  }
+  expect((await request("/operator/login")).status).toBe(429);
+
+  const authorization = `Bearer ${createHmac("sha256", ENV.fabLocalApiToken)
+    .update("fab-managed-parent-status:v1").digest("base64url")}`;
+  for (let attempt = 0; attempt < 120; attempt++) {
+    const response = await request("/api/fab/operator-session/status", {
+      method: "POST", headers: { authorization, "content-type": "application/json" },
+      body: JSON.stringify({ id: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" }),
+    });
+    expect(response.status).toBe(200);
+  }
+  const limited = await request("/api/fab/operator-session/status", {
+    method: "POST", headers: { authorization, "content-type": "application/json" },
+    body: JSON.stringify({ id: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" }),
+  });
+  expect(limited.status).toBe(429);
+});
+
 it.each(["/operator/logout", "/api/trpc/auth.logout"])("invalidates ledger authority through %s", async logoutPath => {
   const { request, login } = await fixture();
   const cookie = sessionCookie(await login());

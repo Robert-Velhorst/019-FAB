@@ -105,7 +105,9 @@ class GmailFetcher(BaseFetcher):
         effective_query = str(query).strip()
         if incremental_after and not re.search(r"(?:^|\s)(?:after:|newer_than:)", effective_query, re.IGNORECASE):
             effective_query = f"{effective_query} after:{incremental_after}"
-        attachments_dir = self.config.get('gmail_attachment_download_dir') or self.config.get('attachments_save_dir', '/tmp/gmail_attachments')
+        attachments_dir = self._download_directory(
+            "gmail", "gmail_attachment_download_dir", "gmail_download_dir"
+        )
         os.makedirs(attachments_dir, exist_ok=True)
         max_pages = _bounded_int(self.config.get("gmail_max_pages"), 50, 1, 500)
         max_messages = _bounded_int(self.config.get("gmail_max_messages"), 5000, 1, 50000)

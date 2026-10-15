@@ -41,11 +41,12 @@ def measure(engine, bank, documents, expected):
 
 def main():
     reports = []
-    for case in ("different_amounts", "same_amount_ties"):
-        bank = [{"id": f"bank-{i}", "amount": -1000 - i if case == "different_amounts" else -4.28,
-                 "date": "2026-09-30", "description": "Synthetic Shop"} for i in range(500)]
-        documents = [{"document_id": f"doc-{i}", "total_amount": i + 1 if case == "different_amounts" else 4.28,
-                      "transaction_date": "2026-09-30", "vendor_name": "Synthetic Shop"} for i in range(100)]
+    for case in ("different_amounts", "same_amount_ties", "sparse_large"):
+        bank_rows, document_rows = (2000, 400) if case == "sparse_large" else (500, 100)
+        bank = [{"id": f"bank-{i}", "amount": -1000 - i if case != "same_amount_ties" else -4.28,
+                 "date": "2026-09-30", "description": "Synthetic Shop"} for i in range(bank_rows)]
+        documents = [{"document_id": f"doc-{i}", "total_amount": i + 1 if case != "same_amount_ties" else 4.28,
+                      "transaction_date": "2026-09-30", "vendor_name": "Synthetic Shop"} for i in range(document_rows)]
         baseline = UnpreparedReconciliation({})
         expected = baseline.reconcile(bank, documents)
         reports.append({"case": case, "bankRows": len(bank), "documentRows": len(documents),

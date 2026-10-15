@@ -3,10 +3,13 @@ import hashlib
 import io
 import json
 import re
-import xml.etree.ElementTree as ET
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, Iterable, List, Optional
+from xml.etree.ElementTree import Element
+
+from defusedxml import ElementTree as ET
+from defusedxml.common import DefusedXmlException
 
 from src.operations.local_ledger import LocalOperationsLedger
 from src.validation.financial_consistency import finite_number
@@ -443,8 +446,13 @@ def _parse_csv_transactions(text: str) -> List[Dict[str, Any]]:
 
 def _parse_camt_transactions(text: str) -> List[Dict[str, Any]]:
     try:
-        root = ET.fromstring(text)
-    except ET.ParseError as exc:
+        root = ET.fromstring(
+            text,
+            forbid_dtd=True,
+            forbid_entities=True,
+            forbid_external=True,
+        )
+    except (ET.ParseError, DefusedXmlException) as exc:
         raise ValueError("CAMT/XML bank statement is not valid XML") from exc
     transactions: List[Dict[str, Any]] = []
     for entry in _iter_local(root, "Ntry"):
@@ -538,27 +546,74 @@ def _parse_number(value: Any) -> Optional[float]:
     text = str(value).strip()
     if not text:
         return None
-    try:
-        return finite_number(Decimal(text))
-    except InvalidOperation:
-        pass
+    if re.fullmatch(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?", text):
+        try:
+            parsed = Decimal(text)
+            if parsed.is_finite():
+                return finite_number(parsed)
+            return None
+        except InvalidOperation:
+            pass
     negative = text.startswith("(") and text.endswith(")")
-    text = re.sub(r"[^\d,.\-]", "", text)
-    if not text or text in {"-", ".", ","}:
+    if "(" in text or ")" in text:
+        if not negative:
+            return None
+        text = text[1:-1].strip()
+    currency = r"(?:EUR|USD|GBP|CAD|AUD|CHF|JPY|SEK|NOK|DKK|€|\$|£|¥)"
+    text = re.sub(rf"^([+-]?)\s*{currency}\s*", r"\1", text, flags=re.IGNORECASE)
+    text = re.sub(rf"\s*{currency}$", "", text, flags=re.IGNORECASE).strip()
+    text = text.replace("\u00a0", " ").replace("\u202f", " ")
+    if not text or not re.fullmatch(r"[+-]?\d[\d,. ]*", text):
         return None
+
+    sign = ""
+    if text[0] in "+-":
+        sign, text = text[0], text[1:]
+    if not text or text[0] in ",." or text[-1] in ",.":
+        return None
+
+    if " " in text:
+        if not re.fullmatch(r"\d{1,3}(?: \d{3})+(?:[,.]\d+)?", text):
+            return None
+        text = text.replace(" ", "")
+
     if "," in text and "." in text:
-        if text.rfind(",") > text.rfind("."):
-            text = text.replace(".", "").replace(",", ".")
+        decimal_separator = "," if text.rfind(",") > text.rfind(".") else "."
+        grouping_separator = "." if decimal_separator == "," else ","
+        if text.count(decimal_separator) != 1:
+            return None
+        integer, fraction = text.rsplit(decimal_separator, 1)
+        if not fraction.isdigit():
+            return None
+        if grouping_separator in integer:
+            if not re.fullmatch(rf"\d{{1,3}}(?:{re.escape(grouping_separator)}\d{{3}})+", integer):
+                return None
         else:
-            text = text.replace(",", "")
+            if not integer.isdigit():
+                return None
+        text = integer.replace(grouping_separator, "") + "." + fraction
     elif "," in text:
         parts = text.split(",")
-        text = "".join(parts[:-1]) + "." + parts[-1] if len(parts[-1]) <= 2 else "".join(parts)
-    elif text.count(".") > 1:
-        parts = text.split(".")
-        text = "".join(parts[:-1]) + "." + parts[-1]
+        if len(parts) == 1:
+            return None
+        if len(parts) == 2 and len(parts[-1]) <= 2:
+            text = ".".join(parts)
+        elif re.fullmatch(r"\d{1,3}(?:,\d{3})+", text):
+            text = text.replace(",", "")
+        else:
+            return None
+    elif "." in text:
+        if text.count(".") == 1:
+            integer, fraction = text.split(".")
+            if not integer.isdigit() or not fraction.isdigit():
+                return None
+        elif re.fullmatch(r"\d{1,3}(?:\.\d{3})+", text):
+            text = text.replace(".", "")
+        else:
+            return None
+
     try:
-        number = Decimal(text)
+        number = Decimal(sign + text)
     except InvalidOperation:
         return None
     if negative:
@@ -650,20 +705,20 @@ def _key(value: Any) -> str:
     return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
 
 
-def _iter_local(root: ET.Element, local_name: str) -> Iterable[ET.Element]:
+def _iter_local(root: Element, local_name: str) -> Iterable[Element]:
     for element in root.iter():
         if _local_name(element.tag) == local_name:
             yield element
 
 
-def _first_local_text(root: ET.Element, local_name: str) -> Optional[str]:
+def _first_local_text(root: Element, local_name: str) -> Optional[str]:
     for element in root.iter():
         if _local_name(element.tag) == local_name and element.text:
             return element.text.strip()
     return None
 
 
-def _first_path_text(root: ET.Element, path: Iterable[str]) -> Optional[str]:
+def _first_path_text(root: Element, path: Iterable[str]) -> Optional[str]:
     current = root
     for local_name in path:
         next_child = None
@@ -677,7 +732,7 @@ def _first_path_text(root: ET.Element, path: Iterable[str]) -> Optional[str]:
     return current.text.strip() if current.text else None
 
 
-def _first_local_attribute(root: ET.Element, local_name: str, attribute: str) -> Optional[str]:
+def _first_local_attribute(root: Element, local_name: str, attribute: str) -> Optional[str]:
     for element in root.iter():
         if _local_name(element.tag) == local_name:
             value = element.attrib.get(attribute)

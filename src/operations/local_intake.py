@@ -261,10 +261,20 @@ class LocalFolderIntake:
         path_value = document.get("local_path") or document.get("storage_path")
         if not str(path_value or "").strip():
             return {"skipped": {"path": None, "reason": "local_path_missing"}}
-        path = _normalize_path(path_value)
-        source_root = _normalize_path(root or os.path.dirname(path))
+        if not str(root or "").strip():
+            return {
+                "skipped": {
+                    "path": _normalize_path(path_value),
+                    "reason": "source_root_missing",
+                }
+            }
+        source_root = os.path.realpath(_normalize_path(root))
+        path = os.path.realpath(_normalize_path(path_value))
+        if not os.path.isdir(source_root):
+            return {"skipped": {"path": path, "reason": "source_root_missing"}}
         try:
-            if os.path.commonpath((source_root, path)) != source_root:
+            common_root = os.path.commonpath((source_root, path))
+            if os.path.normcase(common_root) != os.path.normcase(source_root):
                 return {"skipped": {"path": path, "reason": "path_outside_source_root"}}
         except ValueError:
             return {"skipped": {"path": path, "reason": "path_outside_source_root"}}

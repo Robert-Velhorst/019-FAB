@@ -1,4 +1,6 @@
 import csv
+import hashlib
+import hmac
 import io
 import json
 from datetime import datetime, timedelta, timezone
@@ -14,9 +16,9 @@ from src.data_entry.mijngeldzaken_surface import (
 from src.data_entry.waveapps_api_executor import WaveappsApiExecutor
 from src.data_entry.waveapps_autonomous_operator import WaveappsAutonomousOperator
 from src.operations.local_bookkeeping_records import LocalBookkeepingRecordService
-from src.operations.local_ledger import LocalOperationsLedger
+from src.operations.local_ledger import LEDGER_SCHEMA_VERSION, LocalOperationsLedger
 from src.utils.csv_safety import neutralize_csv_row
-from src.operations.local_routing import PREPARED_ROUTING_STATUSES
+from src.operations.local_routing import PREPARED_ROUTING_STATUSES, build_wave_operation_inputs
 
 
 EXPORT_APPROVAL_PHRASE = "APPROVE FAB EXPORT DRAFT"
@@ -554,6 +556,21 @@ class LocalExportAttemptService:
         confirmation: Optional[str] = None,
         resolution: Optional[str] = None,
     ) -> Dict[str, Any]:
+        with self.ledger.write_transaction():
+            return self._approve_attempt_transaction(
+                export_attempt_id,
+                actor=actor,
+                confirmation=confirmation,
+                resolution=resolution,
+            )
+
+    def _approve_attempt_transaction(
+        self,
+        export_attempt_id: int,
+        actor: str,
+        confirmation: Optional[str],
+        resolution: Optional[str],
+    ) -> Dict[str, Any]:
         attempt = self.ledger.get_export_attempt(export_attempt_id)
         if not attempt:
             return {"success": False, "status": "not_found", "error": "Export attempt not found"}
@@ -580,6 +597,26 @@ class LocalExportAttemptService:
         if stale:
             return stale
 
+        wave_approval_checksum = None
+        if _is_wave_target(_target_system_for_attempt(attempt)):
+            wave_snapshot = _wave_approval_snapshot(self.ledger, self.config, attempt)
+            if wave_snapshot.get("status") != "fresh":
+                return {
+                    "success": False,
+                    "status": "stale_wave_draft",
+                    "message": "Wave draft no longer matches the current source, review state, action, or account mapping. Prepare a new route before approving.",
+                    "reason": wave_snapshot.get("status"),
+                    "externalSubmission": "not_executed",
+                }
+            if wave_snapshot.get("hasOpenReviews") or wave_snapshot.get("reviewRequired"):
+                return {
+                    "success": False,
+                    "status": "blocked_by_review",
+                    "message": "Wave export cannot be approved while its source has an open review or still requires review.",
+                    "externalSubmission": "not_executed",
+                }
+            wave_approval_checksum = wave_snapshot["checksum"]
+
         now = _now()
         resolved_review_ids = (
             self._resolve_wave_execution_reviews(attempt, actor, "reapproved")
@@ -593,6 +630,7 @@ class LocalExportAttemptService:
             "approvedAt": now,
             "resolution": resolution,
             "masterLedgerChecksum": master_ledger_checksum,
+            **({"waveApprovalChecksum": wave_approval_checksum} if wave_approval_checksum else {}),
         }
         self.ledger.update_export_attempt(export_attempt_id, {
             "status": "approved",
@@ -659,6 +697,21 @@ class LocalExportAttemptService:
         actor: str = "local_user",
         confirmation: Optional[str] = None,
         resolution: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        with self.ledger.write_transaction():
+            return self._reject_attempt_transaction(
+                export_attempt_id,
+                actor=actor,
+                confirmation=confirmation,
+                resolution=resolution,
+            )
+
+    def _reject_attempt_transaction(
+        self,
+        export_attempt_id: int,
+        actor: str,
+        confirmation: Optional[str],
+        resolution: Optional[str],
     ) -> Dict[str, Any]:
         attempt = self.ledger.get_export_attempt(export_attempt_id)
         if not attempt:
@@ -769,6 +822,25 @@ class LocalExportAttemptService:
         actor: str = "fab_local_exports",
         confirmation: Optional[str] = None,
     ) -> Dict[str, Any]:
+        with self.ledger.write_transaction():
+            return self._record_result_transaction(
+                export_attempt_id,
+                status=status,
+                external_id=external_id,
+                result=result,
+                actor=actor,
+                confirmation=confirmation,
+            )
+
+    def _record_result_transaction(
+        self,
+        export_attempt_id: int,
+        status: str,
+        external_id: Optional[str],
+        result: Optional[Dict[str, Any]],
+        actor: str,
+        confirmation: Optional[str],
+    ) -> Dict[str, Any]:
         attempt = self.ledger.get_export_attempt(export_attempt_id)
         if not attempt:
             return {"success": False, "status": "not_found", "error": "Export attempt not found"}
@@ -782,18 +854,58 @@ class LocalExportAttemptService:
                 "confirmationPhrase": EXPORT_RESULT_CONFIRMATION_PHRASE,
                 "message": "Type the exact result phrase before recording an external export result.",
             }
+        target_system = _target_system_for_attempt(attempt)
+        if not _is_mijngeldzaken_target(target_system):
+            return {
+                "success": False,
+                "status": "provider_result_required",
+                "message": "Wave and other provider results can only be recorded by their canonical executor or reconciliation path.",
+                "externalSubmission": "not_executed",
+            }
+        if attempt.get("status") != "supervision_required":
+            return {
+                "success": False,
+                "status": "supervision_required",
+                "message": "A MijnGeldzaken result can only be recorded after FAB persists the supervised export artifact.",
+                "externalSubmission": "not_executed",
+            }
         if attempt.get("status") == "supervision_required" and status == "queued":
             return {
                 "success": False,
                 "status": "invalid_supervised_result",
                 "message": "A supervised MijnGeldzaken import must be recorded as executed, submitted, or failed.",
             }
-        if attempt.get("status") not in {"approved", "supervision_required"} and status in {"executed", "submitted", "queued"}:
+        metadata = dict(attempt.get("metadata") or {})
+        supervised_artifact = metadata.get("supervisedArtifact")
+        supervised_artifact = supervised_artifact if isinstance(supervised_artifact, dict) else {}
+        expected_artifact_sha256 = str(supervised_artifact.get("sha256") or "").strip().lower()
+        supplied_result = result if isinstance(result, dict) else {}
+        supplied_artifact_sha256 = str(supplied_result.get("artifactSha256") or "").strip().lower()
+        supplied_artifact_sha256_valid = (
+            len(supplied_artifact_sha256) == 64
+            and all(character in "0123456789abcdef" for character in supplied_artifact_sha256)
+        )
+        if (
+            len(expected_artifact_sha256) != 64
+            or any(character not in "0123456789abcdef" for character in expected_artifact_sha256)
+            or not supplied_artifact_sha256_valid
+            or not hmac.compare_digest(supplied_artifact_sha256, expected_artifact_sha256)
+        ):
             return {
                 "success": False,
-                "status": "blocked_unapproved",
-                "message": "Only approved or supervised export attempts can receive submitted/executed results.",
+                "status": "artifact_evidence_mismatch",
+                "message": "The attestation must identify the exact persisted MijnGeldzaken artifact SHA-256.",
+                "externalSubmission": "not_executed",
             }
+        if external_id is not None:
+            external_id = str(external_id).strip()
+            if len(external_id) > 200 or any(ord(character) < 32 for character in external_id):
+                return {
+                    "success": False,
+                    "status": "invalid_supervised_evidence",
+                    "message": "The supervised import reference must be at most 200 printable characters.",
+                    "externalSubmission": "not_executed",
+                }
         if status in {"executed", "submitted", "queued"}:
             stale = self._master_ledger_staleness(attempt, "result", actor)
             if stale:
@@ -801,7 +913,6 @@ class LocalExportAttemptService:
 
         now = _now()
         external_submission = _external_submission_for_result(status)
-        metadata = dict(attempt.get("metadata") or {})
         master_ledger_checksum = _master_ledger_checksum(metadata)
         metadata["lastResult"] = {
             "actor": actor,
@@ -810,7 +921,10 @@ class LocalExportAttemptService:
             "externalSubmission": external_submission,
             "masterLedgerChecksum": master_ledger_checksum,
         }
-        result_payload = dict(result or {})
+        result_payload = {
+            "source": "supervised_operator_attestation",
+            "artifactSha256": expected_artifact_sha256,
+        }
         if master_ledger_checksum and "masterLedgerChecksum" not in result_payload:
             result_payload["masterLedgerChecksum"] = master_ledger_checksum
         self.ledger.update_export_attempt(export_attempt_id, {
@@ -881,6 +995,130 @@ class LocalExportAttemptService:
             "exportAttempt": self.ledger.get_export_attempt(export_attempt_id),
         }
 
+    def record_unknown_wave_observation(
+        self,
+        export_attempt_id: int,
+        *,
+        external_id: Any,
+        verified_fields: Any,
+        actor: str,
+        confirmation: Any,
+    ) -> Dict[str, Any]:
+        with self.ledger.write_transaction():
+            attempt = self.ledger.get_export_attempt(export_attempt_id)
+            if not attempt:
+                return {"success": False, "status": "not_found", "error": "Export attempt not found"}
+            if (
+                attempt.get("status") != "failed"
+                or attempt.get("external_submission") != "unknown"
+                or not _is_wave_target(_target_system_for_attempt(attempt))
+            ):
+                return {
+                    "success": False,
+                    "status": "not_reconcilable",
+                    "message": "Only an export with an unknown Wave outcome can record a provider observation.",
+                }
+
+            reference = str(external_id or "").strip()
+            if not reference or len(reference) > 200 or any(ord(char) < 32 for char in reference):
+                return {
+                    "success": False,
+                    "status": "invalid_provider_reference",
+                    "message": "Enter the Wave transaction reference (up to 200 printable characters).",
+                }
+
+            required_fields = {"target", "vendor", "date", "amount", "currency"}
+            if attempt.get("document_id"):
+                required_fields.add("attachment")
+            supplied_fields = {
+                str(value).strip().lower()
+                for value in (verified_fields if isinstance(verified_fields, (list, tuple, set)) else [])
+            }
+            if not required_fields.issubset(supplied_fields):
+                return {
+                    "success": False,
+                    "status": "incomplete_observation",
+                    "requiredFields": sorted(required_fields),
+                    "message": "Verify the matching Wave account, vendor, date, amount, currency, and source attachment where applicable.",
+                }
+
+            expected_confirmation = f"RECORD FAB WAVE OBSERVATION #{export_attempt_id}"
+            if str(confirmation or "").strip() != expected_confirmation:
+                return {
+                    "success": False,
+                    "status": "requires_confirmation",
+                    "confirmationPhrase": expected_confirmation,
+                    "message": "Type the exact phrase to record this operator observation.",
+                }
+
+            now = _now()
+            actor_label = "".join(char for char in str(actor or "local_user") if char.isprintable()).strip()[:120]
+            actor_label = actor_label or "local_user"
+            observation = {
+                "provider": "waveapps",
+                "classification": "operator_visual_observation_only",
+                "externalId": reference,
+                "verifiedFields": sorted(required_fields),
+                "actor": actor_label,
+                "observedAt": now,
+                "providerReadbackVerified": False,
+                "sourceArchivalAllowed": False,
+                "externalSubmission": "unknown",
+            }
+            metadata = dict(attempt.get("metadata") or {})
+            prior_observation = metadata.get("operatorReconciliation")
+            if (
+                isinstance(prior_observation, dict)
+                and prior_observation.get("classification") == observation["classification"]
+                and prior_observation.get("externalId") == reference
+                and prior_observation.get("verifiedFields") == observation["verifiedFields"]
+                and prior_observation.get("actor") == actor_label
+            ):
+                return {
+                    "success": True,
+                    "status": "already_recorded",
+                    "externalSubmission": "unknown",
+                    "providerReadbackVerified": False,
+                    "sourceArchivalAllowed": False,
+                    "exportAttempt": attempt,
+                }
+            prior_history = metadata.get("operatorReconciliationHistory")
+            history = list(prior_history) if isinstance(prior_history, list) else []
+            history.append(observation)
+            metadata["operatorReconciliationHistory"] = history[-20:]
+            metadata["operatorReconciliation"] = observation
+            message = (
+                "Wave outcome remains unknown. An operator recorded a visual comparison; "
+                "provider API readback is unverified and this does not authorize retry or source archival."
+            )
+            self.ledger.update_export_attempt(export_attempt_id, {
+                "status": "failed",
+                "externalSubmission": "unknown",
+                "message": message,
+                "metadata": metadata,
+            })
+            self.ledger.record_audit_event({
+                "action": "local_export_attempt.wave_observation_recorded",
+                "entityType": "export_attempt",
+                "entityId": str(export_attempt_id),
+                "details": {
+                    "actor": observation["actor"],
+                    "providerReference": reference,
+                    "verifiedFields": observation["verifiedFields"],
+                    "providerReadbackVerified": False,
+                    "sourceArchivalAllowed": False,
+                    "externalSubmission": "unknown",
+                },
+            })
+            return {
+                "success": True,
+                "status": "observation_recorded",
+                "externalSubmission": "unknown",
+                "providerReadbackVerified": False,
+                "sourceArchivalAllowed": False,
+                "exportAttempt": self.ledger.get_export_attempt(export_attempt_id),
+            }
+
     def execute_attempt(
         self,
         export_attempt_id: int,
@@ -920,6 +1158,10 @@ class LocalExportAttemptService:
                 return source_block
             metadata = dict(attempt.get("metadata") or {})
             master_ledger_checksum = _master_ledger_checksum(metadata)
+            if _is_wave_target(_target_system_for_attempt(attempt)):
+                stale_wave = self._wave_approval_staleness(attempt, actor)
+                if stale_wave:
+                    return stale_wave
             stale = self._master_ledger_staleness(attempt, "execution", actor)
             if stale:
                 self._release_execution_claim(export_attempt_id, "Master-ledger draft became stale before dispatch.")
@@ -969,9 +1211,9 @@ class LocalExportAttemptService:
                     available_signals=available_signals,
                     confidence=confidence,
                 )
-            except Exception as exc:
-                execution_status = "failed"
-                message = f"Execution failed before dispatch: {exc}"
+            except Exception:
+                execution_status = "outcome_unknown"
+                message = "Execution did not produce a verifiable provider result. Check the target before taking further action."
                 execution = {"status": "failed", "message": message, "operation": operation}
                 execution["status"] = execution_status
 
@@ -1061,6 +1303,7 @@ class LocalExportAttemptService:
                     execution_status,
                     execution.get("message") or mapped_message,
                     provider_result,
+                    external_submission=external_submission,
                 )
                 self._record_attention_state(
                     attempt,
@@ -1068,6 +1311,7 @@ class LocalExportAttemptService:
                     mapped_status,
                     execution_status,
                     review_id,
+                    external_submission=external_submission,
                 )
 
             audit_action = {
@@ -1145,6 +1389,7 @@ class LocalExportAttemptService:
         execution_status: str,
         message: str,
         provider_result: Dict[str, Any],
+        external_submission: str = "not_executed",
     ) -> Optional[int]:
         reason = str(provider_result.get("review_reason") or "wave_execution_attention_required")
         document_id = attempt.get("document_id")
@@ -1165,7 +1410,7 @@ class LocalExportAttemptService:
             "executionStatus": execution_status,
             "message": message,
             "missingConfiguration": provider_result.get("missing_configuration"),
-            "externalSubmission": "not_executed",
+            "externalSubmission": external_submission,
         }
         return self.ledger.create_review_item({
             "documentId": document_id,
@@ -1213,6 +1458,7 @@ class LocalExportAttemptService:
         mapped_status: str,
         execution_status: str,
         review_id: Optional[int],
+        external_submission: str = "not_executed",
     ) -> None:
         export_status = "failed" if mapped_status == "failed" else "attention_required"
         record_status = "export_failed" if mapped_status == "failed" else "export_attention_required"
@@ -1220,7 +1466,7 @@ class LocalExportAttemptService:
             "exportAttemptId": export_attempt_id,
             "executionStatus": execution_status,
             "reviewItemId": review_id,
-            "externalSubmission": "not_executed",
+            "externalSubmission": external_submission,
         }
         if attempt.get("document_id"):
             LocalBookkeepingRecordService(self.ledger, self.config).record_export_state(
@@ -1464,15 +1710,43 @@ class LocalExportAttemptService:
             "externalSubmission": "not_executed",
             "message": message,
         })
+        review_item_id = None
         if document:
             LocalBookkeepingRecordService(self.ledger, self.config).upsert_from_document(int(document_id))
+            if status in {"blocked_processing", "blocked_by_review"}:
+                review_marker = f'"exportAttemptId": {int(attempt["id"])}'
+                existing_reviews = self.ledger.list_review_items(
+                    status=tuple(OPEN_REVIEW_STATUSES),
+                    document_id=int(document_id),
+                    limit=500,
+                )
+                matching = next(
+                    (
+                        item for item in existing_reviews
+                        if item.get("reason") == "source_processing_recovery"
+                        and review_marker in str(item.get("details") or "")
+                    ),
+                    None,
+                )
+                review_item_id = int(matching["id"]) if matching else self.ledger.create_review_item({
+                    "documentId": int(document_id),
+                    "reason": "source_processing_recovery",
+                    "details": json.dumps({
+                        "exportAttemptId": int(attempt["id"]),
+                        "processingStatus": document.get("processing_status"),
+                        "stage": stage,
+                        "externalSubmission": "not_executed",
+                    }, sort_keys=True, default=str),
+                    "status": "pending",
+                })
         self.ledger.record_audit_event({
             "action": "local_export_attempt.source_processing_blocked",
             "entityType": "export_attempt",
             "entityId": str(attempt["id"]),
             "details": {
                 "actor": actor, "stage": stage, "documentId": document_id,
-                "reason": status, "externalSubmission": "not_executed",
+                "reason": status, "reviewItemId": review_item_id,
+                "externalSubmission": "not_executed",
             },
         })
         return {
@@ -1512,6 +1786,66 @@ class LocalExportAttemptService:
             "currentChecksum": check.get("currentChecksum"),
             "currentDraft": check.get("currentDraft"),
             "externalSubmission": "not_executed",
+        }
+
+    def _wave_approval_staleness(
+        self,
+        attempt: Dict[str, Any],
+        actor: str,
+    ) -> Optional[Dict[str, Any]]:
+        check = _wave_approval_freshness(self.ledger, self.config, attempt)
+        if check.get("status") == "fresh":
+            return None
+        message = "Wave approval no longer matches the current source, review state, action payload, or account mapping. Prepare and approve a fresh route before retrying."
+        with self.ledger.write_transaction():
+            current = self.ledger.get_export_attempt(int(attempt["id"])) or attempt
+            if current.get("status") != "execution_in_progress":
+                return {
+                    "success": False,
+                    "status": "already_claimed",
+                    "currentStatus": current.get("status"),
+                    "externalSubmission": current.get("external_submission"),
+                }
+            self.ledger.update_export_attempt(int(attempt["id"]), {
+                "status": "attention_required",
+                "approvalRequired": True,
+                "externalSubmission": "not_executed",
+                "message": message,
+            })
+            review_id = self._queue_wave_execution_review(
+                attempt,
+                "stale_wave_approval",
+                message,
+                {"review_reason": "wave_approval_stale"},
+            )
+            self._record_attention_state(
+                attempt,
+                int(attempt["id"]),
+                "attention_required",
+                "stale_wave_approval",
+                review_id,
+            )
+            self.ledger.record_audit_event({
+                "action": "local_export_attempt.wave_approval_stale",
+                "entityType": "export_attempt",
+                "entityId": str(attempt["id"]),
+                "details": {
+                    "actor": actor,
+                    "reason": check.get("status"),
+                    "storedChecksum": check.get("storedChecksum"),
+                    "currentChecksum": check.get("currentChecksum"),
+                    "reviewItemId": review_id,
+                    "externalSubmission": "not_executed",
+                },
+            })
+        return {
+            "success": False,
+            "status": "stale_wave_approval",
+            "message": message,
+            "reason": check.get("status"),
+            "reviewItemId": review_id,
+            "externalSubmission": "not_executed",
+            "exportAttempt": self.ledger.get_export_attempt(int(attempt["id"])),
         }
 
     def _export_block_for_routing(
@@ -1561,6 +1895,18 @@ def _target_system_for_attempt(attempt: Dict[str, Any]) -> str:
             "waveapps",
         )
     ).strip().lower()
+
+
+def _is_wave_target(target_system: Any) -> bool:
+    normalized = str(target_system or "").strip().lower().replace("-", "_").replace(" ", "_")
+    return normalized in {
+        "wave",
+        "waveapps",
+        "waveapps_business",
+        "waveapps_personal",
+        "business",
+        "personal",
+    }
 
 
 def _is_mijngeldzaken_target(target_system: Any) -> bool:
@@ -1723,6 +2069,255 @@ def _master_ledger_freshness(
         "storedChecksum": stored_checksum,
         "currentChecksum": str(current_checksum),
         "currentDraft": current_draft,
+    }
+
+
+def _wave_approval_freshness(
+    ledger: LocalOperationsLedger,
+    config: Dict[str, Any],
+    attempt: Dict[str, Any],
+) -> Dict[str, Any]:
+    metadata = attempt.get("metadata") if isinstance(attempt.get("metadata"), dict) else {}
+    approval = metadata.get("approval") if isinstance(metadata.get("approval"), dict) else {}
+    stored_checksum = str(approval.get("waveApprovalChecksum") or "").strip().lower()
+    if len(stored_checksum) != 64 or any(character not in "0123456789abcdef" for character in stored_checksum):
+        return {"status": "approval_fingerprint_missing", "storedChecksum": stored_checksum or None}
+    current = _wave_approval_snapshot(ledger, config, attempt)
+    if current.get("status") != "fresh":
+        return {**current, "storedChecksum": stored_checksum}
+    current_checksum = str(current["checksum"])
+    if not hmac.compare_digest(stored_checksum, current_checksum):
+        return {
+            **current,
+            "status": "checksum_mismatch",
+            "storedChecksum": stored_checksum,
+            "currentChecksum": current_checksum,
+        }
+    return {
+        **current,
+        "status": "fresh",
+        "storedChecksum": stored_checksum,
+        "currentChecksum": current_checksum,
+    }
+
+
+def _wave_approval_snapshot(
+    ledger: LocalOperationsLedger,
+    config: Dict[str, Any],
+    attempt: Dict[str, Any],
+) -> Dict[str, Any]:
+    target_system = _target_system_for_attempt(attempt)
+    if not _is_wave_target(target_system):
+        return {"status": "not_applicable"}
+
+    document_id = attempt.get("document_id")
+    record_id = attempt.get("bookkeeping_record_id")
+    with ledger.read_snapshot():
+        document = ledger.get_document(int(document_id)) if document_id else None
+        record = (document or {}).get("bookkeeping_record")
+        if not record and record_id:
+            record = ledger.get_bookkeeping_record(int(record_id))
+        if not document and record and record.get("document_id"):
+            document = ledger.get_document(int(record["document_id"]))
+            record = (document or {}).get("bookkeeping_record") or record
+        if not document and not record:
+            return {"status": "source_missing"}
+
+        try:
+            wave_inputs = build_wave_operation_inputs(
+                config=config,
+                document=document,
+                record=record if not document else None,
+            )
+        except (KeyError, TypeError, ValueError):
+            return {"status": "source_invalid"}
+
+        payload = attempt.get("payload") if isinstance(attempt.get("payload"), dict) else {}
+        action_id = str(attempt.get("action_id") or "")
+        surface = str(attempt.get("surface") or "")
+        if (
+            action_id != str(wave_inputs["actionId"])
+            or surface != str(wave_inputs["destination"].get("target_surface") or "")
+            or payload != wave_inputs["payload"]
+        ):
+            return {"status": "payload_mismatch"}
+
+        routing_attempt = (
+            ledger.get_routing_attempt(int(attempt["routing_attempt_id"]))
+            if attempt.get("routing_attempt_id")
+            else None
+        ) or {}
+        routing_metadata = routing_attempt.get("metadata") if isinstance(routing_attempt.get("metadata"), dict) else {}
+        routing_operation = routing_metadata.get("operation") if isinstance(routing_metadata.get("operation"), dict) else {}
+        if routing_operation and (
+            str(routing_operation.get("operation_id") or "") != str(attempt.get("operation_id") or "")
+            or str(routing_operation.get("action_id") or "") != action_id
+            or str(routing_operation.get("surface") or "") != surface
+            or (routing_operation.get("payload") if isinstance(routing_operation.get("payload"), dict) else {}) != payload
+        ):
+            return {"status": "routing_operation_mismatch"}
+
+        record_metadata = record.get("metadata") if isinstance(record, dict) and isinstance(record.get("metadata"), dict) else {}
+        document_state = None
+        if document:
+            document_state = {
+                "id": document.get("id"),
+                "source": document.get("source"),
+                "sourceDocumentId": document.get("source_document_id"),
+                "originalFilename": document.get("original_filename"),
+                "documentType": document.get("document_type"),
+                "vendorName": document.get("vendor_name"),
+                "category": document.get("category"),
+                "transactionDate": document.get("transaction_date"),
+                "totalAmount": document.get("total_amount"),
+                "vatAmount": document.get("vat_amount"),
+                "extractedData": document.get("extracted_data"),
+                "duplicateOfDocumentId": document.get("duplicate_of_document_id"),
+                "duplicateFingerprint": document.get("duplicate_fingerprint"),
+            }
+        attempt_review_marker = f'"exportAttemptId": {int(attempt.get("id") or 0)}'
+        review_required_for_snapshot = bool(record and record.get("review_required"))
+        record_state = None
+        if record:
+            if document:
+                review_document = dict(document)
+                review_document["review_items"] = [
+                    item
+                    for item in (document.get("review_items") or [])
+                    if not (
+                        str(item.get("reason") or "").startswith("wave_")
+                        and attempt_review_marker in str(item.get("details") or "")
+                    )
+                ]
+                review_required_for_snapshot = bool(
+                    LocalBookkeepingRecordService(ledger, config)._document_record_payload(
+                        review_document
+                    ).get("reviewRequired")
+                )
+            record_state = {
+                "id": record.get("id"),
+                "documentId": record.get("document_id"),
+                "bankTransactionId": record.get("bank_transaction_id"),
+                "sourceType": record.get("source_type"),
+                "recordType": record.get("record_type"),
+                "targetSystem": record.get("target_system"),
+                "targetAccount": record.get("target_account"),
+                "vendorName": record.get("vendor_name"),
+                "description": record.get("description"),
+                "category": record.get("category"),
+                "recordDate": record.get("record_date"),
+                "amount": record.get("amount"),
+                "vatAmount": record.get("vat_amount"),
+                "currency": record.get("currency"),
+                "confidenceScore": record.get("confidence_score"),
+                "reviewRequired": review_required_for_snapshot,
+                "reconciliationStatus": record.get("reconciliation_status"),
+                "documentType": record_metadata.get("documentType"),
+                "lineItems": wave_inputs["sourceData"].get("line_items") or [],
+            }
+        bank_transaction = None
+        if record and record.get("bank_transaction_id"):
+            bank = ledger.get_bank_transaction(int(record["bank_transaction_id"])) or {}
+            bank_transaction = {
+                "id": bank.get("id"),
+                "accountIdentifier": bank.get("account_identifier"),
+                "transactionId": bank.get("transaction_id"),
+                "transactionDate": bank.get("transaction_date"),
+                "amount": bank.get("amount"),
+                "currency": bank.get("currency"),
+                "description": bank.get("description"),
+                "counterparty": bank.get("counterparty"),
+                "reconciliationStatus": bank.get("reconciliation_status"),
+                "duplicateFingerprint": bank.get("duplicate_fingerprint"),
+            }
+        review_items = [
+            {
+                "id": item.get("id"),
+                "reason": item.get("reason"),
+                "status": item.get("status"),
+                "details": item.get("details"),
+                "correctedData": item.get("corrected_data_json"),
+            }
+            for item in (document or {}).get("review_items") or []
+            if not (
+                str(item.get("reason") or "").startswith("wave_")
+                and attempt_review_marker in str(item.get("details") or "")
+            )
+        ]
+        snapshot = {
+            "schemaVersion": LEDGER_SCHEMA_VERSION,
+            "targetSystem": target_system,
+            "actionId": action_id,
+            "surface": surface,
+            "operationId": attempt.get("operation_id"),
+            "targetAccount": attempt.get("target_account"),
+            "payload": payload,
+            "document": document_state,
+            "bookkeepingRecord": record_state,
+            "bankTransaction": bank_transaction,
+            "reviewItems": review_items,
+            "provider": _wave_provider_context(config, target_system),
+        }
+        try:
+            canonical = json.dumps(
+                snapshot,
+                ensure_ascii=False,
+                allow_nan=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            ).encode("utf-8")
+        except (TypeError, ValueError, UnicodeError):
+            return {"status": "snapshot_invalid"}
+        return {
+            "status": "fresh",
+            "checksum": hashlib.sha256(canonical).hexdigest(),
+            "hasOpenReviews": any(item.get("status") in OPEN_REVIEW_STATUSES for item in review_items),
+            "reviewRequired": review_required_for_snapshot,
+        }
+
+
+def _wave_provider_context(config: Dict[str, Any], target_system: str) -> Dict[str, Any]:
+    normalized = target_system.strip().lower().replace("-", "_").replace(" ", "_")
+    default_target = str(config.get("waveapps_default_target") or config.get("operations_waveapps_default_target") or "").strip().lower().replace("-", "_").replace(" ", "_")
+    target = normalized
+    if target in {"wave", "waveapps", "business", "personal"}:
+        target = default_target or target
+    if target == "business":
+        target = "waveapps_business"
+    elif target == "personal":
+        target = "waveapps_personal"
+    nested = config.get(target) if isinstance(config.get(target), dict) else {}
+
+    def setting(flat_name: str, *nested_names: str, default: Any = None) -> Any:
+        value = config.get(f"{target}_{flat_name}")
+        if value is not None:
+            return value
+        for name in nested_names or (flat_name,):
+            if nested.get(name) is not None:
+                return nested[name]
+        return default
+
+    business_id = setting("id", "id", "business_id")
+    if business_id is None:
+        business_id = config.get(f"{target}_business_id")
+    return {
+        "configuredDefaultTarget": default_target or None,
+        "resolvedTarget": target,
+        "businessId": business_id,
+        "apiUrl": config.get("waveapps_api_url"),
+        "categoryMapping": setting("category_mapping", default={}),
+        "categoryAccountIds": setting("category_account_ids", default={}),
+        "defaultCategoryAccountId": setting("default_category_account_id"),
+        "anchorAccountId": setting("anchor_account_id"),
+        "defaultAccount": setting("default_account", default="Uncategorized"),
+        "routingDefaultAccount": _config_value(
+            config,
+            "fab_waveapps_default_account",
+            "operations_waveapps_default_account",
+            "waveapps_default_account",
+            default="Uncategorized",
+        ),
     }
 
 
@@ -1933,16 +2528,20 @@ def _first_present(*values: Any) -> Any:
 
 
 def _external_submission_for_result(status: str) -> str:
-    if status in {"executed", "submitted"}:
+    if status == "executed":
         return "executed"
+    if status == "submitted":
+        return "submitted"
     if status == "queued":
         return "queued"
     return "failed"
 
 
 def _message_for_result(status: str) -> str:
-    if status in {"executed", "submitted"}:
-        return "External export result recorded."
+    if status == "executed":
+        return "External export execution recorded."
+    if status == "submitted":
+        return "External export submission recorded."
     if status == "queued":
         return "External export queued by a separate executor."
     return "External export failure recorded."
@@ -1972,6 +2571,8 @@ def _as_bool(value: Any) -> bool:
 
 def _map_execution_status(status: str, target_system: Any = "waveapps") -> tuple[str, str, str]:
     target_label = _target_label(target_system)
+    if status == "outcome_unknown":
+        return "unknown", "failed", "Provider outcome is unknown. Reconcile the target before creating another export."
     if status in {"success", "executed"}:
         return "executed", "executed", f"{target_label} execution completed successfully."
     if status == "submitted":

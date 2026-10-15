@@ -134,13 +134,26 @@ class TestLocalMasterLedgerService(unittest.TestCase):
                 actor="test",
                 confirmation=EXPORT_APPROVAL_PHRASE,
             )
-            mgz_recorded = exports.record_result(
+            mgz_supervised = exports.execute_attempt(mgz_export["exportAttemptId"], actor="test")
+            self.assertTrue(mgz_supervised["success"])
+            rejected_queued_result = exports.record_result(
                 mgz_export["exportAttemptId"],
                 status="queued",
                 external_id="mgz-import-queued",
                 actor="test",
                 confirmation=EXPORT_RESULT_CONFIRMATION_PHRASE,
             )
+            self.assertEqual(rejected_queued_result["status"], "invalid_supervised_result")
+            mgz_artifact_sha256 = mgz_supervised["artifact"]["sha256"]
+            mgz_recorded = exports.record_result(
+                mgz_export["exportAttemptId"],
+                status="submitted",
+                external_id="mgz-import-submitted",
+                result={"artifactSha256": mgz_artifact_sha256},
+                actor="test",
+                confirmation=EXPORT_RESULT_CONFIRMATION_PHRASE,
+            )
+            self.assertTrue(mgz_recorded["success"])
 
             service = LocalMasterLedgerService(ledger, config)
             projection = service.project()
@@ -158,9 +171,9 @@ class TestLocalMasterLedgerService(unittest.TestCase):
             self.assertEqual(rows_by_target["waveapps"]["downstreamStatus"], "awaiting_approval")
             self.assertTrue(rows_by_target["waveapps"]["readyForApproval"])
             self.assertEqual(rows_by_target["waveapps"]["exportAttemptId"], wave_export["exportAttemptId"])
-            self.assertEqual(rows_by_target["mijngeldzaken"]["downstreamStatus"], "queued")
+            self.assertEqual(rows_by_target["mijngeldzaken"]["downstreamStatus"], "submitted")
             self.assertFalse(rows_by_target["mijngeldzaken"]["readyForExternalExecution"])
-            self.assertEqual(rows_by_target["mijngeldzaken"]["externalSubmission"], "queued")
+            self.assertEqual(rows_by_target["mijngeldzaken"]["externalSubmission"], "submitted")
             self.assertEqual(
                 rows_by_target["mijngeldzaken"]["masterLedgerChecksum"],
                 mgz_approved["exportAttempt"]["metadata"]["masterLedgerChecksum"],
@@ -170,7 +183,7 @@ class TestLocalMasterLedgerService(unittest.TestCase):
                 mgz_recorded["exportAttempt"]["result"]["masterLedgerChecksum"],
             )
             self.assertEqual(projection["summary"]["byTargetSystem"]["waveapps"]["statuses"]["awaiting_approval"], 1)
-            self.assertEqual(projection["summary"]["byTargetSystem"]["mijngeldzaken"]["statuses"]["queued"], 1)
+            self.assertEqual(projection["summary"]["byTargetSystem"]["mijngeldzaken"]["statuses"]["submitted"], 1)
             self.assertEqual(projection["summary"]["readyForApproval"], 1)
             self.assertEqual(projection["summary"]["blockedRows"], 0)
             self.assertTrue(csv_artifact["success"])

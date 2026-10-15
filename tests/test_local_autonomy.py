@@ -304,11 +304,7 @@ class TestLocalAutonomousService(unittest.TestCase):
             self.assertNotIn("operations_health_blocked", plan["blockedReasons"])
             self.assertIn("operations_health_blocked", plan["guardedReasons"])
             self.assertTrue(actions["rescan_intake"]["canRun"])
-            self.assertFalse(actions["execute_approved_exports"]["canRun"])
-            self.assertIn(
-                "operations health",
-                actions["execute_approved_exports"]["blockedReason"].lower(),
-            )
+            self.assertNotIn("execute_approved_exports", actions)
 
     def test_dashboard_autonomy_panel_surfaces_top_operating_exceptions(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -721,7 +717,7 @@ class TestLocalAutonomousService(unittest.TestCase):
             audit_actions = [event["action"] for event in client.get("/api/audit").get_json()["auditEvents"]]
             self.assertIn("local_autonomy.cycle_started", audit_actions)
             workflow = client.get(f"/api/workflows/{payload['workflowRunId']}").get_json()
-            self.assertEqual(len(workflow["steps"]), 13)
+            self.assertEqual(len(workflow["steps"]), 12)
             self.assertEqual(workflow["steps"][0]["step_key"], "sync_connector_sources")
             self.assertEqual(workflow["steps"][0]["status"], "skipped")
             self.assertEqual(workflow["steps"][1]["step_key"], "rescan_intake")
@@ -1307,7 +1303,7 @@ class TestLocalAutonomousService(unittest.TestCase):
             audit_actions = [event["action"] for event in ledger.list_audit_events(limit=30)]
             self.assertIn("local_routing.bank_record_wave_draft_prepared", audit_actions)
 
-    def test_autonomy_execution_creates_pre_execution_backup(self):
+    def test_safe_autonomy_cycle_never_executes_approved_exports(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
             document_id = ledger.register_document({
@@ -1329,45 +1325,37 @@ class TestLocalAutonomousService(unittest.TestCase):
                 actor="tester",
                 confirmation=EXPORT_APPROVAL_PHRASE,
             )
-            backup_dir = os.path.join(temp_dir, "backups")
             service = LocalAutonomousService(
                 ledger,
                 {
                     "fab_autonomy_execute_approved_exports": True,
-                    "fab_local_backup_dir": backup_dir,
                 },
                 intake_paths=[],
             )
 
-            plan = service.plan(include_wave_plan=False)
-            result = service.run_cycle(include_wave_plan=False)
+            with patch.object(LocalExportAttemptService, "process_approved_attempts") as execute_exports:
+                plan = service.plan(include_wave_plan=False)
+                result = service.run_cycle(include_wave_plan=False)
 
             self.assertEqual(approved["status"], "approved")
-            self.assertIn("execute_approved_exports", plan["runnableActionIds"])
-            self.assertTrue(result["success"])
-            execution_action = next(
-                action for action in result["executedActions"]
-                if action["id"] == "execute_approved_exports"
+            self.assertNotIn("execute_approved_exports", plan["runnableActionIds"])
+            self.assertNotIn(
+                "execute_approved_exports",
+                {action["id"] for action in plan["actions"]},
             )
-            backup = execution_action["summary"]["preExecutionBackup"]
-            self.assertEqual(backup["status"], "created")
-            self.assertTrue(os.path.exists(backup["backupPath"]))
-            self.assertEqual(len(backup["ledgerSha256"]), 64)
-            self.assertEqual(backup["externalSubmission"], "not_executed")
-            self.assertEqual(execution_action["summary"]["attempted"], 1)
+            self.assertTrue(result["success"])
+            execute_exports.assert_not_called()
             self.assertEqual(
                 ledger.get_export_attempt(prepared["exportAttemptId"])["status"],
-                "attention_required",
+                "approved",
             )
             self.assertEqual(
                 ledger.get_export_attempt(prepared["exportAttemptId"])["external_submission"],
-                "not_executed",
+                "approved_not_executed",
             )
-            reviews = ledger.list_review_items(document_id=document_id)
-            self.assertEqual(reviews[0]["reason"], "wave_target_ambiguous")
             audit_actions = [event["action"] for event in ledger.list_audit_events(limit=40)]
-            self.assertIn("local_backup.created", audit_actions)
-            self.assertIn("local_autonomy.export_execution_preflight_backup", audit_actions)
+            self.assertNotIn("local_backup.created", audit_actions)
+            self.assertNotIn("local_autonomy.export_execution_preflight_backup", audit_actions)
 
     def test_autonomy_blocks_when_remote_exposure_is_unsafe(self):
         with tempfile.TemporaryDirectory() as temp_dir:

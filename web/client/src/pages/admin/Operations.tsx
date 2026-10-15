@@ -22,9 +22,10 @@ import { FabWaveReceiptExecutorDrawer } from "@/components/fab/FabWaveReceiptExe
 import { FabWaveSetupDrawer, type FabWaveSetupSaveInput } from "@/components/fab/FabWaveSetupDrawer";
 import type { FabCommandId, FabRecord } from "@/components/fab/fabView";
 import type { FabBankStatementFormat } from "@/components/fab/fabBankStatement";
-import { asRecord, count, humanize, records, text } from "@/components/fab/fabView";
+import { asRecord, commandDetails, commandOutcome, count, humanize, records, text } from "@/components/fab/fabView";
 import { useFabLocale } from "@/components/fab/fabLocale";
 import { trpc } from "@/lib/trpc";
+import { startVisiblePoll } from "@/hooks/visiblePoll";
 import "@/components/fab/fab-operator.css";
 
 type CommandPayload = {
@@ -74,7 +75,6 @@ export default function AdminOperations() {
 
   const controlCenter = trpc.fab.controlCenter.useQuery(undefined, {
     enabled: hasOperatorAccess,
-    refetchInterval: 60_000,
     refetchOnWindowFocus: false,
   });
   const refreshControlCenter = trpc.fab.refreshControlCenter.useMutation({
@@ -85,10 +85,19 @@ export default function AdminOperations() {
   const refresh = useCallback(async () => {
     await refreshControlCenter.mutateAsync();
   }, [refreshControlCenter]);
+  useEffect(() => {
+    if (!hasOperatorAccess) return;
+    return startVisiblePoll(
+      async () => {
+        await controlCenter.refetch();
+      },
+      { intervalMs: 60_000, initialDelayMs: 60_000 },
+    );
+  }, [controlCenter.refetch, hasOperatorAccess]);
   const runCommand = trpc.fab.runCommand.useMutation({
     onSuccess: async (result) => {
-      const commandResult = asRecord(result.result);
-      const status = text(result.status, text(commandResult.status, "completed"));
+      const commandResult = commandDetails(result);
+      const status = text(commandResult.status, "completed");
       if (pendingCommand) {
         setLastCommand({
           id: pendingCommand,
@@ -98,7 +107,11 @@ export default function AdminOperations() {
           summary: summarizeCommandResult(commandResult),
         });
       }
-      toast.success(`${pendingCommand ? humanize(pendingCommand) : "Command"}: ${humanize(status)}`);
+      const message = `${pendingCommand ? humanize(pendingCommand) : "Command"}: ${humanize(status)}`;
+      const outcome = commandOutcome(result);
+      if (outcome === "failure") toast.error(message);
+      else if (outcome === "attention") toast.warning(message);
+      else toast.success(message);
       setPendingCommand(null);
       setCommandStartedAt(null);
       await controlCenter.refetch();

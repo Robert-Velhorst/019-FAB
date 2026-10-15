@@ -5,12 +5,76 @@ import threading
 import unittest
 from unittest.mock import patch
 
-from src.operations.local_api import create_app
+from src.operations.local_api import HAI_ROUTE_RULES, create_app
+from src.operations.local_exports import EXPORT_APPROVAL_PHRASE, LocalExportAttemptService
 from src.operations.local_hai_connector import LocalHaiConnector
 from src.operations.local_ledger import LocalOperationsLedger
+from src.operations.local_routing import LocalRoutingService
 
 
 class TestLocalHaiConnector(unittest.TestCase):
+    def test_hai_token_is_denied_from_every_unlisted_api_method(self):
+        expected_rules = (
+            ("GET", r"^/api/hai/(?:manifest|status)$"),
+            ("POST", r"^/api/hai/commands/(?:plan|execute)$"),
+            ("GET", r"^/api/backups$"),
+            ("POST", r"^/api/connectors/google-drive/relay$"),
+            ("GET", r"^/api/drive-wave/work-orders$"),
+            ("POST", r"^/api/drive-wave/documents/[1-9][0-9]*/attachment-readback$"),
+            ("GET", r"^/api/wave/receipt-executor/status$"),
+            ("POST", r"^/api/wave/receipt-executor/(?:session|claim|release)$"),
+        )
+        self.assertEqual(
+            tuple((method, pattern.pattern) for method, pattern in HAI_ROUTE_RULES),
+            expected_rules,
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = create_app({
+                "fab_local_ledger_path": os.path.join(temp_dir, "fab.sqlite3"),
+                "fab_local_api_token": "operator-token-for-tests",
+                "fab_hai_api_token": "hai-token-for-tests",
+                "fab_hai_connector_enabled": True,
+                "fab_hai_allowed_commands": "refresh_notifications",
+            })
+            client = app.test_client()
+            hai_headers = {"Authorization": "Bearer hai-token-for-tests"}
+            checked = 0
+            skipped_mutations = 0
+            methods_to_check = ("POST", "PUT", "PATCH", "DELETE", "GET", "HEAD")
+
+            for rule in app.url_map.iter_rules():
+                if not rule.rule.startswith("/api/"):
+                    continue
+                values = {}
+                for name, converter in rule._converters.items():
+                    converter_name = type(converter).__name__.lower()
+                    values[name] = (
+                        1 if "integer" in converter_name or "float" in converter_name
+                        else "00000000-0000-0000-0000-000000000001" if "uuid" in converter_name
+                        else "audit-probe"
+                    )
+                _, path = rule.build(values)
+                allowed_methods = set(rule.methods or ()) - {"OPTIONS"}
+                for method in methods_to_check:
+                    if method not in allowed_methods:
+                        continue
+                    allowed = any(
+                        method == allowed_method and pattern.fullmatch(path)
+                        for allowed_method, pattern in HAI_ROUTE_RULES
+                    )
+                    if allowed and method != "GET":
+                        skipped_mutations += 1
+                        continue
+                    response = client.open(path, method=method, headers=hai_headers)
+                    checked += 1
+                    if allowed:
+                        self.assertNotEqual(response.status_code, 403, f"{method} {path}")
+                    else:
+                        self.assertEqual(response.status_code, 403, f"{method} {path}")
+
+            self.assertGreater(checked, 100)
+            self.assertGreater(skipped_mutations, 0)
+
     def test_hai_safe_cycle_preserves_its_trigger_source(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             app = create_app({
@@ -98,6 +162,11 @@ class TestLocalHaiConnector(unittest.TestCase):
             operator_read = client.get("/api/health", headers=operator_headers)
 
             self.assertEqual(manifest.status_code, 200)
+            manifest_body = manifest.get_json()
+            self.assertEqual(manifest_body["haiAuthentication"], "dedicated_bearer_token")
+            self.assertTrue(manifest_body["dedicatedHaiTokenConfigured"])
+            self.assertTrue(manifest_body["remoteAuthenticationConfigured"])
+            self.assertNotIn("hai-token-for-tests", str(manifest_body))
             self.assertEqual(plan.status_code, 200)
             self.assertEqual(forbidden_read.status_code, 403)
             self.assertEqual(forbidden_mutation.status_code, 403)
@@ -119,6 +188,9 @@ class TestLocalHaiConnector(unittest.TestCase):
             self.assertEqual(manifest["sourceOfTruth"], "fab_local_ledger")
             self.assertEqual(manifest["transport"], "loopback_local_http")
             self.assertEqual(manifest["authentication"], "loopback_origin_controls")
+            self.assertEqual(manifest["haiAuthentication"], "loopback_origin_controls")
+            self.assertFalse(manifest["dedicatedHaiTokenConfigured"])
+            self.assertFalse(manifest["remoteAuthenticationConfigured"])
             self.assertIn("submit_to_wave", manifest["excludedCapabilities"])
             self.assertFalse(result["success"])
             self.assertEqual(result["status"], "connector_disabled")
@@ -337,6 +409,9 @@ class TestLocalHaiConnector(unittest.TestCase):
 
             self.assertEqual(manifest["transport"], "authenticated_local_http")
             self.assertEqual(manifest["authentication"], "bearer_token")
+            self.assertEqual(manifest["haiAuthentication"], "operator_bearer_token")
+            self.assertFalse(manifest["dedicatedHaiTokenConfigured"])
+            self.assertFalse(manifest["remoteAuthenticationConfigured"])
             self.assertNotIn("configured-secret", str(manifest))
 
     def test_maintenance_mode_disables_all_hai_execution_but_keeps_recovery_status_readable(self):
@@ -412,6 +487,28 @@ class TestLocalHaiConnector(unittest.TestCase):
             self.assertIn("YYYY-MM-DD", malformed["error"])
             self.assertEqual(reversed_period["status"], "invalid")
             self.assertIn("on or before", reversed_period["error"])
+
+    def test_compliance_dates_and_target_system_enforce_manifest_types(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            connector = LocalHaiConnector(
+                ledger,
+                {
+                    "fab_hai_connector_enabled": True,
+                    "fab_hai_allowed_commands": "assess_compliance",
+                },
+                executors={"assess_compliance": lambda payload, actor: payload},
+            )
+
+            for value in ("20260615", "2026-W25-1", 20260615):
+                with self.subTest(fromDate=value):
+                    result = connector.plan("assess_compliance", {"fromDate": value})
+                    self.assertEqual(result["status"], "invalid")
+
+            for value in (123, ["wave"], {"name": "wave"}):
+                with self.subTest(targetSystem=value):
+                    result = connector.plan("assess_compliance", {"targetSystem": value})
+                    self.assertEqual(result["status"], "invalid")
 
     def test_request_ids_and_executor_failures_do_not_leak_exception_details(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -512,6 +609,68 @@ class TestLocalHaiConnector(unittest.TestCase):
             self.assertEqual(invalid_nested_payload.status_code, 400)
             self.assertEqual(invalid_nested_payload.get_json()["status"], "invalid")
 
+    def test_hai_safe_cycle_never_executes_approved_wave_exports(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger_path = os.path.join(temp_dir, "fab.sqlite3")
+            ledger = LocalOperationsLedger(ledger_path)
+            document_id = ledger.register_document({
+                "source": "scanner",
+                "sourceDocumentId": "hai-approved-export",
+                "originalFilename": "approved-receipt.pdf",
+                "documentType": "receipt",
+                "processingStatus": "reviewed",
+                "vendorName": "Office Shop",
+                "category": "Office Supplies",
+                "transactionDate": "2026-06-28",
+                "totalAmount": 42.5,
+            })
+            route = LocalRoutingService(ledger).prepare_document_route(document_id)
+            export_service = LocalExportAttemptService(ledger)
+            prepared = export_service.prepare_from_routing_attempt(route["routingAttemptId"])
+            export_service.approve_attempt(
+                prepared["exportAttemptId"],
+                actor="operator-test",
+                confirmation=EXPORT_APPROVAL_PHRASE,
+            )
+            app = create_app({
+                "fab_local_ledger_path": ledger_path,
+                "fab_hai_connector_enabled": True,
+                "fab_hai_allowed_commands": "run_safe_cycle",
+                "fab_autonomy_execute_approved_exports": True,
+            })
+            client = app.test_client()
+
+            with patch.object(LocalExportAttemptService, "process_approved_attempts") as execute_exports:
+                execute_exports.return_value = {
+                    "success": True,
+                    "status": "completed",
+                    "eligibleCount": 0,
+                    "processed": [],
+                    "deferredNotDue": 0,
+                    "preExecutionBackup": None,
+                }
+                response = client.post("/api/hai/commands/execute", json={
+                    "requestId": "hai-safe-cycle-approved-export",
+                    "commandId": "run_safe_cycle",
+                    "payload": {"limit": 10},
+                })
+
+            self.assertEqual(response.status_code, 200, response.get_json())
+            result = response.get_json()
+            self.assertEqual(result["status"], "completed")
+            self.assertEqual(result["externalSubmission"], "not_executed")
+            self.assertNotIn(
+                "execute_approved_exports",
+                result["result"]["plan"]["runnableActionIds"],
+            )
+            execute_exports.assert_not_called()
+            self.assertEqual(
+                LocalOperationsLedger(ledger_path).get_export_attempt(
+                    prepared["exportAttemptId"]
+                )["status"],
+                "approved",
+            )
+
     def test_hai_token_cannot_spoof_audit_actor_on_allowed_routes(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             app = create_app({
@@ -526,6 +685,7 @@ class TestLocalHaiConnector(unittest.TestCase):
                 patch("src.operations.local_api.LocalWaveReceiptExecutorService") as executor,
                 patch("src.operations.local_api.DriveWaveDeliveryService") as delivery,
                 patch("src.operations.local_api.DriveRelayIntakeService") as drive_relay,
+                patch("src.operations.local_api.LocalHaiConnector") as hai_connector,
             ):
                 executor.return_value.register.return_value = {"success": True}
                 executor.return_value.claim_next.return_value = {"success": True}
@@ -533,6 +693,7 @@ class TestLocalHaiConnector(unittest.TestCase):
                 delivery.return_value.record_attachment_readback.return_value = {"success": True}
                 drive_relay.return_value.status.return_value = {"maxBytes": 2048}
                 drive_relay.return_value.ingest.return_value = {"success": True}
+                hai_connector.return_value.execute.return_value = {"success": True}
 
                 responses = [
                     client.post(
@@ -575,7 +736,25 @@ class TestLocalHaiConnector(unittest.TestCase):
                 operator_response = client.post(
                     "/api/wave/receipt-executor/session",
                     headers=operator_headers,
-                    json={"actor": "wave_browser_executor"},
+                    json={"actor": "fab_hai_api:hai\r\nforged"},
+                )
+                hai_execute_response = client.post(
+                    "/api/hai/commands/execute",
+                    headers=headers,
+                    json={
+                        "requestId": "hai-request-actor-test",
+                        "commandId": "refresh_notifications",
+                        "actor": "operator_admin",
+                    },
+                )
+                operator_execute_response = client.post(
+                    "/api/hai/commands/execute",
+                    headers=operator_headers,
+                    json={
+                        "requestId": "operator-request-actor-test",
+                        "commandId": "refresh_notifications",
+                        "actor": "hai-controller",
+                    },
                 )
 
             self.assertEqual(
@@ -583,13 +762,19 @@ class TestLocalHaiConnector(unittest.TestCase):
                 [200, 200, 200, 200, 201],
             )
             self.assertEqual(operator_response.status_code, 200)
+            self.assertEqual(hai_execute_response.status_code, 200)
+            self.assertEqual(operator_execute_response.status_code, 200)
+            self.assertEqual(
+                [call.kwargs["actor"] for call in hai_connector.return_value.execute.call_args_list],
+                ["fab_hai_api:hai", "fab_hai_api:operator"],
+            )
             self.assertEqual(
                 executor.return_value.register.call_args_list[0].kwargs["actor"],
                 "fab_hai_api:hai",
             )
             self.assertEqual(
                 executor.return_value.register.call_args_list[1].kwargs["actor"],
-                "wave_browser_executor",
+                "fab_local_api:operator_claim:fab_hai_api:hai forged",
             )
             self.assertEqual(
                 executor.return_value.claim_next.call_args.kwargs["actor"],
@@ -612,6 +797,25 @@ class TestLocalHaiConnector(unittest.TestCase):
                 "fab_hai_api:hai",
             )
 
+    def test_operator_actor_claim_is_bound_for_direct_json_audit_routes(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = create_app({
+                "fab_local_ledger_path": os.path.join(temp_dir, "fab.sqlite3"),
+                "fab_local_api_token": "operator-token-for-tests",
+            })
+            client = app.test_client()
+            with patch("src.operations.local_api.LocalNotificationService") as notifications:
+                notifications.return_value.refresh.return_value = {"success": True}
+                response = client.post(
+                    "/api/notifications/refresh",
+                    headers={"Authorization": "Bearer operator-token-for-tests"},
+                    json={"actor": "fab_hai_api:hai\r\nforged"},
+                )
+
+            self.assertEqual(response.status_code, 200)
+            notifications.return_value.refresh.assert_called_once_with(
+                actor="fab_local_api:operator_claim:fab_hai_api:hai forged",
+            )
 
 if __name__ == "__main__":
     unittest.main()

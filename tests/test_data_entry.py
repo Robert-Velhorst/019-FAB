@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import tempfile
+from requests.exceptions import Timeout
 
 from src.data_entry.mijngeldzaken_handler import MijngeldzakenHandler
 from src.data_entry.mijngeldzaken_autonomous_operator import MijngeldzakenAutonomousOperator
@@ -155,7 +156,7 @@ class TestDataEntry(unittest.TestCase):
         }
         result = handler.enter_data(business_data)
         self.assertEqual(result["status"], "failure")
-        self.assertIn("API Error", result["message"])
+        self.assertNotIn("API Error", result["message"])
         self.assertTrue(result["requires_manual_review"])
 
         self.config["waveapps_business_category_account_ids"] = {}
@@ -179,6 +180,20 @@ class TestDataEntry(unittest.TestCase):
         self.assertEqual(row["Vendor"], "Local Supermarket")
         # Clean up generated CSV
         os.remove(csv_path)
+
+    @patch("src.data_entry.waveapps_business_handler.requests.post")
+    def test_waveapps_business_timeout_is_unknown_and_does_not_leak_exception(self, mock_post):
+        mock_post.side_effect = Timeout("Bearer secret-token receipt=private-receipt")
+        handler = WaveappsBusinessHandler(self.config)
+        data = {**self.dummy_processed_data, "category": "Business"}
+
+        result = handler.enter_data(data)
+
+        self.assertEqual(result["status"], "outcome_unknown")
+        self.assertEqual(result["review_reason"], "wave_api_outcome_unknown")
+        self.assertTrue(result["requires_manual_review"])
+        self.assertNotIn("secret-token", result["message"])
+        self.assertNotIn("private-receipt", result["message"])
 
     @patch("src.data_entry.waveapps_business_handler.requests.post")
     def test_waveapps_business_credit_note_posts_a_deposit(self, mock_post):
@@ -348,6 +363,20 @@ class TestDataEntry(unittest.TestCase):
         self.assertIn("#handicap", row["Description"])
         # Clean up generated CSV
         os.remove(csv_path)
+
+    @patch("src.data_entry.waveapps_personal_handler.requests.post")
+    def test_waveapps_personal_timeout_is_unknown_and_does_not_leak_exception(self, mock_post):
+        mock_post.side_effect = Timeout("Bearer secret-token receipt=private-receipt")
+        handler = WaveappsPersonalHandler(self.config)
+        data = {**self.dummy_processed_data, "category": "Handicaps"}
+
+        result = handler.enter_data(data)
+
+        self.assertEqual(result["status"], "outcome_unknown")
+        self.assertEqual(result["review_reason"], "wave_api_outcome_unknown")
+        self.assertTrue(result["requires_manual_review"])
+        self.assertNotIn("secret-token", result["message"])
+        self.assertNotIn("private-receipt", result["message"])
 
     def test_waveapps_surface_catalog(self):
         receipt_destination = classify_wave_destination({"document_type": "receipt"})

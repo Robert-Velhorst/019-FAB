@@ -114,13 +114,21 @@ export function createFabServerLifecycle(server: Server, options: { timeoutMs?: 
   function installSignalHandlers(
     signals: Pick<EventEmitter, "on" | "off"> = process,
     exit: (code: number) => void = code => process.exit(code),
+    afterShutdown?: () => Promise<void>,
   ): () => void {
     disposeSignals();
     let requested = false;
     const onSignal = () => {
       if (requested) return;
       requested = true;
-      void shutdown().then(exit);
+      void shutdown().then(async code => {
+        try {
+          await afterShutdown?.();
+          exit(code);
+        } catch {
+          exit(1);
+        }
+      });
     };
     signals.on("SIGTERM", onSignal);
     signals.on("SIGINT", onSignal);

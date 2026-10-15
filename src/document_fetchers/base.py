@@ -43,7 +43,20 @@ class BaseFetcher(ABC):
         Returns:
             The local path where the document was saved.
         """
-        return self._store_content("/tmp", filename, filename, content)
+        directory = self._download_directory("source")
+        return self._store_content(directory, filename, filename, content)
+
+    def _download_directory(self, section: str, *config_keys: str) -> str:
+        section_config = self.config.get(section)
+        section_config = section_config if isinstance(section_config, dict) else {}
+        candidates = [self.config.get(key) for key in config_keys]
+        candidates.extend((section_config.get("download_dir"), self.config.get("attachments_save_dir")))
+        for candidate in candidates:
+            value = os.path.expandvars(os.path.expanduser(str(candidate or "").strip()))
+            if value:
+                return os.path.normpath(value)
+        root = os.path.join("data", "source_downloads")
+        return os.path.join(root, section) if section != "source" else root
 
     def _start_run(self) -> None:
         self.last_error = None

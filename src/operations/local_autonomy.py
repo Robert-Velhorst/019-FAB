@@ -56,7 +56,6 @@ AUTONOMY_EXECUTION_ORDER = (
     "prepare_wave_drafts",
     "prepare_export_attempts",
     "regenerate_stale_export_attempts",
-    "execute_approved_exports",
     "prepare_master_ledger_projection",
     "plan_wave_daily_reconciliation",
     "prepare_period_close_pack",
@@ -460,32 +459,6 @@ class LocalAutonomousService:
                 },
             ),
             _action(
-                "execute_approved_exports",
-                "Execute approved Wave and MijnGeldzaken export attempts when handlers and credentials are enabled.",
-                "system_execute",
-                "high",
-                "safe_auto",
-                bool(self.config.get("fab_autonomy_execute_approved_exports"))
-                and counts["approvedExportAttempts"] > 0
-                and not health_execution_blocked
-                and not blocked,
-                "Enable `fab_autonomy_execute_approved_exports` and configure safe handlers/credentials."
-                if not self.config.get("fab_autonomy_execute_approved_exports")
-                else (
-                    "No approved export attempts are waiting."
-                    if counts["approvedExportAttempts"] == 0
-                    else (
-                        "Resolve blocked operations health before executing approved external exports."
-                        if health_execution_blocked
-                        else None
-                    )
-                ),
-                {
-                    "approvedExportAttempts": counts["approvedExportAttempts"],
-                    "targetBreakdown": counts["approvedExportTargets"],
-                },
-            ),
-            _action(
                 "approve_reconciliation",
                 "Reconciliation candidates need audited approval before close",
                 "match_reconcile",
@@ -728,7 +701,6 @@ class LocalAutonomousService:
                     str((plan_actions.get(action_id) or {}).get("risk") or "unknown") != "low"
                     or str((plan_actions.get(action_id) or {}).get("mode") or "unknown")
                     not in {"safe_auto", "safe_draft", "read_only"}
-                    or action_id == "execute_approved_exports"
                 )
             ]
             if unsafe_recovery_actions:
@@ -1022,12 +994,6 @@ class LocalAutonomousService:
                 "regenerate_stale_export_attempts",
                 self._can_run(plan, "regenerate_stale_export_attempts"),
                 lambda: self._run_stale_export_regeneration(limit),
-            )
-
-            execute_step(
-                "execute_approved_exports",
-                self._can_run(plan, "execute_approved_exports"),
-                lambda: self._run_export_execution(limit),
             )
 
             master_ledger_should_run = (
@@ -1495,54 +1461,6 @@ class LocalAutonomousService:
                 "targetBreakdown": _target_breakdown(rows, _master_row_target_system),
                 "attemptSummaries": results,
                 "externalSubmission": "not_executed",
-            },
-        }
-
-    def _run_export_execution(self, limit: int) -> Dict[str, Any]:
-        service = LocalExportAttemptService(self.ledger, self.config)
-        batch = service.process_approved_attempts(
-            limit=limit,
-            actor="local_autonomy",
-            force=True,
-            create_backup=True,
-        )
-        pre_execution_backup = batch.get("preExecutionBackup")
-        if batch.get("eligibleCount"):
-            self.ledger.record_audit_event({
-                "action": "local_autonomy.export_execution_preflight_backup",
-                "entityType": "autonomous_cycle",
-                "details": {
-                    "attemptCount": batch.get("eligibleCount"),
-                    "backupPath": (pre_execution_backup or {}).get("backupPath"),
-                    "backupFilename": (pre_execution_backup or {}).get("backupFilename"),
-                    "ledgerSha256": (pre_execution_backup or {}).get("ledgerSha256"),
-                    "backupStatus": (pre_execution_backup or {}).get("status"),
-                    "batchStatus": batch.get("status"),
-                    "externalSubmission": "not_executed",
-                },
-            })
-        export_summaries = []
-        processed_attempts = []
-        for execution in batch.get("processed") or []:
-            attempt = execution.get("exportAttempt") if isinstance(execution.get("exportAttempt"), dict) else {}
-            processed_attempts.append(attempt)
-            export_summaries.append({
-                "exportAttemptId": attempt.get("id"),
-                "targetSystem": _export_target_system(attempt),
-                "success": execution.get("success"),
-                "status": execution.get("status"),
-                "executionStatus": execution.get("executionStatus"),
-            })
-        return {
-            "id": "execute_approved_exports",
-            "status": "completed" if batch.get("success") else "blocked",
-            "summary": {
-                "attempted": len(export_summaries),
-                "targetBreakdown": _target_breakdown(processed_attempts, _export_target_system),
-                "attemptSummaries": export_summaries,
-                "deferredNotDue": batch.get("deferredNotDue", 0),
-                "preExecutionBackup": pre_execution_backup,
-                "batchStatus": batch.get("status"),
             },
         }
 
@@ -2088,8 +2006,6 @@ def _records_or_exports_changed(executed: List[Dict[str, Any]]) -> bool:
         if action_id == "prepare_export_attempts" and summary.get("prepared", 0) > 0:
             return True
         if action_id == "regenerate_stale_export_attempts" and summary.get("regenerated", 0) > 0:
-            return True
-        if action_id == "execute_approved_exports" and summary.get("attempted", 0) > 0:
             return True
     return False
 

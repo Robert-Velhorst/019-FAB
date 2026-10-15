@@ -32,7 +32,7 @@ API clients use `Authorization: Bearer <token>`. The API runs under Waitress wit
 
 ## Managed ngrok access
 
-The managed launcher exposes only the authenticated FAB API. The operator dashboard remains on loopback. Start FAB first, configure ngrok for the Windows user, and then run:
+By default, managed ngrok exposes only the authenticated FAB API; the operator dashboard remains on loopback. Start FAB first, configure ngrok for the Windows user, and then run:
 
 ```powershell
 .\Start-FAB-Ngrok.cmd
@@ -44,9 +44,10 @@ including `FAB_LOCAL_API_TOKEN_FILE` and `FAB_HAI_API_TOKEN_FILE`. Configured va
 take precedence over encrypted stored credentials. When configuration omits a
 credential, they can read the existing encrypted local store, but never create or
 rotate a credential. Missing, invalid or identical operator/HAI credentials block
-the tunnel before any public endpoint is started. The `local` profile retains the
-main launcher's stored-credential fallback for short legacy configured values;
-an explicit weak `windows` credential is rejected instead.
+the tunnel before any public endpoint is started. Remote exposure also requires
+both credentials to pass FAB's strong-secret checks, even when the local profile
+allows a legacy value for loopback-only operation. The launcher fails closed; it
+does not rotate or repair credentials automatically.
 
 If configuration changed since FAB started, these scripts cannot recover the
 running process's former credentials. Restore its startup configuration or perform
@@ -59,6 +60,14 @@ When another ngrok endpoint is already online, FAB refuses to stop or pool it. R
 .\Start-FAB-Ngrok.cmd -Url https://your-reserved-endpoint.example
 ```
 
+To operate the dashboard remotely, reserve a second HTTPS origin for the dashboard and opt in explicitly:
+
+```powershell
+.\Start-FAB-Ngrok.cmd -Url https://fab-api.example.ngrok.app -DashboardUrl https://fab-dashboard.example.ngrok.app
+```
+
+The launcher prompts for a dashboard username and password without echoing the password. It creates one ngrok agent with separate API and dashboard endpoints. The dashboard endpoint enforces ngrok Basic Auth before forwarding and removes the `Authorization` header before the request reaches the local web server. Startup is refused unless an unauthenticated remote dashboard request receives `401` and an authenticated request reaches the dashboard. The password is present in the per-user temporary ngrok overlay only while the managed tunnel is active; `Stop-FAB-Ngrok.cmd` removes that overlay. FAB applies a restrictive ACL to its managed ngrok directory and artifacts, granting access only to the current Windows user, SYSTEM, and local Administrators. Keep the endpoint URL and Basic Auth password private. If the dashboard's own managed operator login is enabled, configure its public origin and trusted loopback proxy settings to match the reserved dashboard origin before starting FAB.
+
 Startup succeeds only after all of these checks pass:
 
 - the local API belongs to this checkout and requires a strong bearer token;
@@ -66,8 +75,9 @@ Startup succeeds only after all of these checks pass:
 - authenticated liveness returns this checkout's FAB instance identity;
 - the authenticated HAI manifest is available remotely;
 - the private ngrok inspector shows the exact endpoint forwarding to FAB's loopback API.
+- when `-DashboardUrl` is supplied, the private inspector also verifies the dashboard endpoint's exact loopback target and public origin, and the dashboard's Basic Auth gate is tested both without and with credentials.
 
-The dashboard connection panel and authenticated `GET /api/cloud/status` report `active` only while that owned runtime remains verifiable. Stop the endpoint with:
+The dashboard connection panel and authenticated `GET /api/cloud/status` report `active` only while every configured endpoint remains verifiable. When remote dashboard access is active, the connection panel provides its verified HTTPS link. Stop the endpoints with:
 
 ```powershell
 .\Stop-FAB-Ngrok.cmd

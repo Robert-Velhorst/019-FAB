@@ -3,7 +3,10 @@ from unittest.mock import MagicMock, patch
 import logging
 import os
 import shutil
+import sqlite3
 import tempfile
+import zipfile
+from contextlib import closing
 
 from src.config_loader import ConfigLoader
 from src.workflow.logger import AppLogger
@@ -131,20 +134,213 @@ class TestComponents(unittest.TestCase):
         test_file = os.path.join(self.temp_dir.name, "test_file.txt")
         with open(test_file, "w") as f:
             f.write("This is a test file.")
+        self.config["backup_paths"] = [test_file]
         
         backup_result = manager.perform_backup([test_file], {"type": "zip"})
         self.assertEqual(backup_result["status"], "success")
         self.assertTrue(os.path.exists(backup_result["path"]))
 
-        restore_dir = os.path.join(self.temp_dir.name, "restore_test")
+        restore_dir = os.path.join(self.temp_dir.name, "restore-root", "restore_test")
+        self.config["backup_restore_dir"] = os.path.dirname(restore_dir)
+        manager = BackupManager(self.config)
         restore_result = manager.restore_backup(backup_result["path"], restore_dir)
         self.assertEqual(restore_result["status"], "success")
         self.assertTrue(os.path.exists(os.path.join(restore_dir, "test_file.txt")))
 
         os.remove(test_file)
         os.remove(backup_result["path"])
-        shutil.rmtree(restore_dir)
+        shutil.rmtree(os.path.dirname(restore_dir))
         shutil.rmtree(self.config["backup_base_dir"])
+
+    def test_backup_manager_fails_closed_on_unreadable_source_tree(self):
+        source_dir = os.path.join(self.temp_dir.name, "unreadable-data")
+        os.makedirs(source_dir)
+        self.config["backup_paths"] = [source_dir]
+        manager = BackupManager(self.config)
+
+        def unreadable_walk(_path, *, followlinks, onerror):
+            self.assertFalse(followlinks)
+            onerror(PermissionError("synthetic read denied"))
+            return iter(())
+
+        with patch("src.backup.backup_manager.os.walk", side_effect=unreadable_walk):
+            result = manager.perform_backup([source_dir])
+
+        self.assertEqual(result["status"], "failure")
+        self.assertEqual(manager.list_backups(), [])
+        self.assertFalse(any(name.endswith(".partial") for name in os.listdir(manager.backup_base_dir)))
+
+    def test_backup_manager_fails_closed_on_nested_symbolic_link(self):
+        source_dir = os.path.join(self.temp_dir.name, "linked-data")
+        outside_dir = os.path.join(self.temp_dir.name, "outside-data")
+        os.makedirs(source_dir)
+        os.makedirs(outside_dir)
+        try:
+            os.symlink(outside_dir, os.path.join(source_dir, "linked"), target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("Directory symlinks are unavailable in this Windows environment")
+        self.config["backup_paths"] = [source_dir]
+        manager = BackupManager(self.config)
+
+        result = manager.perform_backup([source_dir])
+
+        self.assertEqual(result["status"], "failure")
+        self.assertEqual(manager.list_backups(), [])
+
+    def test_backup_manager_rejects_sources_larger_than_restore_limit(self):
+        source_file = os.path.join(self.temp_dir.name, "oversized.txt")
+        with open(source_file, "wb") as handle:
+            handle.write(b"too large")
+        self.config["backup_paths"] = [source_file]
+        manager = BackupManager(self.config)
+
+        with patch("src.backup.backup_manager.MAX_RESTORE_BYTES", 4):
+            result = manager.perform_backup([source_file])
+
+        self.assertEqual(result["status"], "failure")
+        self.assertEqual(manager.list_backups(), [])
+
+    def test_backup_manager_snapshots_live_sqlite_wal_database(self):
+        database_path = os.path.join(self.temp_dir.name, "live.sqlite3")
+        writer = sqlite3.connect(database_path)
+        self.addCleanup(writer.close)
+        writer.execute("PRAGMA journal_mode=WAL")
+        writer.execute("CREATE TABLE ledger_entries (id INTEGER PRIMARY KEY, amount TEXT NOT NULL)")
+        writer.execute("INSERT INTO ledger_entries (amount) VALUES ('42.50')")
+        writer.commit()
+
+        manager = BackupManager({
+            "backup_base_dir": os.path.join(self.temp_dir.name, "database-backups"),
+            "backup_paths": [database_path],
+            "database_path": database_path,
+        })
+        result = manager.perform_backup([database_path])
+
+        self.assertEqual(result["status"], "success", result)
+        with zipfile.ZipFile(result["path"]) as archive:
+            snapshot_path = os.path.join(self.temp_dir.name, "restored.sqlite3")
+            with archive.open("live.sqlite3") as source, open(snapshot_path, "wb") as target:
+                shutil.copyfileobj(source, target)
+        with closing(sqlite3.connect(snapshot_path)) as snapshot:
+            rows = snapshot.execute("SELECT amount FROM ledger_entries").fetchall()
+            integrity = snapshot.execute("PRAGMA integrity_check").fetchone()
+
+        self.assertEqual(rows, [("42.50",)])
+        self.assertEqual(integrity, ("ok",))
+        leftovers = [name for name in os.listdir(manager.backup_base_dir) if name.startswith(".fab-sqlite-")]
+        self.assertEqual(leftovers, [])
+
+    def test_backup_manager_rejects_sibling_prefix_zip_traversal(self):
+        manager = BackupManager(self.config)
+        archive_path = os.path.join(manager.backup_base_dir, "malicious.zip")
+        restore_dir = "traversal"
+        escaped_sibling = os.path.join(restore_dir + "-escape", "payload.txt")
+        escaped_sibling = os.path.join(manager.restore_base_dir, escaped_sibling)
+        with zipfile.ZipFile(archive_path, "w") as archive:
+            archive.writestr("../restore-escape/payload.txt", "must not be extracted")
+
+        result = manager.restore_backup(archive_path, restore_dir)
+
+        self.assertEqual(result["status"], "failure")
+        self.assertIn("Unsafe path", result["message"])
+        self.assertFalse(os.path.exists(escaped_sibling))
+
+    def test_backup_manager_rejects_backslash_zip_traversal(self):
+        manager = BackupManager(self.config)
+        archive_path = os.path.join(manager.backup_base_dir, "backslash-traversal.zip")
+        with zipfile.ZipFile(archive_path, "w") as archive:
+            archive.writestr("..\\escape\\payload.txt", "must not be extracted")
+
+        result = manager.restore_backup(archive_path, "backslash-target")
+
+        self.assertEqual(result["status"], "failure")
+        self.assertIn("Unsafe path", result["message"])
+
+    def test_backup_manager_rejects_nonportable_archive_paths(self):
+        manager = BackupManager(self.config)
+        unsafe_members = ("C:/escape.txt", "folder/CON.txt", "trailing./file.txt")
+
+        for index, member in enumerate(unsafe_members):
+            with self.subTest(member=member):
+                archive_path = os.path.join(manager.backup_base_dir, f"unsafe-{index}.zip")
+                with zipfile.ZipFile(archive_path, "w") as archive:
+                    archive.writestr(member, "must not be extracted")
+
+                result = manager.restore_backup(archive_path, f"unsafe-target-{index}")
+
+                self.assertEqual(result["status"], "failure")
+                self.assertIn("Unsafe path", result["message"])
+
+    def test_backup_manager_rejects_case_colliding_archive_paths(self):
+        manager = BackupManager(self.config)
+        archive_path = os.path.join(manager.backup_base_dir, "case-collision.zip")
+        with zipfile.ZipFile(archive_path, "w") as archive:
+            archive.writestr("Receipt.txt", "first")
+            archive.writestr("receipt.txt", "second")
+
+        result = manager.restore_backup(archive_path, "case-collision")
+
+        self.assertEqual(result["status"], "failure")
+        self.assertIn("duplicate paths", result["message"])
+
+    def test_backup_manager_restores_from_configured_source_subdirectory(self):
+        source_dir = os.path.join(self.temp_dir.name, "configured-data")
+        os.makedirs(source_dir)
+        source_file = os.path.join(source_dir, "nested.txt")
+        with open(source_file, "w", encoding="utf-8") as handle:
+            handle.write("configured content")
+        manager = BackupManager({
+            "backup_base_dir": os.path.join(self.temp_dir.name, "backup-output"),
+            "backup_restore_dir": os.path.join(self.temp_dir.name, "restore-output"),
+            "backup_paths": [source_dir],
+        })
+
+        result = manager.perform_backup([source_file])
+
+        self.assertEqual(result["status"], "success")
+        self.assertTrue(os.path.isfile(result["path"]))
+
+    def test_failed_restore_preserves_existing_destination(self):
+        manager = BackupManager({
+            "backup_base_dir": os.path.join(self.temp_dir.name, "backup-output"),
+            "backup_restore_dir": os.path.join(self.temp_dir.name, "restore-output"),
+        })
+        archive_path = os.path.join(manager.backup_base_dir, "corrupt.zip")
+        with open(archive_path, "wb") as handle:
+            handle.write(b"not a zip archive")
+        restore_root = os.path.join(manager.restore_base_dir, "existing")
+        os.makedirs(restore_root)
+        sentinel = os.path.join(restore_root, "keep.txt")
+        with open(sentinel, "w", encoding="utf-8") as handle:
+            handle.write("preserve")
+
+        result = manager.restore_backup(archive_path, restore_root, allow_overwrite=True)
+
+        self.assertEqual(result["status"], "failure")
+        with open(sentinel, encoding="utf-8") as handle:
+            self.assertEqual(handle.read(), "preserve")
+
+    def test_backup_manager_rejects_restore_through_existing_symlink(self):
+        manager = BackupManager(self.config)
+        archive_path = os.path.join(manager.backup_base_dir, "symlink.zip")
+        restore_dir = "restore-symlink"
+        restore_root = os.path.join(manager.restore_base_dir, restore_dir)
+        outside_dir = os.path.join(self.temp_dir.name, "outside")
+        outside_file = os.path.join(outside_dir, "payload.txt")
+        os.makedirs(restore_root)
+        os.makedirs(outside_dir)
+        try:
+            os.symlink(outside_dir, os.path.join(restore_root, "linked"), target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("Directory symlinks are unavailable in this Windows environment")
+        with zipfile.ZipFile(archive_path, "w") as archive:
+            archive.writestr("linked/payload.txt", "must not be extracted")
+
+        result = manager.restore_backup(archive_path, restore_dir)
+
+        self.assertEqual(result["status"], "failure")
+        self.assertIn("Unsafe path", result["message"])
+        self.assertFalse(os.path.exists(outside_file))
 
 if __name__ == "__main__":
     unittest.main()

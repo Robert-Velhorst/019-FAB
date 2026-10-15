@@ -55,7 +55,7 @@ class HandwrittenRecognitionProcessor(BaseProcessor):
             validate_raster_path(document_path)
             image = cv2.imread(document_path)
             if image is None:
-                raise ValueError(f"Could not load image from {document_path}")
+                raise ValueError("Image could not be loaded for handwriting OCR.")
             gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
             threshold = cv2.adaptiveThreshold(
                 gray,

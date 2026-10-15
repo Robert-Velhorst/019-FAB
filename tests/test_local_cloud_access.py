@@ -2,10 +2,16 @@ import json
 import os
 import tempfile
 import unittest
+from io import BytesIO
 from pathlib import Path
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request
+from unittest.mock import MagicMock, patch
 
 from src.operations.local_api import create_app
-from src.operations.local_cloud_access import LocalCloudAccessService
+from src.operations.local_cloud_access import (
+    LocalCloudAccessService,
+    _fetch_inspector_json,
+)
 from src.utils.runtime_identity import local_instance_id
 
 
@@ -63,6 +69,28 @@ class TestLocalCloudAccessService(unittest.TestCase):
         self.assertFalse(result["active"])
         self.assertIsNone(result["publicUrl"])
 
+    def test_inspector_fetch_disables_environment_proxies_and_redirects(self):
+        opener = MagicMock()
+        opener.open.return_value.__enter__.return_value.read.return_value = b'{"tunnels": []}'
+
+        with patch("src.operations.local_cloud_access.build_opener", return_value=opener) as build_opener:
+            result = _fetch_inspector_json("http://127.0.0.1:4040/api/tunnels", 0.75)
+
+        handlers = build_opener.call_args.args
+        self.assertIsInstance(handlers[0], ProxyHandler)
+        self.assertEqual(handlers[0].proxies, {})
+        self.assertIsInstance(handlers[1], HTTPRedirectHandler)
+        self.assertIsNone(handlers[1].redirect_request(
+            Request("http://127.0.0.1:4040/api/tunnels"),
+            BytesIO(),
+            302,
+            "Found",
+            {},
+            "https://external.example.test/collect",
+        ))
+        opener.open.assert_called_once()
+        self.assertEqual(result, {"tunnels": []})
+
     def test_valid_owned_tunnel_is_active_and_sanitized(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -90,6 +118,86 @@ class TestLocalCloudAccessService(unittest.TestCase):
         self.assertNotIn("inspectorPort", rendered)
         self.assertNotIn("overlay", rendered)
         self.assertNotIn("private-token-value", rendered)
+
+    def test_remote_dashboard_requires_verified_basic_auth_endpoint(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            runtime_path = self._write_runtime(root, dashboard_url="https://dashboard.example.test")
+            result = LocalCloudAccessService(
+                project_root=root,
+                runtime_path=runtime_path,
+                api_token_configured=True,
+                inspector_fetch=lambda _url, _timeout: {
+                    "tunnels": [
+                        {
+                            "name": "fab-managed",
+                            "public_url": "https://fab.example.test",
+                            "config": {"addr": "http://127.0.0.1:5001"},
+                        },
+                        {
+                            "name": "fab-managed-dashboard",
+                            "public_url": "https://dashboard.example.test",
+                            "config": {"addr": "http://127.0.0.1:3000"},
+                        },
+                    ],
+                },
+            ).summarize()
+
+        self.assertEqual(result["status"], "active")
+        self.assertEqual(result["dashboardUrl"], "https://dashboard.example.test")
+        self.assertEqual(result["dashboardAuthMode"], "ngrok_basic_auth")
+
+    def test_remote_dashboard_missing_inspector_endpoint_is_stale(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            runtime_path = self._write_runtime(root, dashboard_url="https://dashboard.example.test")
+            result = LocalCloudAccessService(
+                project_root=root,
+                runtime_path=runtime_path,
+                api_token_configured=True,
+                inspector_fetch=lambda _url, _timeout: {
+                    "tunnels": [{
+                        "name": "fab-managed",
+                        "public_url": "https://fab.example.test",
+                        "config": {"addr": "http://127.0.0.1:5001"},
+                    }],
+                },
+            ).summarize()
+
+        self.assertEqual(result["status"], "stale")
+        self.assertFalse(result["active"])
+        self.assertIsNone(result["dashboardUrl"])
+
+    def test_remote_dashboard_runtime_requires_clean_separate_origin_and_auth_gate(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            runtime_path = self._write_runtime(root, dashboard_url="https://fab.example.test")
+            result = LocalCloudAccessService(
+                project_root=root,
+                runtime_path=runtime_path,
+                api_token_configured=True,
+                inspector_fetch=lambda _url, _timeout: self.fail("invalid runtime must not query inspector"),
+            ).summarize()
+
+        self.assertEqual(result["status"], "invalid_runtime")
+        self.assertIsNone(result["dashboardUrl"])
+
+    def test_remote_dashboard_runtime_without_upstream_port_is_invalid(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            runtime_path = self._write_runtime(root, dashboard_url="https://dashboard.example.test")
+            runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
+            runtime.pop("dashboardPort")
+            runtime_path.write_text(json.dumps(runtime), encoding="utf-8")
+            result = LocalCloudAccessService(
+                project_root=root,
+                runtime_path=runtime_path,
+                api_token_configured=True,
+                inspector_fetch=lambda _url, _timeout: self.fail("invalid runtime must not query inspector"),
+            ).summarize()
+
+        self.assertEqual(result["status"], "invalid_runtime")
+        self.assertIsNone(result["dashboardUrl"])
 
     def test_missing_or_mismatched_inspector_tunnel_is_stale(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -220,12 +328,12 @@ class TestLocalCloudAccessService(unittest.TestCase):
                 create_app({
                     "fab_local_ledger_path": os.path.join(temp_dir, "fab.sqlite3"),
                     "fab_local_api_host": "0.0.0.0",
-                    "fab_local_api_token": "configured-token",
+                    "fab_local_api_token": "Remote-Token-2026-ABcd-7890-Valid-XY",
                     "fab_maintenance_mode": True,
                 })
 
     @staticmethod
-    def _write_runtime(root: Path) -> Path:
+    def _write_runtime(root: Path, dashboard_url=None) -> Path:
         runtime_path = root / "data" / "fab-ngrok-runtime.json"
         runtime_path.parent.mkdir(parents=True, exist_ok=True)
         runtime_path.write_text(json.dumps({
@@ -236,6 +344,9 @@ class TestLocalCloudAccessService(unittest.TestCase):
             "processId": 1234,
             "inspectorPort": 4041,
             "publicUrl": "https://fab.example.test",
+            "dashboardUrl": dashboard_url,
+            "dashboardPort": 3000 if dashboard_url else None,
+            "dashboardAuthRequired": bool(dashboard_url),
             "localApiBaseUrl": "http://127.0.0.1:5001",
             "status": "active",
             "startedAt": "2026-08-09T10:00:00Z",

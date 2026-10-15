@@ -17,6 +17,8 @@ class TestConfigLoader(unittest.TestCase):
                 "FAB_WAVEAPPS_BUSINESS_ACCESS_TOKEN",
                 "FAB_WAVEAPPS_BUSINESS_ID",
                 "FAB_WAVEAPPS_DEFAULT_TARGET",
+                "FAB_HAI_API_TOKEN",
+                "FAB_HAI_API_TOKEN_FILE",
             )
         }
 
@@ -76,6 +78,19 @@ class TestConfigLoader(unittest.TestCase):
         self.assertEqual(config["waveapps_business_id"], "business-123")
         self.assertEqual(config["waveapps_business"]["access_token"], "environment-token")
         self.assertEqual(config["waveapps_default_target"], "waveapps_business")
+
+    def test_dedicated_hai_token_file_is_resolved_as_a_secret(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            token_path = Path(temp_dir) / "hai-token"
+            token_path.write_text("dedicated-hai-secret-value-1234567890", encoding="utf-8")
+            os.environ.pop("FAB_HAI_API_TOKEN", None)
+            os.environ["FAB_HAI_API_TOKEN_FILE"] = str(token_path)
+
+            config = ConfigLoader(
+                config_file=os.path.join(temp_dir, "missing.ini")
+            ).get_all_config()
+
+        self.assertEqual(config["fab_hai_api_token"], "dedicated-hai-secret-value-1234567890")
 
     def test_wave_settings_can_be_loaded_from_encrypted_local_store(self):
         os.environ.pop("FAB_WAVEAPPS_BUSINESS_ACCESS_TOKEN", None)

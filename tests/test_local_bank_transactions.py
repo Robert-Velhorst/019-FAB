@@ -71,6 +71,49 @@ class TestLocalBankTransactionImportService(unittest.TestCase):
             self.assertEqual(by_id["csv-1"]["amount"], -42.5)
             self.assertEqual(by_id["csv-2"]["amount"], 100.0)
 
+    def test_csv_rejects_corrupted_amount_instead_of_sanitizing_digits(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            service = LocalBankTransactionImportService(ledger, {})
+
+            result = service.import_statement_text(
+                "Date;Description;Amount\n"
+                "28-06-2026;Office Shop;1x2\n",
+                format="csv",
+                account_identifier="nl-bank",
+            )
+
+            self.assertEqual(result["rowsImported"], 0)
+            self.assertEqual(result["skipped"], 1)
+            self.assertEqual(ledger.list_bank_transactions(account_identifier="nl-bank"), [])
+
+    def test_csv_rejects_malformed_grouping_and_accepts_euro_formatting(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            service = LocalBankTransactionImportService(ledger, {})
+
+            invalid = service.import_statement_text(
+                "Date;Description;Amount\n"
+                "28-06-2026;Bad grouping;1,2,3\n"
+                "29-06-2026;Invalid separator;1_234\n",
+                format="csv",
+                account_identifier="nl-bank",
+            )
+            valid = service.import_statement_text(
+                "Date;Description;Amount\n"
+                "28-06-2026;Office Shop;€ 1.234,56\n",
+                format="csv",
+                account_identifier="nl-bank",
+            )
+
+            self.assertEqual(invalid["rowsImported"], 0)
+            self.assertEqual(invalid["skipped"], 2)
+            self.assertEqual(valid["rowsImported"], 1)
+            self.assertEqual(
+                ledger.list_bank_transactions(account_identifier="nl-bank")[0]["amount"],
+                1234.56,
+            )
+
     def test_exact_reimport_preserves_final_reconciliation_and_original_provenance(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
@@ -309,6 +352,20 @@ class TestLocalBankTransactionImportService(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "not valid XML"):
                 service.import_statement_text("<Document>", format="camt")
+
+    def test_camt_rejects_internal_entity_declarations(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            service = LocalBankTransactionImportService(ledger, {})
+            statement = """<!DOCTYPE Document [
+                <!ENTITY amount "42.50">
+            ]>
+            <Document><Ntry><Amt>&amount;</Amt></Ntry></Document>"""
+
+            with self.assertRaisesRegex(ValueError, "not valid XML"):
+                service.import_statement_text(statement, format="camt")
+
+            self.assertEqual(ledger.list_bank_transactions(), [])
 
 
 if __name__ == "__main__":

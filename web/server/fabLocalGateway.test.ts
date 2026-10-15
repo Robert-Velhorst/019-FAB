@@ -43,6 +43,19 @@ describe("FAB local API gateway", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
+  it("preserves the FAB Operations message-only error envelope", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      success: false,
+      status: "error",
+      errorCode: "workflow_run_not_found",
+      message: "Workflow run was not found.",
+      requestId: "request-123",
+    }), { status: 404 })));
+
+    await expect(fabLocalRequest("/api/test"))
+      .rejects.toMatchObject({ code: "NOT_FOUND", message: "Workflow run was not found." });
+  });
+
   it("preserves a rejected review as a conflict without replaying it", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       success: false, status: "stale_evidence", error: "Reconciliation evidence changed; refresh before approval.",
@@ -521,7 +534,14 @@ describe("FAB local API gateway", () => {
       "/api/reconciliation": { reconciliationMatches: [{ id: 3, status: "needs_review" }] },
       "/api/audit": { auditEvents: [{ id: 2, action: "local_api.source.upsert" }] },
       "/api/close-readiness": { status: "blocked", canClose: false, blockingCount: 2 },
-      "/api/hai/status": { status: "ready", enabled: true, allowedCommandIds: ["run_safe_cycle", "refresh_notifications"] },
+      "/api/hai/status": {
+        status: "ready",
+        enabled: true,
+        allowedCommandIds: ["run_safe_cycle", "refresh_notifications"],
+        haiAuthentication: "dedicated_bearer_token",
+        dedicatedHaiTokenConfigured: true,
+        remoteAuthenticationConfigured: true,
+      },
       "/api/hai/manifest": { version: "fab-hai-connector-v1", commands: [] },
       "/api/cloud/status": {
         service: "fab-ngrok-cloud-access",
@@ -529,6 +549,8 @@ describe("FAB local API gateway", () => {
         active: true,
         configured: true,
         publicUrl: "https://fab.example.test",
+        dashboardUrl: "https://dashboard.example.test",
+        dashboardAuthMode: "ngrok_basic_auth",
         authMode: "bearer_token",
         haiManifestUrl: "https://fab.example.test/api/hai/manifest",
         verifiedAt: "2026-07-25T09:30:00Z",
@@ -754,7 +776,10 @@ describe("FAB local API gateway", () => {
         id: "hai",
         status: "ready",
         allowedCommandIds: ["run_safe_cycle", "refresh_notifications"],
-        details: "Governed machine control is enabled for 2 allowlisted commands.",
+        haiAuthentication: "dedicated_bearer_token",
+        dedicatedHaiTokenConfigured: true,
+        remoteAuthenticationConfigured: true,
+        details: "Governed machine control is enabled for 2 allowlisted commands; a separate HAI credential is configured.",
       }),
       expect.objectContaining({
         id: "ngrok_cloud",
@@ -762,7 +787,9 @@ describe("FAB local API gateway", () => {
         configured: true,
         ready: true,
         publicUrl: "https://fab.example.test",
+        dashboardUrl: "https://dashboard.example.test",
         authMode: "bearer_token",
+        details: "Authenticated FAB API and HAI access are verified; the remote operator dashboard is protected by ngrok Basic Auth.",
       }),
     ]));
     expect(result.recovery).toMatchObject({ dueCount: 1 });

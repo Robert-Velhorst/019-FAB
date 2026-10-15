@@ -52,6 +52,36 @@ export function humanize(value: unknown): string {
   return raw.replace(/[._-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+export function commandOutcome(value: unknown): "success" | "attention" | "failure" {
+  const result = asRecord(value);
+  const nested = asRecord(result.result);
+  if (result.success === false || nested.success === false) return "failure";
+
+  const status = text(result.status, text(nested.status, "")).toLowerCase();
+  if (["failed", "failure", "error", "blocked", "unsupported", "invalid", "cancelled", "canceled"].includes(status)) {
+    return "failure";
+  }
+  if ([
+    "already_running",
+    "already_generated",
+    "attention_required",
+    "completed_with_errors",
+    "deferred",
+    "disabled",
+    "needs_review",
+    "prepared_needs_review",
+    "retry_deferred",
+  ].includes(status)) {
+    return "attention";
+  }
+  return "success";
+}
+
+export function commandDetails(value: unknown): FabRecord {
+  const result = asRecord(value);
+  return { ...result, ...asRecord(result.result) };
+}
+
 export function compactHumanize(value: unknown): string {
   const raw = text(value, "Unknown");
   return raw.replace(/[._-]+/g, " ").replace(/^\w/, (letter) => letter.toUpperCase());

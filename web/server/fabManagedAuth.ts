@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import express, { type Application, type Request, type Response } from "express";
 import { parse } from "cookie";
 import { jwtVerify, SignJWT } from "jose";
@@ -29,7 +29,9 @@ export function isFabManagedAuthEnabled(): boolean {
 }
 
 function equalSecret(left: string, right: string): boolean {
-  return timingSafeEqual(createHash("sha256").update(left).digest(), createHash("sha256").update(right).digest());
+  const leftBytes = Buffer.from(left);
+  const rightBytes = Buffer.from(right);
+  return leftBytes.length === rightBytes.length && timingSafeEqual(leftBytes, rightBytes);
 }
 
 function strongSecret(value: string): boolean {
@@ -181,7 +183,11 @@ export function registerFabManagedAuthRoutes(app: Application): void {
   if (!isFabManagedAuthEnabled()) return;
   validateFabManagedAuthConfiguration();
   // Backend-only authority check, independent of browser origin/cookie authentication.
-  app.post("/api/fab/operator-session/status", (req, res, next) => {
+  const sessionStatusLimiter = rateLimit({
+    windowMs: 60_000, limit: 120, standardHeaders: "draft-7", legacyHeaders: false,
+    message: { error: "Too many operator-session checks. Try again later." },
+  });
+  app.post("/api/fab/operator-session/status", sessionStatusLimiter, (req, res, next) => {
     res.set({ "cache-control": "no-store", "referrer-policy": "no-referrer" });
     if (!ENV.fabLocalApiToken || !equalSecret(req.headers.authorization || "", `Bearer ${fabParentStatusCredential(ENV.fabLocalApiToken)}`)) {
       res.sendStatus(403); return;
@@ -214,10 +220,11 @@ export function registerFabManagedAuthRoutes(app: Application): void {
   });
   const loginLimiter = rateLimit({
     windowMs: 15 * 60 * 1_000, limit: 10, standardHeaders: "draft-7", legacyHeaders: false,
-    // The actual connection peer is stable and cannot be rotated by spoofing XFF.
-    // A single-business reverse proxy intentionally shares this bounded limit.
-    keyGenerator: req => req.socket.remoteAddress || "unknown", validate: false,
     message: { error: "Too many sign-in attempts. Try again later." },
+  });
+  const authPageLimiter = rateLimit({
+    windowMs: 60_000, limit: 60, standardHeaders: "draft-7", legacyHeaders: false,
+    message: { error: "Too many authentication-page requests. Try again later." },
   });
   app.use(["/operator/login", "/operator/logout"], (req, res, next) => {
     securityHeaders(res);
@@ -231,7 +238,7 @@ export function registerFabManagedAuthRoutes(app: Application): void {
     }
     next();
   });
-  app.get(FAB_MANAGED_LOGIN_PATH, async (req, res) => {
+  app.get(FAB_MANAGED_LOGIN_PATH, authPageLimiter, async (req, res) => {
     if (await authenticateFabManagedRequest(req)) { res.redirect(303, "/admin/operations"); return; }
     formPage(res, false);
   });
@@ -256,14 +263,18 @@ export function registerFabManagedAuthRoutes(app: Application): void {
     res.cookie(FAB_MANAGED_COOKIE_NAME, token, { ...cookieOptions, maxAge: FAB_MANAGED_SESSION_TTL_SECONDS * 1_000 });
     res.redirect(303, "/admin/operations");
   });
-  app.get("/operator/logout", (_req, res) => formPage(res, true));
-  app.post("/operator/logout", async (req, res) => {
+  app.get("/operator/logout", authPageLimiter, (_req, res) => formPage(res, true));
+  app.post("/operator/logout", authPageLimiter, async (req, res) => {
     if (!await logoutFabManagedOperator(req, res)) { res.status(403).send("A same-origin HTTPS request is required"); return; }
     res.redirect(303, FAB_MANAGED_LOGIN_PATH);
   });
   // Only known API routes bypass the SPA guard; their own authorization checks
   // run next. Unknown API/asset paths must not reach the static HTML fallback.
-  app.use(async (req, res, next) => {
+  const managedPageLimiter = rateLimit({
+    windowMs: 60_000, limit: 600, standardHeaders: "draft-7", legacyHeaders: false,
+    message: { error: "Too many dashboard requests. Try again shortly." },
+  });
+  app.use(managedPageLimiter, async (req, res, next) => {
     if (/^\/api\/trpc(?:\/|$)/.test(req.path)
       || /^\/api\/fab\/source\/[^/]+\/?$/.test(req.path)
       || ["/api/fab/runtime", "/api/fab/operator-session"].includes(req.path)

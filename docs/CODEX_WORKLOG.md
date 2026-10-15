@@ -1,5 +1,178 @@
 # Codex Worklog
 
+## 2026-10-15 - Bound raster OCR memory and verify package workflow access
+
+- Added shared raster edge/pixel limits before OpenCV decoding and bounded
+  Google Vision uploads to 20 MB before provider requests. Tesseract image
+  pages now use the shared dimension limit and reject multi-frame input.
+- Routed Tesseract and OpenCV image decoding through the shared bounded
+  validation path. Sanitized local image-open failures so returned OCR errors
+  do not disclose receipt paths; size-limit errors remain specific.
+- Focused document/OCR verification passed 43 tests and 16 subtests, Python
+  compilation, and `git diff --check` for the touched paths.
+- Full Windows Python suite then passed: 1,901 tests, 7 skips, and 152
+  subtests in 1,490 seconds.
+- A source sweep found raw chart config interpolation in an exported React
+  `<style>` component. Extracted CSS generation into a pure helper, constrained
+  chart IDs/series identifiers/color syntax, and added a malicious-input
+  regression test. The complete web suite passed 450 tests with 5 skips;
+  TypeScript and all production client/server/standalone bundle builds passed.
+- Codex Security Deep Scan was requested for the whole worktree but did not
+  start: its coordinator requires a managed filesystem permission profile,
+  which this session could not grant. No security-scan result is claimed;
+  local targeted source review and test/build verification continued instead.
+- GitHub's Code Scanning API returned 101 open alerts on `refs/heads/main` at
+  `8fbfeaebe305dd467a5eb8d179cc64f2ad3c2e24` (90 error-severity, 11 warning).
+  Several findings have corresponding local hardening in this checkout, but
+  the remote default-branch findings remain until changes are delivered and
+  CodeQL reruns. Dependabot alerts are zero; this does not substitute for a
+  worktree security scan.
+- Added an API response-boundary guard that withholds diagnostics containing
+  local absolute paths or Python traceback frames while preserving ordinary
+  validation messages. The complete local-operations API module passed 112
+  tests and 2 subtests after this change.
+- Inspected both private GHCR package settings directly. `019-FAB` already has
+  Write under Manage Actions access for `019-fab-api` and
+  `019-fab-dashboard`; no external package permission mutation was needed.
+- Read-only GitHub checks confirmed vulnerability alerts and private
+  vulnerability reporting are enabled; CodeQL default setup is configured for
+  Actions, C#, JavaScript/TypeScript, and Python; Dependabot security updates,
+  secret scanning, and push protection are enabled. `FAB main protection` and
+  `Restrict version tags` rulesets are active. Non-provider secret patterns
+  and validity checks remain disabled and were not changed.
+- Confirmed the public repository About description/topics are populated and
+  the `v0.1.0-preview.1` prerelease already contains checksum-sidecar Windows
+  and Compose bundles plus private API/dashboard images.
+- These changes remain local and uncommitted. Hosted MySQL for the current
+  uncommitted CI changes and live provider/deployment acceptance remain pending.
+
+## 2026-10-15 - Verify GitHub branch CI and runtime contract
+
+- Queried GitHub directly: `hardening/windows-vm-production` is at
+  `c3ed1599b3807a4c900af4ed5b3aa8772f5a1a48`, 20 commits ahead of this
+  checkout's `adc2aa8` base. Its Actions run 92 completed successfully across
+  Linux, all Windows backend shards (including the Windows stack rehearsal),
+  and frontend audit/type/test/build. This run predates the current uncommitted
+  dashboard-polling and MySQL integration additions and does not verify them.
+- The checked-in CI currently pins Node 22 and pnpm 11.20. Local default tools
+  are Node 25/pnpm 11.25, while the bundled Codex tools are Node 24/pnpm 11.25;
+  latest local build results therefore are not an exact Node 22 CI replay.
+- No remote branch, PR, or workflow was changed or triggered.
+
+## 2026-10-15 - Revalidate Windows cloud and HAI paths
+
+- Re-ran the synthetic dashboard-to-Python-API-to-SQLite stack rehearsal against
+  the current production bundle. It passed with loopback-only networking,
+  synthetic records, provider writes disabled, and all owned child processes
+  stopped. The checks exercised dashboard ledger mutations, bank import and
+  reconciliation, authentication boundaries, HAI command/actor constraints,
+  and stale-approval handling.
+- Focused Windows ngrok/cloud-access and HAI/gateway regressions passed:
+  41 tests and 6 subtests. These validate local scripts/contracts, not a public
+  ngrok tunnel or live HAI/provider connectivity.
+
+## 2026-10-15 - Pause operator polling while hidden
+
+- Replaced the Operations dashboard's fixed query interval with the shared,
+  tested visibility-aware poller. It keeps the existing 60-second refresh
+  cadence while visible, pauses requests in hidden tabs, and refreshes on
+  return; cleanup cancels timers and prevents component-unmount polling.
+- Full web TypeScript checking passed and Vitest passed: 448 tests, 5 skipped.
+  Prettier passed for the poller and its unit tests. The poller tests cover
+  hidden/visible transitions, overlap prevention, callback errors, and cleanup.
+- The production Vite build and asset budgets passed, along with both the
+  Express server bundle and standalone FAB bundle.
+
+## 2026-10-15 - Exercise dashboard tRPC through MySQL
+
+- Extended the disposable-MySQL integration suite through the authenticated
+  dashboard `bookkeeping.registerDocument` tRPC procedure, then read back the
+  persisted document and actor-bound audit event. The test uses synthetic
+  records and the existing loopback `fab_test` guard.
+- Direct TypeScript checking passed. Focused Vitest passed 13 mocked database
+  tests; all 5 real-MySQL cases skipped because no opt-in MySQL instance is
+  available locally. The pnpm wrapper hit `EPERM` while writing its ignored
+  generated package map, so verification used already-installed binaries.
+- The hosted MySQL integration job has not run yet; no local or user database
+  was accessed.
+
+## 2026-10-15 - Worker interval resource bound
+
+- Bounded worker cycle intervals to 10 seconds through 24 hours; invalid and
+  non-finite values fall back to 300 seconds, preventing configuration mistakes
+  from creating a hot loop or excessively delayed worker cycles.
+- Added regression coverage for minimum/maximum clamping, invalid values, and
+  the ten one-second sleep slices used for cooperative shutdown.
+- Verification passed 62 worker/runtime tests and then 34 adjacent
+  configuration/component/worker tests, with 2 skips and 11 subtests in the
+  latter run. No provider operations or financial records were involved.
+
+## 2026-10-15 - Source-of-truth and Windows cloud-access audit
+
+- Added a separate CI job with a disposable MySQL 8.4 service that applies the tracked Drizzle migrations and exercises idempotent document registration, dashboard tRPC-to-MySQL persistence, workflow metadata compare-and-swap, review/audit transactions, and rollback on audit failure. The opt-in test refuses non-loopback hosts and databases other than `fab_test`. Full Vitest initially passed (`448 passed`, `4 skipped`); after adding the tRPC database case, the focused suite passed 13 mocked DB tests and skipped all 5 real-MySQL cases because this machine has no loopback MySQL listener. The hosted MySQL job has not yet run.
+- Fresh full Windows backend suite after the connector path and ledger SQL identifier hardening passed: `1,886 passed`, `5 skipped`, and `137 subtests passed` in 887.15 seconds. This is local backend regression evidence for this checkout; frontend, live provider, ngrok, HAI-client, host deployment and external security-scan acceptance remain separate.
+- Hardened the operations ledger's generic SQL helpers: dynamic table/column identifiers are now syntax-checked and quoted before insert, update, count, schema migration, or status-filter SQL construction; parameter values remain bound. Malformed identifier regressions and the existing ledger, operations API, and gateway contract suites passed (`155 passed`, `6 subtests`). The app-wide Codex Security Deep Scan was retried from the current workspace but its worker still refused to start without a managed filesystem permission profile; no Deep Scan report was produced.
+- Hardened the legacy Banking API adapter by applying a finite 5-second connect / 20-second read timeout to transaction and balance requests. New focused regression tests plus the existing component test passed (`3 passed`); this guards against a stalled configured endpoint but does not establish live bank connectivity or PSD2 support.
+- Removed Unix `/tmp` connector download fallbacks that could break standalone Windows runs or store source evidence outside the app data tree. Gmail, Drive, Freshdesk, Photos, and the base fetcher now resolve configured paths first and otherwise use `data/source_downloads[/<source>]`; configured paths are normalized with environment/user expansion. Fetcher and banking regressions passed (`24 passed`, `4 subtests`). A fresh Bandit medium/high scan of 63,033 Python lines reported zero high-severity findings and 29 medium candidates (down from 34); the remaining Photos B113 is a false positive because the request supplies an explicit timeout. SQL-builder candidates remain manually reviewable, not adjudicated vulnerabilities.
+- Current verification refresh: after the reconciliation candidate-index change, the full Python suite passed (`1,887 passed`, `7 skipped`, `137 subtests passed`, 965.55 seconds). The first full Vitest run had three tests exceed the default timeout under concurrent CPU load; each passed in isolation and the full rerun passed (`448 passed`, 35 files). TypeScript checking passed. The Vite production build, asset budgets, Express server bundle, and standalone bundle passed. A fresh `scripts/run_stack_rehearsal.py --bundle-dir web/dist` passed all cross-layer checks using synthetic data, loopback-only networking, a simulated trusted proxy, provider writes disabled, and all owned child processes stopped.
+- Reduced reconciliation scans for sparse amount ranges using a per-call sorted amount index while retaining the existing scorer, candidate ordering/tie behavior, custom-scorer fallback, dense-range fallback, and a full scan when Decimal range arithmetic could round at the active precision. A reproduced large-decimal boundary mismatch now has a regression test. Focused matcher/financial/component checks passed (`65 passed`). Synthetic benchmark medians were 4.17 ms versus 86.27 ms for 500x100 different amounts, 14.64 ms versus 107.11 ms for dense ties, and 33.79 ms versus 1.91 s for 2,000x400 sparse rows; all results were identical. The compared baseline is the unprepared scorer. `tracemalloc` peak rose by about 193 KB on the larger fixture; no whole-app memory or production SLA claim is made.
+- Verified both private GHCR packages (`019-fab-api` and `019-fab-dashboard`) in their GitHub package settings: `Robert-Velhorst/019-FAB` already has **Write** under **Manage Actions access** for each. No permission change was needed; repository Actions access is confirmed, while a new release/tag and an Actions publish run have not been performed in this verification pass.
+- Added a Python dependency vulnerability gate to CI using the official pip-audit action pinned to commit `1220774d901786e6f652ae159f7b6bc8fea6d266`. A local strict audit of `requirements.lock`, `requirements-local.lock`, and `requirements-test.lock` with pip-audit 2.10.1, `--require-hashes`, and `--disable-pip` found no known vulnerabilities. Workflow YAML parsed successfully; the linter reported only existing line-length warnings.
+- Standard and VM Docker Compose configuration parsed successfully using process-scoped synthetic values only. PowerShell's AST parser accepted `Start-FAB.ps1`, `Stop-FAB.ps1`, `Start-FAB-Ngrok.ps1`, `Stop-FAB-Ngrok.ps1`, and `scripts/Windows-Profile.ps1`. No FAB service, ngrok tunnel, or external provider operation was started by these checks.
+- `pnpm.cmd --dir web check` materialized the locked dependencies but failed before type-checking while writing ignored `web/node_modules/.package-map.json` (`EPERM`). Direct execution of the installed TypeScript, Vitest, Vite, production-budget, and esbuild binaries completed successfully. This environment-specific pnpm wrapper failure is not represented as a code-test failure.
+- The Codex Security Deep Scan could not start because its worker requires a managed filesystem permission profile unavailable to this session. No repository-wide security scan or security finding set was produced; local tests and the synthetic rehearsal do not substitute for that scan or for live provider/deployment acceptance.
+
+- Deep Windows standalone rehearsal uncovered and fixed three startup/shutdown defects: hidden dashboard inputs are now included in build-freshness checks; scoped service credentials remove empty `*_FILE` variables (including the operations token file) rather than passing invalid empty paths; and worker runtime PID is now distinct from the contained process-root PID in ownership metadata. Added regression coverage for environment restoration, hidden-input launcher behavior, and worker descendant/root validation.
+- Focused Windows launcher and shutdown tests passed (`64 passed`). An isolated tracked-source copy with a hash-checked Python 3.13 runtime started in the Windows profile on loopback-only synthetic paths; the authenticated API identified `fab-ledger-api`, the dashboard returned HTTP 200 with matching instance identity, and normal `Stop-FAB.ps1` shutdown removed runtime metadata and closed both listeners with no recorded worker process remaining.
+- The rehearsal disabled all provider connectors and did not mutate Wave, Drive, Gmail, or other external records. To exercise startup beyond the deployment preflight, only the temporary test process used `FAB_STORAGE_ENCRYPTION_CONFIRMED=true`; this is not evidence that the host volume is encrypted. Provider acceptance and host encryption remain unverified.
+- Fixed a control-center failure-path inefficiency: if the shared metrics projection failed, the compliance resource was omitted and retried through the generic per-route fallback, which depends on the same failed metrics path. The batch now emits an explicit failed compliance envelope and skips that redundant retry. Route-contract tests passed (`3 passed`); the existing shared-projection/compliance API tests passed (`2 passed`).
+- Replaced the website admin overview's optional-MySQL "Review Backlog" count with a direct link to the live FAB Operations console. The active console is wired through the web gateway to the Python local API and SQLite ledger; the legacy MySQL bookkeeping procedures remain but have no current frontend callers, and `OperationsClient` has no production caller. No data or legacy endpoint was removed.
+- TypeScript `tsc --noEmit` passed when invoked directly. `pnpm.cmd check` could not complete because pnpm received `EPERM` writing ignored `web/node_modules/.package-map.json`; it had materialized the locked dependencies before failing. `git diff --check` passed.
+- Managed ngrok regression module passed (`6 passed`), and PowerShell parsed the ngrok start/stop/verifier plus main FAB start/stop scripts without syntax errors. This verifies local script contracts only; no live ngrok tunnel, public endpoint, or cloud deployment was started.
+- HAI connector, authenticated-actor, integer-contract, and payload-snapshot regressions passed (`80 passed`, `6 subtests`). Source review confirmed Windows startup provisions separate encrypted operator and HAI tokens, and HAI requests are route-allowlisted. This is local synthetic evidence only; no remote HAI client connected.
+- Verified both private GHCR package settings directly: `019-FAB` is listed under each package's "Manage Actions access" with `Write`; no permission change was needed. GitHub warns that public-repository forks may then access private packages. The release workflow remains local and has not been published to GitHub `main`.
+- Added `--bundle-dir` to the stack rehearsal runner so production bundles can be built outside the existing `web/dist` artifacts. A fresh Vite/esbuild build in a unique temporary directory passed all 67 synthetic end-to-end checks, including auth/HAI scopes, source-byte integrity, ledger persistence, review, bank import/reconciliation, and owned-process shutdown. The run used loopback only and made no provider writes; `web/dist` was not changed.
+- Refreshed frontend verification on current source: `tsc --noEmit` passed and Vitest passed (`448 passed`, 35 files). The complete Python suite initially found a Windows Docker teardown timeout at the 30-second cleanup bound; increasing test-owned container/image cleanup timeouts to 90 seconds resolved it. The focused Docker/build-context module passed (`9 passed`), then the complete backend suite passed (`1,872 passed`, `5 skipped`, `130 subtests`, 747.63 seconds). The synthetic container and image from the failed run were removed after verifying their unique test names, and a follow-up read-only inventory found no `fab-context-test-*` containers or images. Local checks only; live providers and production deployment were not exercised.
+- Refreshed CI dependency checks: `pnpm audit --audit-level=high` found no known vulnerabilities and `pnpm peers check` found no peer issues. Production budget verification now accepts an optional public-output directory, retaining the original `web/dist/public` default; the isolated fresh build passed at 2,031-byte HTML and 475,938-byte largest JavaScript asset (512 KiB ceiling).
+
+## 2026-10-14 - Current worktree verification refresh
+
+- Final post-change full backend suite passed: `1,853 passed`, `6 skipped`, and `124 subtests passed` in 1,419.26 seconds. The Wave exception-boundary changes redact provider/request details and classify transport/parse failures as `external_submission=unknown`, making the same failed attempt non-retryable; the dashboard attention aggregate counts these outcomes. Focused data-entry/export/executor/ledger coverage passed (`77 passed`, `18 subtests`), and the added end-to-end unknown-outcome regression passed separately. Python compilation and `git diff --check` passed. This is local evidence only; no live Wave/Gmail call or current browser/Windows runtime acceptance occurred.
+- Fixed stale export-review recovery by creating an idempotent review item for failed/review-blocked processing and recomputing Wave review eligibility from current source data while excluding only the same attempt's Wave review. Gmail consent-marker cleanup retries transient Windows sharing violations and fails closed if cleanup remains blocked. Focused export/Gmail/OAuth tests passed (`32 passed`, `15 subtests`).
+- Fixed a downstream status fidelity bug found by the complete backend run: a supervised MijnGeldzaken result recorded as `submitted` was projected as `executed`. The result ledger now preserves `submitted` distinctly (including its audit-facing message), and the master-ledger regression exercises the persisted-artifact SHA-256 attestation, verifies that the unsupported `queued` result is rejected, and checks the final projection. Full backend suite passed: `1,847 passed, 4 skipped, 120 subtests` in 827.32 seconds; focused export/master-ledger suite passed: `23 passed, 11 subtests`.
+- Removed `execute_approved_exports` from the generic safe-autonomy action graph and runner, so neither the FAB local safe cycle nor HAI `run_safe_cycle` can invoke Wave/MijnGeldzaken export execution even when `fab_autonomy_execute_approved_exports` is enabled. The flag remains documented for the dedicated operations export worker. Historical workflow-recovery records for this high-risk action still surface as approval-required and are not retried automatically. Regression tests cover both generic and HAI entrypoints with an approved synthetic export; the autonomy, HAI, recovery, and worker suites passed (`81 passed`). This is local and uncommitted; GitHub issue #103 remains open until the fix is delivered and verified there.
+- Added a target-specific manual-result boundary: Wave/unknown targets cannot be marked successful or failed through the generic result API/form; MijnGeldzaken attestation requires `supervision_required` and the exact persisted artifact SHA-256. Only a fixed source label and artifact hash are retained as result evidence, external references are bounded, and the approved Wave UI no longer exposes a manual success form. Approval, rejection, and supervised-attestation transitions now run in serialized ledger write transactions; rollback fault injection and a result-versus-rejection race test cover atomicity. Export API actor labels now pass through principal-aware audit attribution. Focused export/API/worker/autonomy/HAI/recovery coverage passed (`210 passed`, `11 subtests`). Issue #102 remains incomplete: canonical Wave provider-result finalization and deterministic Wave approval-state binding are still required.
+- Fixed a path-disclosure issue in the legacy authenticated backup routes: audit `entity_id` and `after_json` previously persisted absolute archive/source/restore paths, while failed backup results could persist raw filesystem errors. Audits now record fixed entity IDs, safe outcome status, and (for successful creation only) the number of included sources; API responses and restore behavior remain unchanged. Added a route-level synthetic backup/restore regression that first failed on the stored absolute path, then passed while also verifying restored bytes. Legacy dashboard auth tests passed (`13 passed`); combined backup manager and dashboard regression selection passed (`35 passed`, `2 skipped`, `3 subtests`, 235.38s). Python compilation and scoped `git diff --check` passed.
+- Extended the backup audit regression to inject a failure result containing an absolute path and prove that the path is not copied into the audit ledger. The final legacy dashboard suite passed again (`13 passed` in 132.59s) with the success, restore-integrity, and failure-redaction assertions active.
+- Re-ran the HAI connector and managed Windows ngrok wrapper suites on the current tree: `20 passed` in 27.62s. This covers dedicated HAI bearer-token scoping, denied unlisted routes, fail-closed command allowlists, and project-owned ngrok start/stop behavior. No live HAI command, tunnel, or provider operation was started.
+- Added a dynamic authentication contract for every non-public GET route in the legacy Flask dashboard. The regression enumerates the actual Flask route map, denies each sensitive read without a session/token, and confirms the intentionally public health response remains minimal. The exhaustive route test passed (`1 passed` in 2.42s); no real ledger data was read.
+- Bounded raster OCR inputs to 25 million pixels and reject multi-frame images rather than allocating unbounded image memory or silently processing only the first frame. Added oversized-image and multi-frame regressions; OCR processor, resource-bound, and Poppler suites passed (`49 passed`, `9 subtests passed`, 69.90s). This is an input/resource safety limit, not a throughput benchmark.
+- Added an end-to-end ledger regression proving oversized-image rejection preserves source bytes, creates a processing-failed review, leaves export blocked, and never calls OCR; combined integration and resource-bound check passed (`15 passed`, `9 subtests passed`).
+- Windows PowerShell's AST parser accepted all six root `.ps1` entrypoints, including hidden files. Focused Windows launcher, lifecycle-lock, and managed-ngrok tests passed: `25 passed` in 47.24 seconds. The ngrok endpoint/Basic Auth YAML shape matches the vendor's documented pattern ([ngrok Basic Auth example](https://ngrok.com/docs/gateway/examples/ollama)); this is configuration-shape evidence only, not a live tunnel acceptance test.
+- Hardened local API audit attribution: HAI requests retain the server-assigned HAI identity, while operator-supplied actor labels are marked as claims under the authenticated operator principal and control characters are normalized. This prevents a caller from making an operator API action appear to originate from HAI or forging multiline audit labels. Local API and HAI connector suites passed: `122 passed` in 169.98 seconds.
+- Re-ran the complete Python suite on branch `hardening/windows-vm-production` at base commit `adc2aa8`: `1,828 passed`, `6 skipped`, `118 subtests passed`, and one timeout in the PowerShell Job Object rollback fixture after 24m13s. No process from the failed fixture remained. The exact rollback case passed for both PowerShell shells on isolated rerun, and the full containment module passed (`18 passed` in 46.87s) with pytest cache disabled; the full run also reported `.pytest_cache` access denied.
+- Closed the same actor-spoofing path across JSON mutation routes that passed actor labels directly to services: the request boundary now binds submitted labels to the authenticated principal and writes the sanitized identity back into the parsed payload. Added direct-route regression coverage for notification refresh, and updated legacy audit assertions to require explicit `unverified_claim` provenance for tokenless loopback requests. HAI connector and local operations API suites passed: `123 passed` in 158.40 seconds; the six changed audit cases passed again (`6 passed`), Python compilation passed, and `git diff --check` was clean.
+- Fixed the Node gateway's message-only upstream error handling: FAB Operations responses use `message` with `errorCode`/`requestId`, while the gateway previously surfaced only `error` and replaced these with a generic HTTP status. The gateway now falls back to the sanitized `message` field without allowing body codes to override HTTP classification. `fabLocalGateway.test.ts` passed (`64 tests`) and `tsc --noEmit` passed.
+- Added a Python/Flask-to-TypeScript gateway contract test covering all control-center read paths, all operator command paths and methods, and the actual batch-resource projection. This catches drift before it reaches runtime; 41 unique gateway paths currently resolve, and both contract tests passed.
+- Re-ran the web tests from the materialized locked dependency tree after the concurrency fix: `428 passed` across 35 files. `tsc --noEmit` passed. The isolated Vite production build passed the same HTML/JavaScript budgets (2,031-byte shell; largest JavaScript asset 475,938 bytes), and both Express server entrypoints bundled successfully to temporary output without replacing the running dashboard's `dist` files.
+- Standard Compose and the maintenance override both validated when invoked as a layered project with synthetic-only validation secrets; the override is not a standalone Compose project.
+- An initial ad-hoc route probe was discarded after finding it misread Werkzeug's `Rule.build()` return tuple and therefore did not exercise the intended paths. Added durable Flask route-map regression tests for missing operator credentials and the HAI credential's exact eight-rule allowlist. They exercise every registered API method, check login/bootstrap exceptions, fail if API coverage drops below 100 routes, and skip allowlisted writes. The focused HAI/operator/dashboard auth suite passed: 32 passed in 50.52 seconds.
+- The normal pnpm test command could not complete its dependency-status check because Windows returned `EPERM` while opening `web/node_modules/.package-map.json`; no packages were downloaded. Direct execution of the already materialized Vitest, TypeScript, Vite, and esbuild binaries passed.
+- Fresh local runtime inspection found no FAB API listener on ports 5001/8001 and no FAB dashboard listener on 3005. Port 8001 returned `Python/3.11 SimpleHTTPServer` 404 for `/api/live`; port 3000 is owned by `com.docker.backend` but returned no HTTP bytes. `com.docker.service` was stopped and a read-only Docker CLI inventory hung. Only the CLI process started by this audit was stopped; no service or container was changed, so live UI acceptance remains blocked pending an operator-approved runtime start.
+- GitHub PR #118 (`codex/first-fab-release-package`, head `19aa325`) has all reported Actions checks passing. The existing preview release is `v0.1.0-preview.1`; no GHCR images were published, and the local Docker builders were unreachable at that checkpoint.
+- Fixed the admin tRPC bookkeeping path so workflow-run updates reject empty payloads and return `NOT_FOUND` when the target run is missing. Redacted workflow metadata/error text, source-document IDs, and free-form review reasons from audit details; audit records retain changed field names and safe classification fields.
+- Replaced Gmail, Google Drive, and Wave executor status intervals with a shared visibility-aware poller. Polls do not overlap, pause while the browser tab is hidden, resume immediately when visible, and surface refresh errors in the drawer. This avoids invalidating the cached control center every 2.5-5 seconds during long authorization or executor sessions.
+- Moved document registration/updates, workflow-run creation/updates, review-item creation, routing attempts, and reconciliation-match creation behind database transactions that insert their audit event before commit. Wired the same transaction boundary through the tRPC and HAI/service paths, including autonomous run creation/claiming, executor cycles, executor loops, operation updates, and autonomous-review exceptions. Missing-row updates produce no audit event, and audit storage failures roll back the corresponding financial operation.
+- Added an optimistic compare-and-swap predicate on the prior workflow metadata for autonomous operation claims, cycles, loops, and status updates. A stale concurrent worker now receives a conflict rather than overwriting another worker's operation state; unsuccessful compare-and-swap updates emit no audit event.
+- Verification for this follow-up passed the full 428-test web suite, `tsc --noEmit`, `git diff --check`, and a temporary production Vite build within budgets (2,031-byte HTML shell; largest JS asset 475,938 bytes). Both Express server entrypoints bundled successfully to temporary output. Database tests verify audited writes share a transaction, missing-row writes do not leave orphan audit rows, audit failure propagates so the DB rolls back, and the generated MySQL predicate compares expected prior metadata. A route test verifies stale claims return `CONFLICT`. The redundant Python rerun was stopped at 31% because this follow-up changed no Python files; the prior full Python result above remains the available evidence. The mysql2 default `FOUND_ROWS` flag was inspected directly, disproving a suspected no-op-update/404 defect; no change was made for that non-issue.
+- This checkpoint verifies local code and build behavior only. Live Google/Wave acceptance, a dedicated ngrok endpoint, multi-tenant authorization, formal penetration/DPIA/accountant review, and the managed-profile security scan remain unverified or externally blocked. No provider records or Drive files were changed.
+- Made Wave attachment evidence, document lifecycle metadata, review resolution, and their audit event atomic in the local ledger. Made Drive archive lifecycle metadata and archive audit atomic; on a local commit failure FAB attempts to restore the Drive source and records a blocked review state. Lease-heartbeat exceptions now immediately mark ownership uncertain so post-move verification fails closed and triggers source restoration. Added failure-injection and rollback regressions; the complete Drive/Wave delivery module passed (`49 passed`, `32 subtests passed`, 29.40s). No live provider records or files were changed.
+- Refreshed the broad frontend verification: the first complete Vitest run finished with `428 passed` and one timeout in `server/_core/deploymentStartup.test.ts` while waiting for the production runtime identity endpoint. The exact test file passed alone (`8 passed`), confirming a timing-sensitive readiness limit under suite load. Increased the bounded wait from 20 to 45 seconds and the enclosing test timeout from 30 to 60 seconds; the complete rerun then passed (`429 passed`, 35 files, 42.42s). `tsc --noEmit` passed after the adjustment.
+- Confirmed PR #118 is open and unmerged and all currently reported GitHub Actions/CodeQL checks pass. Refreshed the active GitHub CLI credential after the user's device-flow approval; `gh auth status` now reports exactly the requested additional `write:packages` scope. The existing `v0.1.0-preview.1` release tag resolves to `main` commit `3e74dbcf5bb4158888ef550797c79bc564e5d291`.
+- Attempted the private GHCR bootstrap from a separate clean checkout of that release tag, leaving the dirty working tree untouched. GitHub still reports no `fab-api` or `fab-dashboard` package. Docker's `default` and `desktop-linux` builders both timed out at the engine ping (`context deadline exceeded`), so the build/publish command was stopped before an image was published. Only the audit's own stalled CLI commands were canceled; no Docker service or existing container was changed. No package visibility or Actions-access setting was changed.
+- Rechecked local listeners for runtime acceptance: `127.0.0.1:3000` is occupied by a non-FAB service whose HTTP root identifies `LARO API`; no listeners were found on 3005, 5001, or 8001. FAB's Windows launcher explicitly rejects occupied production ports and does not silently choose another port or stop an unknown process. Preserve the other app; use an explicit unused `PORT` (3005 was free at this observation) only after runtime startup is authorized. No other app or service was modified.
+- Verified the Windows launcher conflict policy using the PowerShell AST/launcher checks and isolated startup preflight: `4 passed` in 19.78 seconds. These checks confirm startup validation precedes service creation and the Windows profile rejects invalid/changed ports; they do not constitute a live FAB startup or browser acceptance test.
+
 ## 2026-08-13 - Bounded recurring autonomy and canonical operator tickets
 
 - Audited the production ledger after unattended operation. The 150-document database had accumulated 250,572 audit events, 60,153 workflow steps, and 166,347 repeated `local_export_attempt.prepared` events because unchanged drafts and not-due work were repeatedly materialized.

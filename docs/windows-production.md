@@ -52,7 +52,13 @@ Restrict ledger, evidence, backup, and credential directories to the owning acco
 and approved administrators. Verify host encryption and recovery-key custody before
 setting `FAB_STORAGE_ENCRYPTION_CONFIRMED=true`. That setting is an operator
 attestation, not proof of BitLocker or any other host control. Missing attestation
-is reported as attention/degraded rather than an automatic encryption claim.
+blocks production startup; it is never treated as proof that encryption is enabled.
+
+The Windows profile uses SQLite WAL with `synchronous=FULL`, syncing each committed
+transaction for stronger power-loss durability. This can increase write latency;
+group related ledger writes into explicit transactions rather than weakening
+production durability. The default `local` profile retains `synchronous=NORMAL` for
+development and test performance.
 
 ## Start and Stop
 

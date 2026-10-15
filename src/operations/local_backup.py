@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 import copy
+import hmac
 import hashlib
 import json
 import math
@@ -16,6 +17,8 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 from src.operations.local_ledger import LocalOperationsLedger
+from src.security.deployment_secrets import read_secret, strong_secret
+from src.security.local_secret_store import LocalSecretStore
 from src.worker.runtime import WorkerAlreadyRunningError, managed_worker_maintenance
 
 
@@ -23,10 +26,16 @@ BACKUP_MANIFEST_NAME = "manifest.json"
 BACKUP_LEDGER_NAME = "fab_operations.sqlite3"
 RESTORE_CONFIRMATION_PHRASE = "RESTORE FAB LOCAL LEDGER"
 FULL_RESTORE_CONFIRMATION_PHRASE = "RESTORE FAB LEDGER AND SOURCE EVIDENCE"
+LEGACY_RESTORE_CONFIRMATION_PHRASE = "RESTORE FAB LEGACY CHECKSUM ONLY BACKUP"
+LEGACY_FULL_RESTORE_CONFIRMATION_PHRASE = (
+    "RESTORE FAB LEGACY CHECKSUM ONLY BACKUP AND SOURCE EVIDENCE"
+)
 RESTORE_MODE_LEDGER_ONLY = "ledger_only"
 RESTORE_MODE_FULL = "ledger_and_source_evidence"
 BACKUP_FORMAT_V1 = "fab-local-ledger-backup-v1"
 BACKUP_FORMAT_V2 = "fab-recovery-package-v2"
+BACKUP_FORMAT_V3 = "fab-recovery-package-v3"
+SOURCE_EVIDENCE_FORMATS = {BACKUP_FORMAT_V2, BACKUP_FORMAT_V3}
 SOURCE_EVIDENCE_PREFIX = "source_evidence/"
 RESTORED_SOURCE_DIR_PREFIX = "fab-source-evidence-"
 SCHEDULED_BACKUP_LEASE_NAME = "local_scheduled_backup"
@@ -52,6 +61,15 @@ class LocalBackupService:
         self.project_root = _project_root(self.ledger_path, self.config)
         self.backup_dir = self._backup_dir()
         os.makedirs(self.backup_dir, exist_ok=True)
+        credentials_dir = os.path.join(self.project_root, "credentials")
+        self.config.setdefault(
+            "fab_local_secret_store_path",
+            os.path.join(credentials_dir, "fab-local-secrets.enc"),
+        )
+        self.config.setdefault(
+            "fab_local_secret_key_path",
+            os.path.join(credentials_dir, "fab-local-secrets.key"),
+        )
 
     def create_backup(
         self,
@@ -76,7 +94,7 @@ class LocalBackupService:
                     require_complete=require_complete_source_evidence,
                 )
                 manifest = {
-                    "format": BACKUP_FORMAT_V2,
+                    "format": BACKUP_FORMAT_V3,
                     "createdAt": _now(),
                     "ledgerFilename": BACKUP_LEDGER_NAME,
                     "ledgerSha256": ledger_sha256,
@@ -91,6 +109,7 @@ class LocalBackupService:
                         "restoreRequiresConfirmation": RESTORE_CONFIRMATION_PHRASE,
                     },
                 }
+                manifest["integrity"] = self._sign_manifest(manifest)
                 manifest_path = os.path.join(temp_dir, BACKUP_MANIFEST_NAME)
                 with open(manifest_path, "w", encoding="utf-8") as handle:
                     json.dump(manifest, handle, sort_keys=True, indent=2, default=str)
@@ -160,6 +179,17 @@ class LocalBackupService:
                     "ledgerSha256": inspected.get("manifest", {}).get("ledgerSha256"),
                     "sizeBytes": os.path.getsize(path),
                     "format": inspected.get("manifest", {}).get("format"),
+                    "integrityStatus": inspected.get("integrityStatus"),
+                    "restoreConfirmationPhrase": (
+                        RESTORE_CONFIRMATION_PHRASE
+                        if inspected.get("integrityStatus") == "authenticated"
+                        else LEGACY_RESTORE_CONFIRMATION_PHRASE
+                    ),
+                    "fullRestoreConfirmationPhrase": (
+                        FULL_RESTORE_CONFIRMATION_PHRASE
+                        if inspected.get("integrityStatus") == "authenticated"
+                        else LEGACY_FULL_RESTORE_CONFIRMATION_PHRASE
+                    ),
                     "sourceEvidenceStatus": (
                         source_evidence.get("coverageStatus")
                         if source_evidence
@@ -188,6 +218,8 @@ class LocalBackupService:
             "backupDir": self.backup_dir,
             "restoreConfirmationPhrase": RESTORE_CONFIRMATION_PHRASE,
             "fullRestoreConfirmationPhrase": FULL_RESTORE_CONFIRMATION_PHRASE,
+            "legacyRestoreConfirmationPhrase": LEGACY_RESTORE_CONFIRMATION_PHRASE,
+            "legacyFullRestoreConfirmationPhrase": LEGACY_FULL_RESTORE_CONFIRMATION_PHRASE,
             "restorePolicy": self.restore_policy(),
             "backups": backups[: _bounded_limit(limit)],
             "schedule": self.schedule_status(deep_verify=deep_verify),
@@ -203,18 +235,22 @@ class LocalBackupService:
             raise ValueError("Only .zip local FAB backups are supported")
         signature = _file_signature(resolved_path)
         cached = _MANIFEST_INSPECTION_CACHE.get(resolved_path)
-        if cached and cached.get("signature") == signature:
-            return copy.deepcopy(cached["result"])
+        cached_result = _verify_cached_manifest(cached, signature, self._verify_manifest_integrity)
+        if cached_result is not None:
+            return cached_result
         with _open_preflighted_archive(resolved_path) as archive:
             names = archive.namelist()
             self._validate_member_names(names)
             manifest = self._read_backup_manifest(archive)
             manifest_bytes = archive.getinfo(BACKUP_MANIFEST_NAME).file_size
+            integrity_status = self._verify_manifest_integrity(manifest)
             backup_format = manifest.get("format")
-            if backup_format not in {BACKUP_FORMAT_V1, BACKUP_FORMAT_V2}:
+            if backup_format not in {BACKUP_FORMAT_V1, BACKUP_FORMAT_V2, BACKUP_FORMAT_V3}:
                 raise ValueError("Unsupported FAB backup format")
+            if backup_format == BACKUP_FORMAT_V3 and integrity_status != "authenticated":
+                raise ValueError("Version 3 FAB backups require an authenticated manifest")
             expected_names = {BACKUP_MANIFEST_NAME, BACKUP_LEDGER_NAME}
-            if backup_format == BACKUP_FORMAT_V2:
+            if backup_format in SOURCE_EVIDENCE_FORMATS:
                 expected_names.update(
                     self._validate_source_evidence_manifest(manifest, archive)
                 )
@@ -226,6 +262,14 @@ class LocalBackupService:
             expected_sha256 = str(manifest.get("ledgerSha256") or "").strip().lower()
             if not _valid_sha256(expected_sha256):
                 raise ValueError("Backup manifest has no valid ledger SHA-256")
+        cached_result = _authenticated_cached_result(
+            cached,
+            signature,
+            manifest,
+            integrity_status,
+        )
+        if cached_result is not None:
+            return cached_result
         result = {
             "success": True,
             "status": "manifest_valid",
@@ -233,6 +277,17 @@ class LocalBackupService:
             "backupFilename": os.path.basename(resolved_path),
             "manifest": manifest,
             "deepVerification": "not_executed",
+            "integrityStatus": integrity_status,
+            "restoreConfirmationPhrase": (
+                RESTORE_CONFIRMATION_PHRASE
+                if integrity_status == "authenticated"
+                else LEGACY_RESTORE_CONFIRMATION_PHRASE
+            ),
+            "fullRestoreConfirmationPhrase": (
+                FULL_RESTORE_CONFIRMATION_PHRASE
+                if integrity_status == "authenticated"
+                else LEGACY_FULL_RESTORE_CONFIRMATION_PHRASE
+            ),
         }
         _store_inspection_cache(
             _MANIFEST_INSPECTION_CACHE,
@@ -243,6 +298,62 @@ class LocalBackupService:
         )
         return result
 
+    def _backup_integrity_key(self) -> bytes:
+        try:
+            configured = read_secret("FAB_BACKUP_INTEGRITY_KEY")
+            if configured:
+                if not strong_secret(configured):
+                    raise ValueError("FAB_BACKUP_INTEGRITY_KEY must be a strong secret of at least 32 characters.")
+                return configured.encode("utf-8")
+            value = LocalSecretStore(self.config).get_or_create_runtime_secret(
+                "backup_integrity_key"
+            )
+        except (OSError, ValueError, RuntimeError) as exc:
+            raise ValueError(
+                "FAB backup integrity key is unavailable; configure FAB_BACKUP_INTEGRITY_KEY or repair the encrypted local secret store."
+            ) from exc
+        if not strong_secret(value):
+            raise ValueError("The stored FAB backup integrity key is invalid.")
+        return value.encode("utf-8")
+
+    def _sign_manifest(self, manifest: Dict[str, Any]) -> Dict[str, str]:
+        key = self._backup_integrity_key()
+        payload = _canonical_manifest(manifest)
+        return {
+            "algorithm": "hmac-sha256",
+            "keyId": hashlib.sha256(key).hexdigest()[:16],
+            "signature": hmac.new(key, payload, hashlib.sha256).hexdigest(),
+        }
+
+    def _verify_manifest_integrity(self, manifest: Dict[str, Any]) -> str:
+        integrity = manifest.get("integrity")
+        if integrity is None:
+            return "legacy_checksum_only"
+        if not isinstance(integrity, dict):
+            raise ValueError("Backup manifest integrity metadata is invalid")
+        if integrity.get("algorithm") != "hmac-sha256":
+            raise ValueError("Backup manifest uses an unsupported integrity algorithm")
+        key_id = integrity.get("keyId")
+        signature = integrity.get("signature")
+        if not isinstance(key_id, str) or not re.fullmatch(r"[a-f0-9]{16}", key_id):
+            raise ValueError("Backup manifest has an invalid integrity key identifier")
+        if not isinstance(signature, str) or not re.fullmatch(r"[a-f0-9]{64}", signature):
+            raise ValueError("Backup manifest has an invalid integrity signature")
+        key = self._backup_integrity_key()
+        expected_key_id = hashlib.sha256(key).hexdigest()[:16]
+        if not hmac.compare_digest(key_id, expected_key_id):
+            raise ValueError("Backup integrity key does not match this FAB installation")
+        unsigned_manifest = dict(manifest)
+        unsigned_manifest.pop("integrity", None)
+        expected_signature = hmac.new(
+            key,
+            _canonical_manifest(unsigned_manifest),
+            hashlib.sha256,
+        ).hexdigest()
+        if not hmac.compare_digest(signature, expected_signature):
+            raise ValueError("Backup manifest authenticity check failed")
+        return "authenticated"
+
     def inspect_backup(self, backup_path: str) -> Dict[str, Any]:
         resolved_path = self._resolve_backup_path(backup_path)
         if not os.path.exists(resolved_path):
@@ -251,19 +362,22 @@ class LocalBackupService:
             raise ValueError("Only .zip local FAB backups are supported")
         signature = _file_signature(resolved_path)
         cached = _INSPECTION_CACHE.get(resolved_path)
-        if cached and cached.get("signature") == signature:
-            return copy.deepcopy(cached["result"])
-
+        cached_result = _verify_cached_manifest(cached, signature, self._verify_manifest_integrity)
+        if cached_result is not None:
+            return cached_result
         with _open_preflighted_archive(resolved_path) as archive:
             names = archive.namelist()
             self._validate_member_names(names)
             manifest = self._read_backup_manifest(archive)
             manifest_bytes = archive.getinfo(BACKUP_MANIFEST_NAME).file_size
+            integrity_status = self._verify_manifest_integrity(manifest)
             backup_format = manifest.get("format")
-            if backup_format not in {BACKUP_FORMAT_V1, BACKUP_FORMAT_V2}:
+            if backup_format not in {BACKUP_FORMAT_V1, BACKUP_FORMAT_V2, BACKUP_FORMAT_V3}:
                 raise ValueError("Unsupported FAB backup format")
+            if backup_format == BACKUP_FORMAT_V3 and integrity_status != "authenticated":
+                raise ValueError("Version 3 FAB backups require an authenticated manifest")
             expected_names = {BACKUP_MANIFEST_NAME, BACKUP_LEDGER_NAME}
-            if backup_format == BACKUP_FORMAT_V2:
+            if backup_format in SOURCE_EVIDENCE_FORMATS:
                 expected_names.update(
                     self._validate_source_evidence_manifest(manifest, archive)
                 )
@@ -275,8 +389,16 @@ class LocalBackupService:
             expected_sha256 = str(manifest.get("ledgerSha256") or "").strip().lower()
             if not _valid_sha256(expected_sha256):
                 raise ValueError("Backup manifest has no valid ledger SHA-256")
-            if backup_format == BACKUP_FORMAT_V2:
+            if backup_format in SOURCE_EVIDENCE_FORMATS:
                 self._verify_source_evidence_bytes(manifest, archive)
+            cached_result = _authenticated_cached_result(
+                cached,
+                signature,
+                manifest,
+                integrity_status,
+            )
+            if cached_result is not None:
+                return cached_result
             with tempfile.TemporaryDirectory() as temp_dir:
                 inspected_ledger_path = os.path.join(temp_dir, BACKUP_LEDGER_NAME)
                 digest = hashlib.sha256()
@@ -306,7 +428,12 @@ class LocalBackupService:
             "backupPath": resolved_path,
             "backupFilename": os.path.basename(resolved_path),
             "manifest": manifest,
-            "restoreConfirmationPhrase": RESTORE_CONFIRMATION_PHRASE,
+            "restoreConfirmationPhrase": (
+                RESTORE_CONFIRMATION_PHRASE
+                if integrity_status == "authenticated"
+                else LEGACY_RESTORE_CONFIRMATION_PHRASE
+            ),
+            "integrityStatus": integrity_status,
         }
         _store_inspection_cache(_INSPECTION_CACHE, resolved_path, signature, result, manifest_bytes=manifest_bytes)
         return result
@@ -359,7 +486,7 @@ class LocalBackupService:
         created_at = _parse_timestamp(manifest.get("createdAt"))
         source_evidence = manifest.get("sourceEvidence") or {}
         source_complete = (
-            manifest.get("format") == BACKUP_FORMAT_V2
+            manifest.get("format") in SOURCE_EVIDENCE_FORMATS
             and source_evidence.get("coverageStatus") == "complete"
         )
         next_due = created_at + timedelta(hours=interval_hours) if created_at else now
@@ -473,6 +600,7 @@ class LocalBackupService:
         manifest = inspected["manifest"]
         source_evidence = manifest.get("sourceEvidence") or {}
         policy = self.restore_policy()
+        legacy_integrity = inspected.get("integrityStatus") != "authenticated"
         blockers = []
         source_target = None
         target_status = "not_applicable"
@@ -482,7 +610,7 @@ class LocalBackupService:
                 "message": "Restore is locked while the normal FAB runtime is active.",
             })
         if mode == RESTORE_MODE_FULL:
-            if manifest.get("format") != BACKUP_FORMAT_V2:
+            if manifest.get("format") not in SOURCE_EVIDENCE_FORMATS:
                 blockers.append({
                     "code": "source_evidence_unavailable",
                     "message": "Legacy ledger-only packages cannot restore source evidence.",
@@ -513,10 +641,19 @@ class LocalBackupService:
             "canRestore": not blockers,
             "restoreMode": mode,
             "confirmationPhrase": (
-                FULL_RESTORE_CONFIRMATION_PHRASE
-                if mode == RESTORE_MODE_FULL
-                else RESTORE_CONFIRMATION_PHRASE
+                (
+                    LEGACY_FULL_RESTORE_CONFIRMATION_PHRASE
+                    if mode == RESTORE_MODE_FULL
+                    else LEGACY_RESTORE_CONFIRMATION_PHRASE
+                )
+                if legacy_integrity
+                else (
+                    FULL_RESTORE_CONFIRMATION_PHRASE
+                    if mode == RESTORE_MODE_FULL
+                    else RESTORE_CONFIRMATION_PHRASE
+                )
             ),
+            "integrityStatus": inspected.get("integrityStatus"),
             "backupFilename": inspected["backupFilename"],
             "backupPath": inspected["backupPath"],
             "manifest": _restore_manifest_summary(manifest),
@@ -535,19 +672,17 @@ class LocalBackupService:
         actor: str = "local_backup_restore",
     ) -> Dict[str, Any]:
         mode = _restore_mode(restore_mode)
-        required_confirmation = (
-            FULL_RESTORE_CONFIRMATION_PHRASE
-            if mode == RESTORE_MODE_FULL
-            else RESTORE_CONFIRMATION_PHRASE
-        )
+        plan = self.plan_restore(backup_path, restore_mode=mode)
+        required_confirmation = str(plan.get("confirmationPhrase") or "")
         if confirmation != required_confirmation:
             return {
                 "success": False,
                 "status": "requires_confirmation",
                 "error": f"Restore requires exact confirmation: {required_confirmation}",
+                "confirmationPhrase": required_confirmation,
+                "integrityStatus": plan.get("integrityStatus"),
                 "externalSubmission": "not_executed",
             }
-        plan = self.plan_restore(backup_path, restore_mode=mode)
         if not plan.get("canRestore"):
             return {
                 **plan,
@@ -594,7 +729,7 @@ class LocalBackupService:
                 if self._read_backup_manifest(archive) != manifest:
                     raise ValueError("Backup manifest changed after inspection")
                 expected_names = {BACKUP_MANIFEST_NAME, BACKUP_LEDGER_NAME}
-                if manifest.get("format") == BACKUP_FORMAT_V2:
+                if manifest.get("format") in SOURCE_EVIDENCE_FORMATS:
                     expected_names.update(self._validate_source_evidence_manifest(manifest, archive))
                 self._validate_expected_archive_names(names, expected_names)
                 self._prepare_restored_ledger(
@@ -912,6 +1047,8 @@ class LocalBackupService:
         candidate = os.path.abspath(candidate)
         if os.path.commonpath([candidate, self.backup_dir]) != self.backup_dir:
             raise ValueError("Backup path must be inside the configured FAB backup directory")
+        _assert_no_reparse_points(self.backup_dir)
+        _assert_no_reparse_points(candidate)
         return candidate
 
     def _snapshot_source_evidence(
@@ -1038,11 +1175,17 @@ class LocalBackupService:
     def _backup_paths(self, limit: int) -> list:
         if not os.path.isdir(self.backup_dir):
             return []
-        paths = [
-            os.path.join(self.backup_dir, name)
-            for name in os.listdir(self.backup_dir)
-            if name.lower().endswith(".zip")
-        ]
+        paths = []
+        for name in os.listdir(self.backup_dir):
+            if not name.lower().endswith(".zip"):
+                continue
+            path = os.path.join(self.backup_dir, name)
+            try:
+                _assert_no_reparse_points(path)
+            except ValueError:
+                continue
+            if os.path.isfile(path):
+                paths.append(path)
         paths.sort(
             key=lambda path: os.path.getmtime(path)
             if os.path.exists(path)
@@ -1333,7 +1476,7 @@ def _assert_not_reparse_point(path: str) -> None:
         return
     file_attributes = int(getattr(stat, "st_file_attributes", 0) or 0)
     if os.path.islink(path) or file_attributes & 0x400:
-        raise ValueError("Source restore paths cannot contain links or reparse points")
+        raise ValueError("Paths cannot contain links or reparse points")
 
 
 def _assert_no_reparse_points(path: str) -> None:
@@ -1412,12 +1555,59 @@ def _copy_with_sha256(source_path: str, destination_path: str) -> Tuple[str, int
     return digest.hexdigest(), byte_count
 
 
-def _file_signature(path: str) -> Tuple[int, int, int]:
+def _canonical_manifest(manifest: Dict[str, Any]) -> bytes:
+    return json.dumps(
+        manifest,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def _authenticated_cached_result(
+    cached: Optional[Dict[str, Any]],
+    signature: Tuple[int, ...],
+    manifest: Dict[str, Any],
+    integrity_status: str,
+) -> Optional[Dict[str, Any]]:
+    if not cached or cached.get("signature") != signature:
+        return None
+    result = cached.get("result")
+    if not isinstance(result, dict):
+        return None
+    if result.get("manifest") != manifest:
+        return None
+    if result.get("integrityStatus") != integrity_status:
+        return None
+    return copy.deepcopy(result)
+
+
+def _verify_cached_manifest(
+    cached: Optional[Dict[str, Any]],
+    signature: Tuple[int, ...],
+    verify_integrity: Any,
+) -> Optional[Dict[str, Any]]:
+    if not cached or cached.get("signature") != signature:
+        return None
+    result = cached.get("result")
+    manifest = result.get("manifest") if isinstance(result, dict) else None
+    if not isinstance(manifest, dict):
+        return None
+    integrity_status = verify_integrity(manifest)
+    if result.get("integrityStatus") != integrity_status:
+        return None
+    return copy.deepcopy(result)
+
+
+def _file_signature(path: str) -> Tuple[int, ...]:
     stat = os.stat(path)
     return (
         int(stat.st_size),
         int(stat.st_mtime_ns),
         int(stat.st_ctime_ns),
+        int(getattr(stat, "st_dev", 0)),
+        int(getattr(stat, "st_ino", 0)),
     )
 
 
@@ -1521,7 +1711,7 @@ def _preflight_zip_directory(source: Any) -> None:
 def _store_inspection_cache(
     cache: Dict[str, Dict[str, Any]],
     path: str,
-    signature: Tuple[int, int, int],
+    signature: Tuple[int, ...],
     result: Dict[str, Any],
     *,
     manifest_bytes: int,

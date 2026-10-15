@@ -14,6 +14,8 @@ from typing import Any, Dict, Optional, Sequence
 VENDOR_CATEGORY_RULE_STATUSES = {"suggested", "approved", "rejected", "disabled", "learned"}
 GOVERNED_VENDOR_CATEGORY_RULE_STATUSES = {"approved", "rejected", "disabled"}
 LEDGER_SCHEMA_VERSION = 1
+MAX_ERROR_DIAGNOSTIC_INPUT_CHARS = 16_384
+MAX_ERROR_DIAGNOSTIC_OUTPUT_CHARS = 2_000
 MISSING_REVIEW_MATCH_REFERENCE_SQL = (
     "CASE WHEN json_valid(corrected_data_json) THEN CAST(COALESCE("
     "json_extract(corrected_data_json, '$.reconciliationMatchId'), "
@@ -49,6 +51,16 @@ def default_ledger_path() -> str:
         or os.path.join(os.path.expanduser("~"), ".fab")
     )
     return os.path.join(base_dir, "FAB", "fab_operations.sqlite3")
+
+
+def _quote_sql_identifier(identifier: str) -> str:
+    """Quote a simple or qualified SQLite identifier, rejecting SQL fragments."""
+    if not isinstance(identifier, str):
+        raise ValueError("SQLite identifier must be text.")
+    parts = identifier.split(".")
+    if not parts or any(not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", part) for part in parts):
+        raise ValueError("Invalid SQLite identifier.")
+    return ".".join(f'"{part}"' for part in parts)
 
 
 class LocalOperationsLedger:
@@ -94,7 +106,9 @@ class LocalOperationsLedger:
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA busy_timeout = 30000")
         connection.execute("PRAGMA foreign_keys = ON")
-        connection.execute("PRAGMA synchronous = NORMAL")
+        profile = os.environ.get("FAB_DEPLOYMENT_PROFILE", "local").strip().lower()
+        synchronous = "FULL" if profile in {"windows", "vm"} else "NORMAL"
+        connection.execute(f"PRAGMA synchronous = {synchronous}")
         return connection
 
     @contextmanager
@@ -3688,7 +3702,8 @@ class LocalOperationsLedger:
         if desired_status not in {"unread", "suppressed"}:
             raise ValueError(f"Unsupported notification upsert status: {desired_status}")
         with self._connection() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            if self._write_transaction_connection.get() is None:
+                connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
                 "SELECT * FROM notifications WHERE fingerprint = ? LIMIT 1",
                 (fingerprint,),
@@ -3850,6 +3865,25 @@ class LocalOperationsLedger:
         with self._connection() as connection:
             rows = connection.execute(query, params).fetchall()
         return [self._row_to_dict(row) for row in rows]
+
+    def notification_summary(self) -> Dict[str, int]:
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT
+                    COUNT(*) AS active,
+                    SUM(CASE WHEN status = 'unread' THEN 1 ELSE 0 END) AS unread,
+                    SUM(CASE WHEN severity = 'high' THEN 1 ELSE 0 END) AS high,
+                    SUM(CASE WHEN severity = 'medium' THEN 1 ELSE 0 END) AS medium,
+                    SUM(CASE WHEN severity = 'low' THEN 1 ELSE 0 END) AS low,
+                    SUM(CASE WHEN status = 'acknowledged' THEN 1 ELSE 0 END) AS acknowledged
+                FROM notifications
+                WHERE status IN ('unread', 'read', 'acknowledged')
+                """
+            ).fetchone()
+        return {key: int(row[key] or 0) for key in (
+            "active", "unread", "high", "medium", "low", "acknowledged"
+        )}
 
     def create_compliance_assessment(
         self,
@@ -4211,7 +4245,8 @@ class LocalOperationsLedger:
                 "attention_export_attempts": self._count(
                     connection,
                     "export_attempts",
-                    "status = 'attention_required' AND external_submission = 'not_executed'",
+                    "(status = 'attention_required' AND external_submission = 'not_executed') "
+                    "OR (status = 'failed' AND external_submission = 'unknown')",
                 ),
                 "supervised_export_attempts": self._count(
                     connection,
@@ -5840,10 +5875,13 @@ class LocalOperationsLedger:
     @staticmethod
     def _insert_with_connection(connection: sqlite3.Connection, table: str, values: Dict[str, Any]) -> int:
         values = {key: value for key, value in values.items() if value is not None}
-        columns = ", ".join(values.keys())
+        if not values:
+            raise ValueError("At least one value is required for a ledger insert.")
+        quoted_table = _quote_sql_identifier(table)
+        columns = ", ".join(_quote_sql_identifier(key) for key in values)
         placeholders = ", ".join("?" for _ in values)
         cursor = connection.execute(
-            f"INSERT INTO {table} ({columns}) VALUES ({placeholders})",
+            f"INSERT INTO {quoted_table} ({columns}) VALUES ({placeholders})",
             tuple(values.values()),
         )
         return int(values.get("id") or cursor.lastrowid)
@@ -5862,9 +5900,10 @@ class LocalOperationsLedger:
         values = {key: value for key, value in values.items() if value is not None}
         if not values:
             return
-        assignments = ", ".join(f"{key} = ?" for key in values)
+        quoted_table = _quote_sql_identifier(table)
+        assignments = ", ".join(f"{_quote_sql_identifier(key)} = ?" for key in values)
         connection.execute(
-            f"UPDATE {table} SET {assignments} WHERE id = ?",
+            f"UPDATE {quoted_table} SET {assignments} WHERE id = ?",
             (*values.values(), record_id),
         )
 
@@ -5932,7 +5971,7 @@ class LocalOperationsLedger:
 
     @staticmethod
     def _count(connection: sqlite3.Connection, table: str, where: Optional[str] = None) -> int:
-        query = f"SELECT COUNT(*) AS count FROM {table}"
+        query = f"SELECT COUNT(*) AS count FROM {_quote_sql_identifier(table)}"
         if where:
             query = f"{query} WHERE {where}"
         row = connection.execute(query).fetchone()
@@ -5945,12 +5984,14 @@ class LocalOperationsLedger:
         column: str,
         definition: str,
     ) -> None:
+        quoted_table = _quote_sql_identifier(table)
+        quoted_column = _quote_sql_identifier(column)
         columns = {
             row["name"]
-            for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
+            for row in connection.execute(f"PRAGMA table_info({quoted_table})").fetchall()
         }
         if column not in columns:
-            connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+            connection.execute(f"ALTER TABLE {quoted_table} ADD COLUMN {quoted_column} {definition}")
 
     @classmethod
     def _backfill_document_content_hashes(cls, connection: sqlite3.Connection) -> None:
@@ -6486,14 +6527,15 @@ class LocalOperationsLedger:
     def _append_status_filter(where: list, params: list, column: str, value: Optional[Any]) -> None:
         if not value:
             return
+        quoted_column = _quote_sql_identifier(column)
         if isinstance(value, Sequence) and not isinstance(value, str):
             statuses = [str(item) for item in value if item]
             if statuses:
                 placeholders = ", ".join("?" for _ in statuses)
-                where.append(f"{column} IN ({placeholders})")
+                where.append(f"{quoted_column} IN ({placeholders})")
                 params.extend(statuses)
             return
-        where.append(f"{column} = ?")
+        where.append(f"{quoted_column} = ?")
         params.append(str(value))
 
     @classmethod
@@ -6653,7 +6695,7 @@ class LocalOperationsLedger:
             return [cls._redact_sensitive(item) for item in value]
         if isinstance(value, str):
             value = re.sub(
-                r"(?i)([a-z][a-z0-9+.-]*://)[^/@\s]+@",
+                r"(?i)(?<![a-z0-9+.-])([a-z][a-z0-9+.-]*://)[^/@\s]+@",
                 r"\1[REDACTED]@",
                 value,
             )
@@ -6683,7 +6725,8 @@ class LocalOperationsLedger:
     def _redact_error_message(cls, value: Any) -> Optional[str]:
         if value in (None, ""):
             return None
-        return str(cls._redact_sensitive(str(value)))[:2000]
+        bounded_value = str(value)[:MAX_ERROR_DIAGNOSTIC_INPUT_CHARS]
+        return str(cls._redact_sensitive(bounded_value))[:MAX_ERROR_DIAGNOSTIC_OUTPUT_CHARS]
 
     @staticmethod
     def _float(value: Any) -> Optional[float]:
