@@ -207,9 +207,13 @@ function Get-CimInstance {{
 function Stop-Process {{ [CmdletBinding()] param([int]$Id, [switch]$Force) }}
 function Wait-Process {{ [CmdletBinding()] param([int]$Id, [int]$Timeout) }}
 $failedAsExpected = $false
+$stopError = ''
 try {{ & '{escaped_script}' -Quiet }}
-catch {{ $failedAsExpected = $_.Exception.Message -match 'still running|did not exit|retained' }}
-if (-not $failedAsExpected) {{ throw 'Stop-FAB-Ngrok did not retain state after the process survived termination.' }}
+catch {{
+    $stopError = $_.Exception.Message
+    $failedAsExpected = $stopError -match 'still running|did not exit|retained'
+}}
+if (-not $failedAsExpected) {{ throw "Stop-FAB-Ngrok did not retain state after the process survived termination. Original error: $stopError" }}
 if (-not (Test-Path -LiteralPath '{runtime_path}')) {{ throw 'Runtime ownership metadata was removed.' }}
 if (-not (Test-Path -LiteralPath '{overlay}')) {{ throw 'The ngrok overlay was removed.' }}
 """
