@@ -359,7 +359,7 @@ class TestComponents(unittest.TestCase):
         with zipfile.ZipFile(archive_path, "w") as archive:
             archive.writestr("linked/payload.txt", "must not be extracted")
 
-        result = manager.restore_backup(archive_path, restore_dir)
+        result = manager.restore_backup(archive_path, restore_dir, allow_overwrite=True)
 
         self.assertEqual(result["status"], "failure")
         self.assertIn("Unsafe path", result["message"])

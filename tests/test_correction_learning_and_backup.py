@@ -75,7 +75,9 @@ class TestCorrectionLearningAndBackup(unittest.TestCase):
         result = manager.perform_backup()
 
         self.assertEqual(result["status"], "success")
-        self.assertIn(export_dir, result["included_paths"])
+        canonical_export_dir = os.path.normcase(os.path.realpath(export_dir))
+        included_paths = {os.path.normcase(path) for path in result["included_paths"]}
+        self.assertIn(canonical_export_dir, included_paths)
         with zipfile.ZipFile(result["path"], "r") as archive:
             self.assertIn(
                 "mijngeldzaken-exports/mijngeldzaken_import_doc-1.csv",

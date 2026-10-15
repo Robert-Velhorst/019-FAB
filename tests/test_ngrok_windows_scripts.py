@@ -176,7 +176,7 @@ class TestNgrokWindowsScripts(unittest.TestCase):
             for path in (overlay, stdout, stderr):
                 path.write_text("owned fixture", encoding="utf-8")
 
-            normalized_root = str(root.resolve()).replace("\\", "/").lower()
+            normalized_root = os.path.abspath(str(root)).replace("\\", "/").lower()
             instance_id = hashlib.sha256(normalized_root.encode("utf-8")).hexdigest()
             runtime_path = data / "fab-ngrok-runtime.json"
             runtime_path.write_text(json.dumps({

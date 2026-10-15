@@ -259,7 +259,7 @@ class BackupManager:
             restore_value = os.fspath(restore_dir)
             if not isinstance(restore_value, str) or not restore_value.strip():
                 return {"status": "failure", "message": "Restore destination must be a non-empty path."}
-            restore_candidate = os.path.abspath(
+            restore_candidate = _canonical_path(
                 restore_value
                 if os.path.isabs(restore_value)
                 else os.path.join(self.restore_base_dir, restore_value)
