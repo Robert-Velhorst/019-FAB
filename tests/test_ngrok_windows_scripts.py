@@ -195,6 +195,17 @@ class TestNgrokWindowsScripts(unittest.TestCase):
             escaped_overlay = str(overlay).replace("'", "''")
             harness = f"""
 $ErrorActionPreference = 'Stop'
+$fixtureRoot = Split-Path -Parent '{escaped_script}'
+$normalizedRoot = [System.IO.Path]::GetFullPath($fixtureRoot).TrimEnd("\\", "/").Replace("\\", "/").ToLowerInvariant()
+$sha256 = [System.Security.Cryptography.SHA256]::Create()
+try {{
+    $instanceId = ([System.BitConverter]::ToString($sha256.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($normalizedRoot)))).Replace("-", "").ToLowerInvariant()
+}}
+finally {{ $sha256.Dispose() }}
+$runtime = Get-Content -LiteralPath '{runtime_path}' -Raw | ConvertFrom-Json
+$runtime.instanceRoot = [System.IO.Path]::GetFullPath($fixtureRoot).TrimEnd("\\", "/")
+$runtime.instanceId = $instanceId
+$runtime | ConvertTo-Json -Compress | Set-Content -LiteralPath '{runtime_path}'
 function Get-CimInstance {{
     [CmdletBinding()]
     param([string]$ClassName, [string]$Filter, [string[]]$Property)
