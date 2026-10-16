@@ -58,10 +58,16 @@
 - Ran the broader local regression group across folder intake, connector intake,
   Drive relay, photo-picker intake/client, and the local operations API:
   `174 passed, 2 skipped, 2 subtests passed` in 116.59 seconds.
-- Confirmed both PR-triggered FAB runs and a workflow-dispatch run fail with
-  `startup_failure` before any jobs are created. Updated the checkpoint to
-  record that hosted-runner blocker and the exact current PR head. CodeQL remains
-  queued; no hosted verification is inferred from the local tests.
+- Confirmed three PR-triggered FAB runs and a workflow-dispatch run fail with
+  `startup_failure` before any jobs are created. CodeQL remains queued; no
+  hosted verification is inferred from the local tests.
+
+## 2026-10-16 - Refresh the current verification checkpoint
+
+- Refreshed `CODEX_CHECKPOINTS.md` to PR head `4c8b5a8` and added the latest
+  `startup_failure` run `38966565138`. GitHub still creates no jobs for the
+  FAB workflow, while local integration coverage remains green. No provider
+  writes or code-scanning alert suppressions were performed.
 
 ## 2026-10-16 - Correct Drive archive recovery state and review PR security gate
 
