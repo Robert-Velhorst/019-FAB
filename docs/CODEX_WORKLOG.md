@@ -16,6 +16,39 @@
 - Updated `CODEX_CHECKPOINTS.md` to replace stale PR heads and CI references.
   No live provider data, Drive files, release, or package contents were changed.
 
+## 2026-10-16 - Recheck hosted security and whole-repository alert inventory
+
+- CodeQL run `38964032687` completed successfully for PR code head `1dee2d8`;
+  its pull-request check explicitly reports no new alerts in code changed by the
+  PR. This is not a clean bill for all existing code-scanning alerts.
+- Queried GitHub's current default-branch code-scanning inventory. At the
+  observed analysis commit `6445f876`, 100 alerts remain open across 11 rules,
+  including 22 high-severity path-injection findings and 63 medium stack-trace
+  exposure findings. These findings are on `refs/heads/main`; do not attribute
+  them to the current PR head or imply that this PR resolves them wholesale.
+- FAB verification run `38964460719` completed for `f50b3a8`: all four Windows
+  shards, frontend, MySQL integration, and both container builds passed. Linux
+  reported `1,918 passed, 44 skipped, 219 subtests passed` and one failing
+  traversal-filename expectation because Linux treats backslashes differently
+  from Windows. The stored file remained contained; the failure exposed a
+  cross-platform filename-normalization mismatch.
+- A native Codex Security Standard scan was started for the isolated PR
+  checkout, but its progress update was rejected because another continuation
+  owns that scan. No findings or coverage from it are claimed. No code-scanning
+  alert was dismissed or suppressed.
+- The active CI run surfaced Node.js 20 deprecation warnings from the pinned
+  Docker build actions. Updated the CI and release workflows to digest-pinned
+  Node.js 24-native releases (`setup-buildx-action` v4.1.0 and
+  `build-push-action` v7.4.0); validate in a fresh hosted run after the current
+  run completes.
+- Updated `CODEX_CHECKPOINTS.md` to distinguish the PR CodeQL result, the
+  default-branch alert backlog, and unfinished full CI.
+- Fixed Drive relay basename handling to interpret both slash styles as
+  separators before Werkzeug sanitization. Focused relay tests now pass
+  (`5 passed`); Python compilation and `git diff --check` pass. Updated the
+  checkpoint with the exact failed CI result and staged the workflow fix for a
+  new hosted verification run.
+
 ## 2026-10-16 - Correct Drive archive recovery state and review PR security gate
 
 - Fixed a false `externalSubmission: not_executed` result after Drive had already

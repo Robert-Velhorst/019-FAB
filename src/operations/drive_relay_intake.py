@@ -218,7 +218,8 @@ class DriveRelayIntakeService:
 
 
 def _safe_filename(filename: str) -> str:
-    safe = secure_filename(os.path.basename(filename)).strip(" .")
+    portable_basename = os.path.basename(str(filename).replace("\\", "/"))
+    safe = secure_filename(portable_basename).strip(" .")
     safe = safe or "drive-document"
     if len(safe) <= 180:
         return safe
