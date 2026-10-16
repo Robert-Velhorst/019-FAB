@@ -68,6 +68,18 @@ class TestDriveRelayIntakeService(unittest.TestCase):
         )
         self.assertTrue(os.path.isfile(document["storage_path"]))
 
+    def test_untrusted_traversal_filename_is_stored_only_under_download_root(self):
+        result = self._ingest(filename="../../outside\\receipt.pdf")
+
+        self.assertTrue(result["success"])
+        stored_path = os.path.realpath(result["document"]["path"])
+        root = os.path.realpath(self.download_dir)
+        self.assertTrue(stored_path.startswith(root + os.sep))
+        self.assertEqual(
+            os.path.basename(stored_path),
+            f"{result['sourceSha256'][:12]}-receipt.pdf",
+        )
+
     def test_folder_size_and_hash_mismatches_are_rejected_without_writing(self):
         service = DriveRelayIntakeService(self.ledger, self.config)
         folder_result = service.ingest(
