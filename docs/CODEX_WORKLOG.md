@@ -36,6 +36,19 @@
   high path-flow and one medium exception-exposure CodeQL alerts; the path
   hardening is in this local update and must be assessed by the next hosted scan.
 
+## 2026-10-16 - Stop reflecting vendor-rule exception details
+
+- Vendor-rule API and form handlers now return a fixed conflict message instead
+  of reflecting exception text. The valid conflict remains understandable to
+  the operator without exposing internal exception details.
+- Verification: vendor-rule resolution route tests passed (`3 passed`), local
+  intake suite passed (`17 passed, 2 skipped`), and Python compilation plus
+  `git diff --check` passed. The full intake/upload/connector group passed
+  (`44 passed, 2 skipped`) after the path-boundary changes.
+- These latest path and exception-handling changes await commit and a fresh
+  hosted CodeQL result; the previous aggregate check remains a failure until a
+  new head proves otherwise.
+
 ## 2026-10-16 - Refresh PR state and continue security review
 
 - Revalidated the protected canonical checkout at `dbe3a8a6383c88ad926a707ff7d8975561c99327`; its extensive staged user work remains untouched. The isolated PR #125 worktree is clean at `9571430366725dfe13f028cd975c8f1b5cacdc09` before this documentation correction.

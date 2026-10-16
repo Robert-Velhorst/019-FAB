@@ -165,6 +165,9 @@ MAX_TRACKED_LOGIN_CLIENTS = 4096
 REVIEW_RESOLUTION_STATUSES = {"approved", "rejected", "resolved", "ignored"}
 RECONCILIATION_RESOLUTION_STATUSES = {"approved", "reconciled", "rejected", "resolved", "ignored", "needs_review"}
 RULE_RESOLUTION_STATUSES = VENDOR_CATEGORY_RULE_STATUSES - {"learned"}
+VENDOR_RULE_CONFLICT_MESSAGE = (
+    "Conflicting approved vendor category rule already exists for this target"
+)
 API_REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{8,64}$")
 INTERNAL_DIAGNOSTIC_PATTERN = re.compile(
     r"(?im)(?:traceback \(most recent call last\):|^\s*File [\"'][^\r\n]+[\"'], line \d+|"
@@ -5907,8 +5910,8 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
                 sources=payload.get("sources"),
                 actor=payload.get("actor") or "api",
             )
-        except ValueError as exc:
-            return jsonify({"error": str(exc)}), 400
+        except ValueError:
+            return jsonify({"error": VENDOR_RULE_CONFLICT_MESSAGE}), 400
         return jsonify(result)
 
     @app.post("/sources/sync")
@@ -8580,8 +8583,8 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
                 resolution=request.form.get("resolution") or None,
                 actor="local_dashboard",
             )
-        except ValueError as exc:
-            return jsonify({"success": False, "error": str(exc)}), 400
+        except ValueError:
+            return jsonify({"success": False, "error": VENDOR_RULE_CONFLICT_MESSAGE}), 400
         if rule:
             ledger.record_audit_event({
                 "action": "local_dashboard.vendor_category_rule.status_changed",
