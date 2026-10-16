@@ -1,5 +1,35 @@
 # Codex Worklog
 
+## 2026-10-16 - Revalidate published PR checkout on Windows
+
+- Verified PR #125 is open at `04a006d059ad235ec0c03611f1b5691738f65a35`;
+  its working tree is clean. PR #118 remains open. Release
+  `v0.1.0-preview.1` exists with Windows and Compose ZIPs plus SHA-256 files;
+  private GHCR packages `019-fab-api` and `019-fab-dashboard` each have a
+  `0.1.0-preview.1` image tag. The repository has Actions Write access on both.
+- On the PR checkout, full Windows Python verification passed (1,984 passed,
+  6 skipped, 219 subtests) in 769.33 seconds. The web suite passed (471 passed,
+  5 skipped across 40 files); `tsc --noEmit`, production Vite/server/standalone
+  build and bundle budgets passed. The synthetic Windows dashboard/API/SQLite
+  stack rehearsal passed all checks, including HAI auth/scope, audit replay,
+  reconciliation, exception recovery, and owned-child shutdown.
+- Three 30-request, six-client warm-cache synthetic control-center runs measured
+  median/p95 latencies of 70.17/96.50 ms, 36.44/46.99 ms, and 37.89/45.82 ms.
+  Each returned 57,768 bytes. Sampled combined API/dashboard working-set peaks
+  were 191,123,456, 192,811,008, and 193,351,680 bytes. The first run was an
+  outlier; this is diagnostic evidence on a one-document fixture, not a
+  production SLA or scaled/cold/sustained resource baseline. The synthetic
+  2,000x400 sparse reconciliation benchmark measured 2.662 s unprepared and
+  40.23 ms indexed, with identical results; traced allocation peaks were
+  651,704 and 848,007 bytes respectively.
+- `git diff --check` passed. Build/dependency artifacts are ignored in this PR
+  clone; no tracked source changes, provider writes, or public tunnel were used.
+  A dependency setup attempt through a temporary junction was blocked by Windows
+  `EPERM`; dependency installation and builds then succeeded inside this clone,
+  and the canonical checkout's pnpm metadata and Vite entrypoint remain present.
+  GitHub Linux, frontend, MySQL, and container checks pass; Windows and CodeQL
+  checks remain queued, leaving PR #125 blocked.
+
 ## 2026-10-16 - Measure rehearsal process resources
 
 - Added sampled CPU-time and working-set metrics for the isolated Python API and Node dashboard children to `scripts/run_stack_rehearsal.py`; unsupported/exited processes are reported as unavailable, not zero.
