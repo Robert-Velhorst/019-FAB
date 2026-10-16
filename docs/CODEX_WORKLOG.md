@@ -5,9 +5,10 @@
 - Revalidated the protected canonical checkout at `dbe3a8a6383c88ad926a707ff7d8975561c99327`; its extensive staged user work remains untouched. The isolated PR #125 worktree is clean at `9571430366725dfe13f028cd975c8f1b5cacdc09` before this documentation correction.
 - PR #125 remains open. Linux backend, frontend, MySQL integration, and both container builds pass on the recorded head; four Windows shards and CodeQL are pending. Private GHCR Actions Write access for both FAB packages was already granted.
 - Continued source review of Flask auth/HAI, Drive-to-Wave archive gating, and backup restore/path boundaries. Focused Windows suites passed: `103 passed, 40 subtests` across HAI, Drive/Wave delivery, and backup inspection.
-- Saved a provisional Codex Security Standard threat model and partial coverage checkpoint for the recorded PR head. No findings are recorded so far; the repository-wide audit is incomplete and this is not a clean result. Independent review was unavailable because the agent thread limit was reached.
+- Saved a provisional Codex Security Standard threat model and partial coverage checkpoint for the recorded PR head. The canonical scan draft remains incomplete; a low-severity HAI false-completion defect was validated, fixed, and preserved in a supplemental security-audit artifact. This is not a clean or complete repository-wide result. Independent review was unavailable because the agent thread limit was reached.
 - Corrected stale C0/C7/C8 state in `CODEX_CHECKPOINTS.md` to distinguish the canonical checkout from the isolated PR worktree and reflect current check/security status. `git diff --check` passed. No provider writes, live data, or public tunnel were used.
 - Pushed the checkpoint-only commit `9d921d2d4f27167ea22e478bbd62e6e99d11e20b` to PR #125. Refreshed GitHub state confirms the PR is open at that head; all new CI and CodeQL checks are pending. The previous code commit's Linux, frontend, MySQL, and container checks passed; Windows and CodeQL were pending.
+- Deep HAI/API regression verification passed after the executor-result fix (`208 passed, 10 subtests`). The narrower HAI module passed (`25 passed, 8 subtests`). Ruff is not installed in the isolated venv; `git diff --check` and Python compilation remain the applicable local static checks.
 
 ## 2026-10-16 - Revalidate published PR checkout on Windows
 

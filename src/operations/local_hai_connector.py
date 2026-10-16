@@ -589,6 +589,32 @@ class LocalHaiConnector:
                     "externalSubmission": external_submission,
                 }
 
+            if not isinstance(result, dict):
+                external_submission = _indeterminate_external_submission(command)
+                audit_event_id = self.ledger.record_audit_event({
+                    "action": "hai.command.failed",
+                    "entityType": "hai_command_request",
+                    "entityId": request_id,
+                    "details": {
+                        "requestId": request_id,
+                        "commandId": command_id,
+                        "actor": actor,
+                        "payload": normalized_payload,
+                        "errorType": "invalid_executor_result",
+                        "externalSubmission": external_submission,
+                    },
+                })
+                return {
+                    "success": False,
+                    "status": "failed",
+                    "requestId": request_id,
+                    "commandId": command_id,
+                    "error": "Command returned an invalid result; inspect the correlated local audit event.",
+                    "errorCode": "invalid_executor_result",
+                    "auditEventId": audit_event_id,
+                    "externalSubmission": external_submission,
+                }
+
             external_submission = _command_external_submission(command, result)
             if isinstance(result, dict) and result.get("success") is False:
                 audit_event_id = self.ledger.record_audit_event({

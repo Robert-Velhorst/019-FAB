@@ -464,6 +464,50 @@ class TestLocalHaiConnector(unittest.TestCase):
             self.assertEqual(event["details"]["externalSubmission"], "not_executed")
             self.assertEqual(executions, ["hai"])
 
+    def test_invalid_executor_result_is_indeterminate_and_not_reexecuted(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            executions = []
+
+            def executor(payload, actor):
+                executions.append(actor)
+                return None
+
+            connector = LocalHaiConnector(
+                ledger,
+                {
+                    "fab_hai_connector_enabled": True,
+                    "fab_hai_allowed_commands": "archive_verified_drive_sources",
+                },
+                executors={"archive_verified_drive_sources": executor},
+            )
+
+            first = connector.execute(
+                "hai-invalid-executor-result",
+                "archive_verified_drive_sources",
+                {"dryRun": False},
+            )
+            replay = connector.execute(
+                "hai-invalid-executor-result",
+                "archive_verified_drive_sources",
+                {"dryRun": False},
+            )
+
+            event = ledger.find_audit_event(
+                "hai.command.failed",
+                "hai_command_request",
+                "hai-invalid-executor-result",
+            )
+            self.assertFalse(first["success"])
+            self.assertEqual(first["status"], "failed")
+            self.assertEqual(first["errorCode"], "invalid_executor_result")
+            self.assertEqual(first["externalSubmission"], "unknown")
+            self.assertEqual(replay["status"], "previously_failed")
+            self.assertEqual(replay["externalSubmission"], "unknown")
+            self.assertEqual(event["details"]["externalSubmission"], "unknown")
+            self.assertNotIn("result", event["details"])
+            self.assertEqual(executions, ["hai"])
+
     def test_idempotent_result_replay_rechecks_current_connector_policy(self):
         revoked_policies = (
             ({"fab_hai_connector_enabled": False, "fab_hai_allowed_commands": "refresh_notifications"}, "connector_disabled"),
