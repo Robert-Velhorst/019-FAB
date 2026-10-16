@@ -1039,10 +1039,17 @@ class DriveWaveDeliveryService:
                     )
                 except Exception as rollback_exc:
                     rollback = {"status": "failed", "reason": _safe_reason(rollback_exc)}
-            reasons = [reason]
-            if rollback is None or str(rollback.get("status") or "").lower() not in {
+            rollback_status = (
+                str(rollback.get("status") or "").lower()
+                if isinstance(rollback, dict)
+                else ""
+            )
+            rollback_confirmed = rollback_status in {
                 "restored", "already_restored", "moved", "ok", "success"
-            }:
+            }
+            external_submission = "not_executed" if rollback_confirmed else "unknown"
+            reasons = [reason]
+            if not rollback_confirmed:
                 reasons.append("archive_source_restore_failed")
             failure_audit_id = None
             try:
@@ -1057,7 +1064,7 @@ class DriveWaveDeliveryService:
                             "reason": reason,
                             "moveStarted": True,
                             "rollback": rollback,
-                            "externalSubmission": "not_executed",
+                            "externalSubmission": external_submission,
                         },
                     })
             except Exception:
@@ -1069,7 +1076,7 @@ class DriveWaveDeliveryService:
                 "reasons": reasons,
                 "rollback": rollback,
                 "auditEventId": failure_audit_id,
-                "externalSubmission": "not_executed",
+                "externalSubmission": external_submission,
             }
         return {
             "success": True,

@@ -1425,6 +1425,42 @@ class TestDriveWaveDeliveryService(unittest.TestCase):
         with open(self.ledger.get_document(self.document_id)["storage_path"], "rb") as source:
             self.assertEqual(source.read(), self.source_bytes)
 
+    def test_archive_audit_commit_failure_with_unconfirmed_restore_reports_unknown(self):
+        archiver = FakeDriveArchiver(self.source_hash, self.source_size)
+        service = DriveWaveDeliveryService(self.ledger, self.config, drive_archiver=archiver)
+        service.record_attachment_readback(
+            self.document_id,
+            self.source_bytes,
+            filename="invoice.pdf",
+            mime_type="application/pdf",
+            evidence=self._evidence(),
+        )
+        record_audit_event = self.ledger.record_audit_event
+
+        def fail_archive_audit(payload, preferred_id=None):
+            if payload.get("action") == "drive_wave.source_archived":
+                raise sqlite3.OperationalError("disk full")
+            return record_audit_event(payload, preferred_id)
+
+        def failed_restore(*args):
+            raise TimeoutError("Drive restore response was lost")
+
+        archiver.restore_file = failed_restore
+        with patch.object(self.ledger, "record_audit_event", side_effect=fail_archive_audit):
+            result = service.archive_document(self.document_id)
+
+        failure = self.ledger.find_audit_event(
+            "drive_wave.archive_failed", "bookkeeping_document", str(self.document_id)
+        )
+        self.assertFalse(result["success"])
+        self.assertIn("archive_source_restore_failed", result["reasons"])
+        self.assertEqual(result["externalSubmission"], "unknown")
+        self.assertEqual(failure["details"]["externalSubmission"], "unknown")
+        self.assertEqual(failure["details"]["rollback"]["status"], "failed")
+        self.assertTrue(archiver.archived)
+        lifecycle = self.ledger.get_document(self.document_id)["metadata"]["driveWaveLifecycle"]
+        self.assertEqual(lifecycle["status"], "attachment_verified")
+
     def test_archive_lease_prevents_concurrent_moves(self):
         archiver = FakeDriveArchiver(self.source_hash, self.source_size)
         service = DriveWaveDeliveryService(self.ledger, self.config, drive_archiver=archiver)

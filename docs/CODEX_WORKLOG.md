@@ -1,5 +1,26 @@
 # Codex Worklog
 
+## 2026-10-16 - Correct Drive archive recovery state and review PR security gate
+
+- Fixed a false `externalSubmission: not_executed` result after Drive had already
+  moved a verified file but the local archive-ledger commit failed. The result
+  is now `not_executed` only when restore is positively confirmed; failed or
+  ambiguous compensation reports `unknown`, with a regression covering disk-full
+  ledger failure and a lost Drive restore response.
+- Verification: the combined Drive/Wave and HAI regression group passed
+  (`141 passed, 40 subtests`); `py_compile` and `git diff --check` passed.
+  No live Drive or Wave mutation was performed.
+- Refreshed PR #125 checks for its then-current head `592de35`: FAB verification
+  passed on Linux and all four Windows shards, frontend, MySQL integration, both
+  container builds, and CodeQL analysis language jobs passed. GitHub Advanced
+  Security's aggregate `CodeQL` check nevertheless failed with six new alerts:
+  five high-severity path-flow findings in `local_intake.py` and one medium
+  stack-trace exposure in `local_api.py`. This is an active security blocker;
+  the passing analysis jobs are not a clean security result. Triage and fix the
+  findings before describing the PR as security-clean.
+- Next code and regression update is prepared locally; this log/checkpoint must
+  be pushed with it so the hosted checks rerun against the actual updated head.
+
 ## 2026-10-16 - Refresh PR state and continue security review
 
 - Revalidated the protected canonical checkout at `dbe3a8a6383c88ad926a707ff7d8975561c99327`; its extensive staged user work remains untouched. The isolated PR #125 worktree is clean at `9571430366725dfe13f028cd975c8f1b5cacdc09` before this documentation correction.
