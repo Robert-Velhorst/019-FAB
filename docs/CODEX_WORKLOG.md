@@ -1055,3 +1055,26 @@
 - No Drive source was archived.
 - No credentials, OAuth tokens, financial files, or runtime database were added to Git.
 - No direct MijnGeldzaken, PSD2, or SVB automation was invented to satisfy a checklist.
+
+## 2026-10-16 - Verify PR CI and private GHCR Actions access
+
+- PR #125 is open at `b664468a3df3cbde40553f553901c06fcd891006`.
+- Hosted FAB verification run `38961436355` completed successfully: Linux backend,
+  all four Windows backend shards, MySQL integration, frontend, and both
+  production-container build jobs passed. Container jobs built without publishing.
+- GitHub Advanced Security CodeQL check `117178222073` still fails with six
+  high-severity path-flow alerts in `src/operations/local_intake.py`. The earlier
+  medium exception-exposure alert is no longer reported. Security remains open;
+  no alert was suppressed or dismissed.
+- Verified both private GHCR packages, `019-fab-api` and `019-fab-dashboard`,
+  already grant `019-FAB` Actions Write access. No permission change was needed.
+- GitHub warns that granting a public repository access to private packages can
+  make them accessible to fork-triggered workflows. The container publishing
+  workflow itself is tag-push-only, checks the tagged commit is on `main`, and
+  scopes `packages: write` to its publish job; review any future workflow that
+  consumes these private images separately.
+- Release `v0.1.0-preview.1` is already published as a prerelease with Windows
+  and Compose archives and SHA-256 sidecars. This verification did not publish
+  another release or container image.
+- No live provider operation, cloud deployment, public tunnel, or accountant
+  acceptance was performed.
