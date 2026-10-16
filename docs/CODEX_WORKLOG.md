@@ -18,6 +18,19 @@
   status is accurate. Provider writes, live ngrok exposure, target-host cloud
   deployment, and human/accountant acceptance remain separate unverified gates.
 
+## 2026-10-16 - Verify full CI and CodeQL on refreshed PR head
+
+- FAB verification run `38968352699` passed all nine jobs on commit
+  `3a47906537f1e59a5191e2a81dba6fcc286fa236`. This re-ran Linux and four
+  Windows backend shards, frontend checks/build, MySQL integration, and both
+  build-only container jobs after the checkpoint update.
+- CodeQL run `38968348453` passed Python, JavaScript/TypeScript, Actions, and
+  C# analysis. The aggregate PR check states: "No new alerts in code changed by
+  this pull request." This does not clear the existing default-branch alert
+  backlog or replace a whole-repository security assessment.
+- The PR remains open. No external package, provider, tunnel, or deployment
+  mutation occurred.
+
 ## 2026-10-16 - Verify intake hardening and refresh release/security checkpoint
 
 - Verified the isolated PR #125 checkout is clean at `1dee2d8` on
