@@ -869,6 +869,55 @@ class TestLocalDocumentProcessor(unittest.TestCase):
             fields = {field["field_name"]: field for field in document["extracted_fields"]}
             self.assertEqual(fields["category"]["provenance"]["fieldSource"], "categorizer")
 
+    def test_legacy_conflicting_approved_vendor_rules_fail_closed(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            receipt_path = os.path.join(temp_dir, "receipt.txt")
+            with open(receipt_path, "w", encoding="utf-8") as handle:
+                handle.write("Vendor: Office Shop\nDate: 2026-06-28\nTotal: EUR 42.50\n")
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            document_id = ledger.register_document({
+                "source": "local_folder",
+                "sourceDocumentId": "conflicting-approved-rules",
+                "originalFilename": "receipt.txt",
+                "mimeType": "text/plain",
+                "storagePath": receipt_path,
+                "documentType": "text",
+                "metadata": {"routing": {"targetSystem": "waveapps_business"}},
+                "processingStatus": "imported",
+            })
+            first_rule_id = ledger.upsert_vendor_category_rule({
+                "vendorName": "Office Shop",
+                "category": "Office Supplies",
+                "targetSystem": "waveapps_business",
+                "status": "approved",
+            })
+            second_rule_id = ledger.upsert_vendor_category_rule({
+                "vendorName": "Office Shop",
+                "category": "Equipment",
+                "targetSystem": "waveapps_business",
+                "status": "suggested",
+            })
+            with ledger._connection() as connection:
+                connection.execute(
+                    "UPDATE vendor_category_rules SET status = 'approved' WHERE id = ?",
+                    (second_rule_id,),
+                )
+
+            result = LocalDocumentProcessor(
+                ledger,
+                categorizer=StaticCategorizer(category="Office Supplies", confidence_score=0.99),
+                validator=StaticValidator(),
+            ).process_document(document_id)
+
+            self.assertEqual(result["status"], "needs_review")
+            self.assertEqual(result["category"], "Manual Review")
+            self.assertIn("conflicting_approved_vendor_category_rules", result["reviewReasons"])
+            self.assertEqual(
+                result["vendorCategoryRuleConflict"]["ruleIds"],
+                sorted([first_rule_id, second_rule_id]),
+            )
+            self.assertEqual(ledger.get_document(document_id)["category"], "Manual Review")
+
     def test_process_imported_batches_only_imported_documents(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             receipt_path = os.path.join(temp_dir, "receipt.txt")

@@ -541,6 +541,47 @@ class TestLocalBookkeepingRecordService(unittest.TestCase):
             self.assertIsNone(record["metadata"]["appliedVendorCategoryRule"])
             self.assertEqual(record["line_items"][0]["account_name"], "wave-checking")
 
+    def test_upsert_from_bank_transaction_fails_closed_on_legacy_rule_conflict(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            ledger.upsert_vendor_category_rule({
+                "vendorName": "Office Shop",
+                "category": "Office Supplies",
+                "targetSystem": "waveapps",
+                "status": "approved",
+            })
+            conflict_id = ledger.upsert_vendor_category_rule({
+                "vendorName": "Office Shop",
+                "category": "Equipment",
+                "targetSystem": "waveapps",
+                "status": "suggested",
+            })
+            with ledger._connection() as connection:
+                connection.execute(
+                    "UPDATE vendor_category_rules SET status = 'approved' WHERE id = ?",
+                    (conflict_id,),
+                )
+            transaction_id = ledger.upsert_bank_transaction({
+                "accountIdentifier": "wave-checking",
+                "transactionId": "tx-rule-conflict-record",
+                "counterparty": "Office Shop",
+                "transactionDate": "2026-06-28",
+                "amount": -42.5,
+                "currency": "EUR",
+                "status": "posted",
+            })
+
+            result = LocalBookkeepingRecordService(ledger, {}).upsert_from_bank_transaction(
+                transaction_id,
+            )
+            record = ledger.get_bookkeeping_record(result["recordId"])
+
+            self.assertEqual(result["status"], "needs_review")
+            self.assertTrue(result["reviewRequired"])
+            self.assertIsNone(record["category"])
+            self.assertIsNone(record["target_account"])
+            self.assertTrue(record["metadata"]["vendorCategoryRuleConflict"]["conflict"])
+
     def test_refresh_bank_transactions_updates_all_records_without_audit_spam(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))

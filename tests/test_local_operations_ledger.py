@@ -768,6 +768,35 @@ class TestLocalOperationsLedger(unittest.TestCase):
             self.assertEqual(rule["metadata"]["statusHistory"][0]["to"], "approved")
             self.assertEqual(metrics["suggested_vendor_rules"], 0)
 
+    def test_conflicting_approved_vendor_rules_are_rejected(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            approved_id = ledger.upsert_vendor_category_rule({
+                "vendorName": "Office Shop",
+                "category": "Office Supplies",
+                "targetSystem": "waveapps_business",
+                "status": "approved",
+            })
+            suggested_id = ledger.upsert_vendor_category_rule({
+                "vendorName": " OFFICE SHOP ",
+                "category": "Equipment",
+                "targetSystem": "waveapps_business",
+                "status": "suggested",
+            })
+
+            with self.assertRaisesRegex(ValueError, "Conflicting approved"):
+                ledger.update_vendor_category_rule_status(suggested_id, "approved")
+            with self.assertRaisesRegex(ValueError, "Conflicting approved"):
+                ledger.upsert_vendor_category_rule({
+                    "vendorName": "office shop",
+                    "category": "Equipment",
+                    "targetSystem": "waveapps_business",
+                    "status": "approved",
+                })
+
+            self.assertEqual(ledger.get_vendor_category_rule(approved_id)["status"], "approved")
+            self.assertEqual(ledger.get_vendor_category_rule(suggested_id)["status"], "suggested")
+
     def test_duplicate_candidates_are_upserted_listed_and_resolved(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))

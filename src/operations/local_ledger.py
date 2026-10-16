@@ -5857,7 +5857,8 @@ class LocalOperationsLedger:
         if status not in VENDOR_CATEGORY_RULE_STATUSES:
             raise ValueError(f"Unsupported vendor category rule status: {status}")
 
-        with self._connection() as connection:
+        with self.write_transaction():
+            connection = self._write_transaction_connection.get()
             existing = connection.execute(
                 """
                 SELECT * FROM vendor_category_rules
@@ -5872,6 +5873,20 @@ class LocalOperationsLedger:
                 effective_status = status
                 if existing_status in GOVERNED_VENDOR_CATEGORY_RULE_STATUSES and status == "suggested":
                     effective_status = existing_status
+                if effective_status == "approved":
+                    conflict = connection.execute(
+                        """
+                        SELECT 1 FROM vendor_category_rules
+                        WHERE normalized_vendor_name = ? AND target_system = ?
+                          AND status = 'approved' AND category != ? AND id != ?
+                        LIMIT 1
+                        """,
+                        (normalized_vendor_name, target_system, category, rule_id),
+                    ).fetchone()
+                    if conflict:
+                        raise ValueError(
+                            "Conflicting approved vendor category rule already exists for this target"
+                        )
                 self._update_with_connection(
                     connection,
                     "vendor_category_rules",
@@ -5887,6 +5902,20 @@ class LocalOperationsLedger:
                     },
                 )
                 return rule_id
+            if status == "approved":
+                conflict = connection.execute(
+                    """
+                    SELECT 1 FROM vendor_category_rules
+                    WHERE normalized_vendor_name = ? AND target_system = ?
+                      AND status = 'approved' AND category != ?
+                    LIMIT 1
+                    """,
+                    (normalized_vendor_name, target_system, category),
+                ).fetchone()
+                if conflict:
+                    raise ValueError(
+                        "Conflicting approved vendor category rule already exists for this target"
+                    )
             return self._insert_with_connection(
                 connection,
                 "vendor_category_rules",
@@ -5924,7 +5953,8 @@ class LocalOperationsLedger:
         if status not in VENDOR_CATEGORY_RULE_STATUSES:
             raise ValueError(f"Unsupported vendor category rule status: {status}")
         now = self._now()
-        with self._connection() as connection:
+        with self.write_transaction():
+            connection = self._write_transaction_connection.get()
             row = connection.execute(
                 "SELECT * FROM vendor_category_rules WHERE id = ? LIMIT 1",
                 (rule_id,),
@@ -5932,6 +5962,25 @@ class LocalOperationsLedger:
             if not row:
                 return None
             rule = self._row_to_dict(row)
+            if status == "approved":
+                conflict = connection.execute(
+                    """
+                    SELECT 1 FROM vendor_category_rules
+                    WHERE normalized_vendor_name = ? AND target_system = ?
+                      AND status = 'approved' AND category != ? AND id != ?
+                    LIMIT 1
+                    """,
+                    (
+                        rule["normalized_vendor_name"],
+                        rule["target_system"],
+                        rule["category"],
+                        rule_id,
+                    ),
+                ).fetchone()
+                if conflict:
+                    raise ValueError(
+                        "Conflicting approved vendor category rule already exists for this target"
+                    )
             metadata = rule.get("metadata") or {}
             history = list(metadata.get("statusHistory") or [])
             history.append({

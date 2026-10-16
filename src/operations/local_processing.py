@@ -1580,7 +1580,16 @@ class LocalDocumentProcessor:
                 category = category_result.get("category", "Manual Review")
                 confidence_score = _safe_float(category_result.get("confidence_score"), 0.0)
                 applied_rule = self._approved_vendor_category_rule(document, extracted_data)
-                if applied_rule:
+                if applied_rule and applied_rule.get("conflict"):
+                    category = "Manual Review"
+                    confidence_score = 0.0
+                    processed_data["vendor_category_rule_conflict"] = {
+                        "vendorName": extracted_data.get("vendor_name") or document.get("vendor_name"),
+                        "targetSystem": applied_rule["target_system"],
+                        "ruleIds": applied_rule["rule_ids"],
+                        "categories": applied_rule["categories"],
+                    }
+                elif applied_rule:
                     category = applied_rule["category"]
                     confidence_score = max(confidence_score or 0.0, _safe_float(applied_rule.get("confidence_score"), 1.0) or 1.0)
                     processed_data["applied_vendor_category_rule"] = {
@@ -1690,6 +1699,7 @@ class LocalDocumentProcessor:
                     "fieldEvidence": processed_data.get("field_evidence") or {},
                     "duplicateMatch": duplicate_match if duplicate_match.get("is_duplicate") else None,
                     "appliedVendorCategoryRule": processed_data.get("applied_vendor_category_rule"),
+                    "vendorCategoryRuleConflict": processed_data.get("vendor_category_rule_conflict"),
                     "appliedTrustedCategorySuggestion": processed_data.get("applied_trusted_category_suggestion"),
                     "documentTypeClassification": document_type_classification,
                     "providerEvidencePolicy": provider_evidence_policy or None,
@@ -1779,6 +1789,7 @@ class LocalDocumentProcessor:
                 "duplicateOfDocumentId": duplicate_of_document_id,
                 "bookkeepingRecordId": record_result.get("recordId"),
                 "appliedVendorCategoryRule": processed_data.get("applied_vendor_category_rule"),
+                "vendorCategoryRuleConflict": processed_data.get("vendor_category_rule_conflict"),
                 "appliedTrustedCategorySuggestion": processed_data.get("applied_trusted_category_suggestion"),
                 "documentTypeClassification": document_type_classification,
                 "creditNoteAmountNormalization": credit_note_amount_normalization,
@@ -1797,6 +1808,7 @@ class LocalDocumentProcessor:
             "reviewReasons": review_reasons,
             "validation": validation,
             "appliedVendorCategoryRule": processed_data.get("applied_vendor_category_rule"),
+            "vendorCategoryRuleConflict": processed_data.get("vendor_category_rule_conflict"),
             "appliedTrustedCategorySuggestion": processed_data.get("applied_trusted_category_suggestion"),
             "documentType": semantic_document_type,
             "documentTypeClassification": document_type_classification,
@@ -1863,6 +1875,14 @@ class LocalDocumentProcessor:
         candidates = exact_target or universal
         if not candidates:
             return None
+        categories = sorted({str(rule.get("category") or "").strip() for rule in candidates})
+        if len(categories) > 1:
+            return {
+                "conflict": True,
+                "target_system": target_system,
+                "rule_ids": sorted(int(rule["id"]) for rule in candidates),
+                "categories": categories,
+            }
         return candidates[0]
 
     def _process_path(self, path: str, document: Dict[str, Any]) -> Dict[str, Any]:
@@ -1908,6 +1928,8 @@ class LocalDocumentProcessor:
         confidence_score: float,
     ) -> list:
         reasons = []
+        if processed_data.get("vendor_category_rule_conflict"):
+            reasons.append("conflicting_approved_vendor_category_rules")
         if not str(processed_data.get("ocr_text") or "").strip():
             reasons.append("empty_ocr_text")
         document_type_classification = processed_data.get("document_type_classification") or {}

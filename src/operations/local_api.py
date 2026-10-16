@@ -8573,12 +8573,15 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         status = str(request.form.get("status") or "").strip()
         if status not in RULE_RESOLUTION_STATUSES:
             status = "suggested"
-        rule = ledger.update_vendor_category_rule_status(
-            rule_id,
-            status,
-            resolution=request.form.get("resolution") or None,
-            actor="local_dashboard",
-        )
+        try:
+            rule = ledger.update_vendor_category_rule_status(
+                rule_id,
+                status,
+                resolution=request.form.get("resolution") or None,
+                actor="local_dashboard",
+            )
+        except ValueError as exc:
+            return jsonify({"success": False, "error": str(exc)}), 400
         if rule:
             ledger.record_audit_event({
                 "action": "local_dashboard.vendor_category_rule.status_changed",

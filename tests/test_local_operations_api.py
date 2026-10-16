@@ -2136,6 +2136,34 @@ class TestLocalOperationsApi(unittest.TestCase):
             self.assertEqual(rule["metadata"]["lastActor"], "local_dashboard")
             self.assertEqual(ledger.dashboard_metrics()["suggested_vendor_rules"], 0)
 
+    def test_dashboard_rule_resolution_reports_conflicting_approval(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger_path = os.path.join(temp_dir, "fab.sqlite3")
+            ledger = LocalOperationsLedger(ledger_path)
+            ledger.upsert_vendor_category_rule({
+                "vendorName": "Train Vendor",
+                "category": "Travel",
+                "targetSystem": "waveapps_business",
+                "status": "approved",
+            })
+            suggested_id = ledger.upsert_vendor_category_rule({
+                "vendorName": "Train Vendor",
+                "category": "Office Supplies",
+                "targetSystem": "waveapps_business",
+                "status": "suggested",
+            })
+            app = create_app({"fab_local_ledger_path": ledger_path})
+            client = app.test_client()
+
+            response = client.post(
+                f"/rules/{suggested_id}/resolve",
+                data={"status": "approved"},
+            )
+
+            self.assertEqual(response.status_code, 400)
+            self.assertIn("Conflicting approved", response.get_json()["error"])
+            self.assertEqual(ledger.get_vendor_category_rule(suggested_id)["status"], "suggested")
+
     def test_api_exposes_vendor_and_category_operating_directories(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             ledger_path = os.path.join(temp_dir, "fab.sqlite3")
