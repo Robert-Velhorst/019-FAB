@@ -19,6 +19,12 @@ LOCKS = (
 )
 
 
+def seed_verification_lock(root: Path, temporary_root: Path, output_name: str) -> Path:
+    output = temporary_root / output_name
+    shutil.copyfile(root / output_name, output)
+    return output
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group()
@@ -38,7 +44,11 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="fab-python-locks-") as temporary:
         temp_root = Path(temporary)
         for input_name, output_name in LOCKS:
-            output = temp_root / output_name if args.verify else root / output_name
+            output = (
+                seed_verification_lock(root, temp_root, output_name)
+                if args.verify
+                else root / output_name
+            )
             command = [
                 uv,
                 "pip",
