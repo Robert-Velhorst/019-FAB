@@ -21,6 +21,8 @@ Audit date: 2026-08-13
 
 ## Remediated in this audit
 
+- Replaced eager `os.walk` directory enumeration in local intake with a deterministic `scandir` traversal capped at 120,000 filesystem entries per source scan. This bounds memory spent listing irrelevant files and directories before the existing document, byte, and directory limits apply; overflow fails closed as `attention_required` without importing a partial manifest.
+
 - Replaced repeated export-attempt list scans and no-op updates with indexed identity lookups, route-without-export queries, explicit changed-state results, and no-op batch behavior.
 - Made master-ledger projection and Wave daily planning due-based, preventing identical checksum projections and same-day plans from running every five minutes.
 - Reduced recurring workflow persistence to runnable steps while preserving complete failure and emergency-stop boundaries; coalesced unchanged worker summaries with bounded daily heartbeats.
@@ -136,7 +138,10 @@ Audit date: 2026-08-13
   invalid `status=unreconciled` filter and excludes only finalized
   reconciliation states from the local amount projection.
 
-## Verification snapshot (2026-10-16)
+## Verification snapshot (2026-10-17)
+
+- Fresh complete Python suite on the canonical working tree passed 1,982 tests, 6 skipped, and 219 subtests in 1,270.51 seconds; the filesystem-entry cap regression passed. Python lock verification and its regression test also passed.
+- PR #125 head `cd5889f` passed hosted Linux/Windows backend, web, isolated MySQL, both container-build, and four-language CodeQL checks. The bounded folder traversal is a newer change and needs a fresh hosted run.
 
 - Latest full Python suite on the current worktree: 1,976 passed, 6 skipped, and 219 subtests passed in 748.66 seconds. The changed API, Drive archive, autonomy, processing, report-export, and anomaly-analysis areas were covered by this run.
 - Python lock regeneration/verification passed for all four hash-locked sets. `pip-audit` reported no known vulnerabilities for the production, local, ML, and test locks.

@@ -405,6 +405,29 @@ class TestLocalFolderIntake(unittest.TestCase):
             ):
                 self.assertFalse(intake.has_pending_changes([intake_dir]))
 
+    def test_filesystem_entry_limit_bounds_irrelevant_directory_contents(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            intake_dir = os.path.join(temp_dir, "sort-out")
+            os.makedirs(intake_dir)
+            for name in ("one.bin", "two.bin", "receipt.pdf"):
+                with open(os.path.join(intake_dir, name), "wb") as handle:
+                    handle.write(b"source")
+            intake = LocalFolderIntake(ledger)
+            intake.MAX_FILESYSTEM_ENTRIES_PER_SCAN = 2
+
+            result = intake.rescan([intake_dir])
+
+            self.assertEqual(result["status"], "attention_required")
+            self.assertEqual(
+                result["skipped"][0]["reason"],
+                "filesystem_entry_limit_exceeded",
+            )
+            self.assertEqual(ledger.list_documents(), [])
+            source = ledger.list_source_accounts(source_type="local_folder")[0]
+            self.assertEqual(source["status"], "attention_required")
+            self.assertEqual(ledger.get_source_scan_batch(source["id"], None, 10), [])
+
     def test_sha256_rejects_symlink_and_applies_default_size_cap(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             outside = os.path.join(temp_dir, "outside.pdf")

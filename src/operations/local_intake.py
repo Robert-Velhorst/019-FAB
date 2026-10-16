@@ -38,6 +38,7 @@ class LocalFolderIntake:
     MAX_MANIFEST_ENTRIES = 100_000
     MAX_MANIFEST_PATH_BYTES = 16 * 1024 * 1024
     MAX_DIRECTORIES_PER_SCAN = 20_000
+    MAX_FILESYSTEM_ENTRIES_PER_SCAN = 120_000
 
     def __init__(
         self,
@@ -134,6 +135,7 @@ class LocalFolderIntake:
                     "maxManifestEntries": self.MAX_MANIFEST_ENTRIES,
                     "maxManifestPathBytes": self.MAX_MANIFEST_PATH_BYTES,
                     "maxDirectories": self.MAX_DIRECTORIES_PER_SCAN,
+                    "maxFilesystemEntries": self.MAX_FILESYSTEM_ENTRIES_PER_SCAN,
                 })
                 summary.setdefault("scanIncomplete", {})[root] = True
                 summary["status"] = "attention_required"
@@ -149,6 +151,7 @@ class LocalFolderIntake:
                         "maxManifestEntries": self.MAX_MANIFEST_ENTRIES,
                         "maxManifestPathBytes": self.MAX_MANIFEST_PATH_BYTES,
                         "maxDirectories": self.MAX_DIRECTORIES_PER_SCAN,
+                        "maxFilesystemEntries": self.MAX_FILESYSTEM_ENTRIES_PER_SCAN,
                     },
                 })
                 continue
@@ -377,15 +380,10 @@ class LocalFolderIntake:
 
     def _iter_document_paths(self, root: str):
         visited_directories = 0
-
-        def fail_walk(error):
-            raise error
-
-        for current_root, dir_names, file_names in os.walk(
-            root,
-            followlinks=False,
-            onerror=fail_walk,
-        ):
+        visited_entries = 0
+        pending_directories = [root]
+        while pending_directories:
+            current_root = pending_directories.pop()
             visited_directories += 1
             if visited_directories > self.MAX_DIRECTORIES_PER_SCAN:
                 raise SourceScanManifestLimitError(
@@ -393,20 +391,32 @@ class LocalFolderIntake:
                     max_entries=self.MAX_MANIFEST_ENTRIES,
                     max_path_bytes=self.MAX_MANIFEST_PATH_BYTES,
                 )
-            dir_names.sort()
-            dir_names[:] = [
-                name
-                for name in dir_names
-                if not os.path.islink(os.path.join(current_root, name))
-            ]
-            for file_name in sorted(file_names):
-                path = os.path.join(current_root, file_name)
-                if os.path.islink(path):
-                    continue
-                extension = os.path.splitext(file_name)[1].lower()
-                if "*" not in self.allowed_extensions and extension not in self.allowed_extensions:
-                    continue
+            child_directories = []
+            document_paths = []
+            with os.scandir(current_root) as entries:
+                for entry in entries:
+                    visited_entries += 1
+                    if visited_entries > self.MAX_FILESYSTEM_ENTRIES_PER_SCAN:
+                        raise SourceScanManifestLimitError(
+                            "filesystem_entry_limit_exceeded",
+                            max_entries=self.MAX_MANIFEST_ENTRIES,
+                            max_path_bytes=self.MAX_MANIFEST_PATH_BYTES,
+                        )
+                    if entry.is_symlink():
+                        continue
+                    if entry.is_dir(follow_symlinks=False):
+                        child_directories.append(entry.name)
+                        continue
+                    extension = os.path.splitext(entry.name)[1].lower()
+                    if "*" not in self.allowed_extensions and extension not in self.allowed_extensions:
+                        continue
+                    document_paths.append(os.path.join(current_root, entry.name))
+            for path in sorted(document_paths):
                 yield path
+            pending_directories.extend(
+                os.path.join(current_root, name)
+                for name in reversed(sorted(child_directories))
+            )
 
     def register_fetched_document(
         self,
