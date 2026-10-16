@@ -53,6 +53,16 @@
   retried. CodeQL run `38966062508` is queued for the same head. A fresh PR
   event is required to verify the updated code and action pins.
 
+## 2026-10-16 - Validate the full intake integration slice locally
+
+- Ran the broader local regression group across folder intake, connector intake,
+  Drive relay, photo-picker intake/client, and the local operations API:
+  `174 passed, 2 skipped, 2 subtests passed` in 116.59 seconds.
+- Confirmed both PR-triggered FAB runs and a workflow-dispatch run fail with
+  `startup_failure` before any jobs are created. Updated the checkpoint to
+  record that hosted-runner blocker and the exact current PR head. CodeQL remains
+  queued; no hosted verification is inferred from the local tests.
+
 ## 2026-10-16 - Correct Drive archive recovery state and review PR security gate
 
 - Fixed a false `externalSubmission: not_executed` result after Drive had already
