@@ -9,6 +9,7 @@
 - Corrected stale C0/C7/C8 state in `CODEX_CHECKPOINTS.md` to distinguish the canonical checkout from the isolated PR worktree and reflect current check/security status. `git diff --check` passed. No provider writes, live data, or public tunnel were used.
 - Pushed the checkpoint-only commit `9d921d2d4f27167ea22e478bbd62e6e99d11e20b` to PR #125. Refreshed GitHub state confirms the PR is open at that head; all new CI and CodeQL checks are pending. The previous code commit's Linux, frontend, MySQL, and container checks passed; Windows and CodeQL were pending.
 - Deep HAI/API regression verification passed after the executor-result fix (`208 passed, 10 subtests`). The narrower HAI module passed (`25 passed, 8 subtests`). Ruff is not installed in the isolated venv; `git diff --check` and Python compilation remain the applicable local static checks.
+- The Drive/Wave delivery regression suite passed with the fix (`52 passed, 32 subtests`). Pushed `e43e9e0e808a1f7a33934028f4ce7bcdfbe4124c` to PR #125; the fresh FAB verification run `38940384831` and CodeQL run `38940379696` were queued/pending at the latest check. No live archive operation was performed.
 
 ## 2026-10-16 - Revalidate published PR checkout on Windows
 
