@@ -18,8 +18,8 @@
   stack-trace exposure in `local_api.py`. This is an active security blocker;
   the passing analysis jobs are not a clean security result. Triage and fix the
   findings before describing the PR as security-clean.
-- At this point `11d124b` is pushed; the Drive correction is hosted and the next
-  intake security correction is local pending its commit and hosted scan.
+- The Drive recovery correction is pushed as `11d124b`; intake path confinement
+  and non-reflective rule errors were pushed as `f3b17c3` and `4d8f1c0`.
 
 ## 2026-10-16 - Confine local intake paths after symlink resolution
 
@@ -28,13 +28,13 @@
   configured root, including through a symlinked parent, are rejected before
   they are statted or hashed. Added a parent-symlink escape regression with a
   Windows fallback that simulates the resolved target.
-- Verification: local intake suite passed (`17 passed, 2 skipped`); combined
-  intake, connector, Drive relay, photo picker, and upload API tests passed
-  (`44 passed, 2 skipped`). Python compilation and `git diff --check` passed.
+- Verification at the time: local intake suite passed (`17 passed, 2 skipped`);
+  combined intake, connector, Drive relay, photo picker, and upload API tests
+  passed (`44 passed, 2 skipped`). Python compilation and `git diff --check` passed.
   Ruff is not installed in this checkout runtime.
-- The then-current PR head `11d124b` still had the previously observed five
-  high path-flow and one medium exception-exposure CodeQL alerts; the path
-  hardening is in this local update and must be assessed by the next hosted scan.
+- The then-current PR head `11d124b` still had five high path-flow and one
+  medium exception-exposure CodeQL alerts. The fixes were pushed afterward and
+  require hosted reassessment.
 
 ## 2026-10-16 - Stop reflecting vendor-rule exception details
 
@@ -44,10 +44,18 @@
 - Verification: vendor-rule resolution route tests passed (`3 passed`), local
   intake suite passed (`17 passed, 2 skipped`), and Python compilation plus
   `git diff --check` passed. The full intake/upload/connector group passed
-  (`44 passed, 2 skipped`) after the path-boundary changes.
-- These latest path and exception-handling changes await commit and a fresh
-  hosted CodeQL result; the previous aggregate check remains a failure until a
-  new head proves otherwise.
+  (`44 passed, 2 skipped`) after the path-boundary changes. These fixes are
+  pushed at `4d8f1c0`; fresh hosted checks were pending at the last poll.
+
+## 2026-10-16 - Bind recurring intake hashes to configured roots
+
+- The shared hash helper now accepts the configured root and revalidates
+  canonical containment before stat/open and after opening, including in
+  recurring pending-change checks. This protects both import and change-detection
+  paths when a candidate changes after directory walking.
+- Verification: combined intake, connector, Drive relay, photo picker, upload,
+  and vendor-rule route tests passed (`48 passed, 2 skipped`); compilation and
+  `git diff --check` passed. This follow-up is local and needs hosted retesting.
 
 ## 2026-10-16 - Refresh PR state and continue security review
 

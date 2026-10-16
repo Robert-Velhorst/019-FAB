@@ -329,7 +329,7 @@ class LocalFolderIntake:
                     if not existing:
                         return True
                     existing_hash = _document_content_hash(existing)
-                    if not existing_hash or existing_hash != _sha256_file(path):
+                    if not existing_hash or existing_hash != _sha256_file(path, source_root=root):
                         return True
                 except (OSError, DocumentSizeLimitError):
                     return True
@@ -485,7 +485,12 @@ class LocalFolderIntake:
                     }
                 }
             try:
-                content_hash = _sha256_file(path, max_bytes=max_bytes, read_budget=read_budget)
+                content_hash = _sha256_file(
+                    path,
+                    max_bytes=max_bytes,
+                    read_budget=read_budget,
+                    source_root=root,
+                )
             except DocumentSizeLimitError as exc:
                 if str(exc) == "scan_byte_limit_exceeded":
                     return {
@@ -784,14 +789,26 @@ def _sha256_file(
     *,
     max_bytes: Optional[int] = None,
     read_budget: Optional[_SourceReadBudget] = None,
+    source_root: Optional[str] = None,
 ) -> str:
     if max_bytes is None:
         is_text = os.path.splitext(path)[1].lower() in {".csv", ".txt"}
         max_bytes = MAX_TEXT_DOCUMENT_BYTES if is_text else MAX_SOURCE_DOCUMENT_BYTES
     max_bytes = max(1, int(max_bytes))
+    if source_root is not None:
+        path = os.path.realpath(_normalize_path(path))
+        root = os.path.realpath(_normalize_path(source_root))
+        try:
+            common_root = os.path.commonpath((root, path))
+        except ValueError as exc:
+            raise OSError("source_path_outside_root") from exc
+        if os.path.normcase(common_root) != os.path.normcase(root):
+            raise OSError("source_path_outside_root")
     before = os.stat(path, follow_symlinks=False)
     if not stat_module.S_ISREG(before.st_mode):
         raise OSError("source_not_regular_file")
+    if source_root is not None:
+        _ensure_path_within_root(path, source_root)
     if read_budget is not None and before.st_size > read_budget.remaining:
         raise DocumentSizeLimitError("scan_byte_limit_exceeded")
     effective_limit = min(max_bytes, read_budget.remaining) if read_budget is not None else max_bytes
@@ -805,6 +822,8 @@ def _sha256_file(
         opened = os.fstat(handle.fileno())
         if not stat_module.S_ISREG(opened.st_mode) or not _same_file_identity(before, opened):
             raise OSError("source_changed_before_hash")
+        if source_root is not None:
+            _ensure_path_within_root(path, source_root)
         if opened.st_size > effective_limit:
             reason = "scan_byte_limit_exceeded" if read_budget is not None else "document_exceeds_limit"
             raise DocumentSizeLimitError(reason)
@@ -824,6 +843,17 @@ def _sha256_file(
     if not _same_file_identity(opened, after) or not _same_file_identity(after, current):
         raise OSError("source_changed_during_hash")
     return digest.hexdigest()
+
+
+def _ensure_path_within_root(path: str, source_root: str) -> None:
+    resolved_root = os.path.realpath(_normalize_path(source_root))
+    resolved_path = os.path.realpath(_normalize_path(path))
+    try:
+        common_root = os.path.commonpath((resolved_root, resolved_path))
+    except ValueError as exc:
+        raise OSError("source_path_outside_root") from exc
+    if os.path.normcase(common_root) != os.path.normcase(resolved_root):
+        raise OSError("source_path_outside_root")
 
 
 def _same_file_identity(left, right) -> bool:

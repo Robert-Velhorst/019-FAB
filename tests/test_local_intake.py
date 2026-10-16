@@ -14,6 +14,19 @@ from src.operations.local_ledger import LocalOperationsLedger
 
 
 class TestLocalFolderIntake(unittest.TestCase):
+    def test_hash_rejects_path_outside_explicit_source_root(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_root = os.path.join(temp_dir, "intake")
+            outside_root = os.path.join(temp_dir, "outside")
+            os.makedirs(source_root)
+            os.makedirs(outside_root)
+            outside_path = os.path.join(outside_root, "receipt.pdf")
+            with open(outside_path, "wb") as handle:
+                handle.write(b"outside root")
+
+            with self.assertRaisesRegex(OSError, "source_path_outside_root"):
+                local_intake_module._sha256_file(outside_path, source_root=source_root)
+
     def test_hash_rejects_unexpected_eof_before_recorded_file_size(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             path = os.path.join(temp_dir, "receipt.pdf")
