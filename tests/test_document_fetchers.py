@@ -35,6 +35,7 @@ class TestDocumentFetchers(unittest.TestCase):
             "google_drive_folder_id": "sort-out-folder",
             "freshdesk_api_key": "test_api_key",
             "freshdesk_domain": "test_domain",
+            "freshdesk_attachment_allowed_hosts": ["example.com"],
             "freshdesk_download_dir": os.path.join(self.temp_dir.name, "freshdesk_downloads"),
             "google_photos_credentials_file": os.path.join(self.temp_dir.name, "photos_credentials.json"),
             "google_photos_token_file": os.path.join(self.temp_dir.name, "photos_token.json"),
@@ -195,6 +196,61 @@ class TestDocumentFetchers(unittest.TestCase):
         self.assertEqual(service.users.return_value.messages.return_value.list.call_count, 2)
         for document in documents:
             os.remove(document["local_path"])
+
+    @patch("src.document_fetchers.gmail_fetcher.build")
+    @patch("src.document_fetchers.gmail_fetcher.InstalledAppFlow")
+    @patch("src.document_fetchers.gmail_fetcher.Request")
+    @patch("src.document_fetchers.gmail_fetcher.os.path.exists")
+    @patch("src.document_fetchers.gmail_fetcher.GoogleOAuthTokenStore")
+    def test_gmail_run_byte_budget_stops_and_marks_import_partial(
+        self,
+        mock_pickle,
+        mock_exists,
+        mock_Request,
+        mock_InstalledAppFlow,
+        mock_build,
+    ):
+        mock_exists.return_value = True
+        mock_pickle.return_value.load.return_value = MagicMock()
+        service = MagicMock()
+        mock_build.return_value = service
+        service.users.return_value.messages.return_value.list.return_value.execute.return_value = {
+            "messages": [{"id": "msg-budget"}],
+        }
+        service.users.return_value.messages.return_value.get.return_value.execute.return_value = {
+            "internalDate": "1735689600000",
+            "payload": {
+                "headers": [{"name": "From", "value": "vendor@example.com"}],
+                "parts": [
+                    {
+                        "filename": "first.pdf",
+                        "body": {"data": base64.urlsafe_b64encode(b"A" * 600).decode("ascii")},
+                        "mimeType": "application/pdf",
+                    },
+                    {
+                        "filename": "second.pdf",
+                        "body": {"data": base64.urlsafe_b64encode(b"B" * 600).decode("ascii")},
+                        "mimeType": "application/pdf",
+                    },
+                ],
+            },
+        }
+        config = {
+            **self.config,
+            "gmail_max_attachment_bytes": 1024,
+            "gmail_max_run_bytes": 1024,
+        }
+
+        fetcher = GmailFetcher(config)
+        documents = fetcher.fetch_documents()
+
+        self.assertEqual(len(documents), 1)
+        self.assertEqual(fetcher.last_run["status"], "partial")
+        self.assertEqual(fetcher.last_run["downloadedBytes"], 600)
+        self.assertEqual(fetcher.last_run["maxRunBytes"], 1024)
+        with open(documents[0]["local_path"], "rb") as handle:
+            self.assertEqual(len(handle.read()), 600)
+        os.remove(documents[0]["local_path"])
 
     @patch("src.document_fetchers.gmail_fetcher.build")
     @patch("src.document_fetchers.gmail_fetcher.InstalledAppFlow")
@@ -369,7 +425,7 @@ class TestDocumentFetchers(unittest.TestCase):
         mock_response.status_code = 200
         mock_response.json.return_value = {
             "tickets": [
-                {"id": 1, "attachments": [{"id": 101, "name": "report.pdf", "attachment_url": "http://example.com/report.pdf"}]}
+                {"id": 1, "attachments": [{"id": 101, "name": "report.pdf", "attachment_url": "https://example.com/report.pdf"}]}
             ]
         }
         conversations_response = MagicMock()
@@ -406,6 +462,50 @@ class TestDocumentFetchers(unittest.TestCase):
             mock_requests_get.call_args.args[0],
             "https://example.freshdesk.com/api/v2/tickets",
         )
+
+    @patch("src.document_fetchers.freshdesk_fetcher.requests.get")
+    def test_freshdesk_attachment_fetch_rejects_untrusted_host_and_redirect(self, mock_requests_get):
+        fetcher = FreshdeskFetcher(self.config)
+        attachment = {
+            "id": 1,
+            "name": "invoice.pdf",
+            "content_type": "application/pdf",
+            "attachment_url": "https://127.0.0.1/private.pdf",
+        }
+        kwargs = {
+            "ticket": {"id": 1},
+            "conversation": {},
+            "attachment": attachment,
+            "document_id": "freshdesk_1_1",
+            "match": None,
+            "attachments_dir": self.config["freshdesk_download_dir"],
+            "timeout": 10,
+            "max_attachment_bytes": 1024,
+            "pdf_only": True,
+        }
+
+        kwargs["attachment"] = {**attachment, "attachment_url": "https://attacker.example/private.pdf"}
+        blocked = fetcher._attachment_document(**kwargs)
+        self.assertEqual(blocked["reason"], "unsafe_url")
+        mock_requests_get.assert_not_called()
+
+        kwargs["attachment"] = attachment
+        blocked = fetcher._attachment_document(**kwargs)
+        self.assertEqual(blocked["reason"], "unsafe_url")
+        mock_requests_get.assert_not_called()
+
+        redirect_response = MagicMock()
+        redirect_response.status_code = 302
+        mock_requests_get.return_value = redirect_response
+        kwargs["attachment"] = {
+            **attachment,
+            "attachment_url": "https://example.com/redirect.pdf",
+        }
+        redirected = fetcher._attachment_document(**kwargs)
+
+        self.assertEqual(redirected["reason"], "unsafe_url")
+        self.assertFalse(mock_requests_get.call_args.kwargs["allow_redirects"])
+        redirect_response.close.assert_called_once()
 
     @patch("src.document_fetchers.freshdesk_fetcher.requests.put")
     @patch("src.document_fetchers.freshdesk_fetcher.requests.get")

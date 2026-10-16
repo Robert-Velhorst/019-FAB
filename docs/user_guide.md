@@ -148,6 +148,8 @@ Configuration for fetching documents from Gmail.
 *   `scanner_mode`: Enables strict scanner-mailbox intake. In this mode FAB accepts only PDF filenames with an allowed PDF MIME type and a verified `%PDF-` file signature.
 *   `trusted_senders`: Comma-separated exact sender addresses accepted in scanner mode. The Noodzakelijk Online HP ePrint profile uses `eprintcenter@hp8.us`.
 *   `max_attachment_bytes`: Rejects oversized scanner attachments before writing them to the intake cache.
+*   `max_run_bytes`: Caps combined attachment bytes in one scan; reaching it marks the intake partial and prevents checkpoint advancement. Defaults to 250 MiB.
+*   `max_run_attachments`: Caps accepted attachments per scan; reaching it marks the intake partial and prevents checkpoint advancement. Defaults to 5,000.
 *   `incremental_overlap_seconds`: Rechecks this many seconds before the durable last-successful checkpoint. The overlap prevents boundary loss while stable provider IDs keep repeated results idempotent.
 
 Use the **Gmail scanner** activation step in the operator dashboard to install a desktop OAuth client and complete user-owned, read-only Gmail consent. FAB reads matching attachments directly into its durable ledger; it does not stage them through Drive, mark messages read, add labels, or delete source email. The worker then runs OCR, field extraction, validation, duplicate detection, learned vendor categorization, routing, and the existing Wave approval/readback gates. Disable the older Apps Script trigger after activation so it cannot create a second, racing Drive copy.
@@ -185,7 +187,8 @@ Configuration for fetching documents from Freshdesk.
 *   `ticket_statuses`: Freshdesk status IDs searched by the profile; defaults to open and pending (`2,3`).
 *   `include_ticket_description`: Retains normalized ticket text as non-posting supporting evidence.
 *   `pdf_only`: Requires attachment filename, MIME type, and binary signature to identify a PDF.
-*   `require_https_attachments`: Rejects non-HTTPS attachment URLs for the financial profile.
+*   `require_https_attachments`: Retained for configuration compatibility; attachment downloads always require HTTPS.
+*   `attachment_allowed_hosts`: Optional comma-separated exact hostnames for Freshdesk attachment CDNs. The configured API hostname is allowed automatically; redirects and IP-literal URLs are rejected.
 
 The Freshdesk connector is read-only. It never closes tickets and does not copy
 files to Drive; matched evidence enters FAB's immutable local ledger directly.

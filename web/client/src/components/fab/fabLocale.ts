@@ -33,6 +33,7 @@ const dutchStatuses: Record<string, string> = {
   credentials_required: "Referenties vereist",
   needs_attention: "Aandacht nodig",
   supervision_required: "Toezicht vereist",
+  outcome_unknown: "Resultaat onbekend; controleer Wave",
   idle: "Inactief",
   high: "Hoog",
   medium: "Middel",
