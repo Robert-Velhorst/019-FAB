@@ -1,5 +1,23 @@
 # Codex Worklog
 
+## 2026-10-16 - Confirm hosted CI and refresh PR security checkpoint
+
+- Verified PR #125 remains open at `6a3bf9bc249b1b6049ee3428c99892c564d3e30e`;
+  the isolated worktree is clean. Both private FAB GHCR packages already grant
+  `Robert-Velhorst/019-FAB` Actions Write; this was verified in both package
+  settings, so no access change was necessary.
+- Hosted FAB verification run `38966840477` completed successfully across all
+  nine jobs. Linux backend: 1,919 passed, 44 skipped, 219 subtests. Four Windows
+  shards: 1,985 passed, 15 skipped, 219 subtests total. Frontend: 471 passed,
+  5 skipped. MySQL integration: 5 passed. Both production container builds
+  passed without publishing images.
+- CodeQL run `38966836975` has four language jobs but was still queued at the
+  latest check. The latest default-branch analysis is at `6445f876`; its open
+  findings are not attributed to this PR head, and no findings were dismissed.
+- Refreshed `CODEX_CHECKPOINTS.md` and `GOAL_COMPLETION_MATRIX.md` so hosted CI
+  status is accurate. Provider writes, live ngrok exposure, target-host cloud
+  deployment, and human/accountant acceptance remain separate unverified gates.
+
 ## 2026-10-16 - Verify intake hardening and refresh release/security checkpoint
 
 - Verified the isolated PR #125 checkout is clean at `1dee2d8` on
