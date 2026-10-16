@@ -46,8 +46,12 @@
 - Fixed Drive relay basename handling to interpret both slash styles as
   separators before Werkzeug sanitization. Focused relay tests now pass
   (`5 passed`); Python compilation and `git diff --check` pass. Updated the
-  checkpoint with the exact failed CI result and staged the workflow fix for a
-  new hosted verification run.
+  checkpoint with the exact failed CI result. Pushed the code and workflow
+  updates as `9fa48a2`.
+- The FAB verification trigger for `9fa48a2` ended as `startup_failure` before
+  any job was created; there is no run log, and GitHub says the run cannot be
+  retried. CodeQL run `38966062508` is queued for the same head. A fresh PR
+  event is required to verify the updated code and action pins.
 
 ## 2026-10-16 - Correct Drive archive recovery state and review PR security gate
 
