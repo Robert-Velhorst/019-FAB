@@ -2,7 +2,7 @@
   "name": "fab-website",
   "version": "1.0.0",
   "type": "module",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "scripts": {
     "dev": "tsx watch server/dev.ts",
     "build": "vite build && node scripts/verify-production-build.mjs && esbuild server/_core/index.ts --platform=node --bundle --format=esm --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\" --outdir=dist && esbuild server/fabStandalone.ts --platform=node --bundle --format=esm --splitting --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\" --outdir=dist --entry-names=fab-standalone --chunk-names=fab-chunks/[name]-[hash]",
