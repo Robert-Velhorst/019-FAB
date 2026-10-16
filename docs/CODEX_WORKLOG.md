@@ -1,5 +1,21 @@
 # Codex Worklog
 
+## 2026-10-16 - Verify intake hardening and refresh release/security checkpoint
+
+- Verified the isolated PR #125 checkout is clean at `1dee2d8` on
+  `codex/fab-followup-20261015`. Regression tests for local intake, connector
+  intake, and Drive relay passed (`40 passed, 2 skipped`); Python compilation
+  and `git diff --check` passed.
+- The FAB verification run `38964035980` and CodeQL run `38964032687` are both
+  queued for this exact commit. The earlier CodeQL run reported six high-severity
+  path-flow alerts; latest hosted security status therefore remains unresolved.
+- Confirmed the two FAB GHCR packages remain private and associated with
+  `Robert-Velhorst/019-FAB`. Their Actions Write access was already verified in
+  package settings on 2026-10-16 after the user's authorization; no additional
+  permission change or package publication was needed for this update.
+- Updated `CODEX_CHECKPOINTS.md` to replace stale PR heads and CI references.
+  No live provider data, Drive files, release, or package contents were changed.
+
 ## 2026-10-16 - Correct Drive archive recovery state and review PR security gate
 
 - Fixed a false `externalSubmission: not_executed` result after Drive had already
