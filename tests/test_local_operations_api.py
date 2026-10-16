@@ -2164,6 +2164,18 @@ class TestLocalOperationsApi(unittest.TestCase):
             self.assertIn("Conflicting approved", response.get_json()["error"])
             self.assertEqual(ledger.get_vendor_category_rule(suggested_id)["status"], "suggested")
 
+            api_response = client.post(
+                f"/api/rules/{suggested_id}/resolve",
+                json={"status": "approved"},
+            )
+
+            self.assertEqual(api_response.status_code, 400)
+            self.assertEqual(
+                api_response.get_json()["error"],
+                "Conflicting approved vendor category rule already exists for this target",
+            )
+            self.assertEqual(ledger.get_vendor_category_rule(suggested_id)["status"], "suggested")
+
     def test_api_exposes_vendor_and_category_operating_directories(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             ledger_path = os.path.join(temp_dir, "fab.sqlite3")
