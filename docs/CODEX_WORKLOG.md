@@ -7,6 +7,7 @@
 - Continued source review of Flask auth/HAI, Drive-to-Wave archive gating, and backup restore/path boundaries. Focused Windows suites passed: `103 passed, 40 subtests` across HAI, Drive/Wave delivery, and backup inspection.
 - Saved a provisional Codex Security Standard threat model and partial coverage checkpoint for the recorded PR head. No findings are recorded so far; the repository-wide audit is incomplete and this is not a clean result. Independent review was unavailable because the agent thread limit was reached.
 - Corrected stale C0/C7/C8 state in `CODEX_CHECKPOINTS.md` to distinguish the canonical checkout from the isolated PR worktree and reflect current check/security status. `git diff --check` passed. No provider writes, live data, or public tunnel were used.
+- Pushed the checkpoint-only commit `9d921d2d4f27167ea22e478bbd62e6e99d11e20b` to PR #125. Refreshed GitHub state confirms the PR is open at that head; all new CI and CodeQL checks are pending. The previous code commit's Linux, frontend, MySQL, and container checks passed; Windows and CodeQL were pending.
 
 ## 2026-10-16 - Revalidate published PR checkout on Windows
 
