@@ -37,10 +37,11 @@
   owns that scan. No findings or coverage from it are claimed. No code-scanning
   alert was dismissed or suppressed.
 - The active CI run surfaced Node.js 20 deprecation warnings from the pinned
-  Docker build actions. Updated the CI and release workflows to digest-pinned
-  Node.js 24-native releases (`setup-buildx-action` v4.1.0 and
-  `build-push-action` v7.4.0); validate in a fresh hosted run after the current
-  run completes.
+  Docker build actions. A newer Node.js 24-native release was tested locally
+  against workflow YAML, but a repository settings check later showed the
+  selected-actions allowlist permits only the existing Docker action SHAs.
+  Restored those approved pins instead of broadening repository permissions;
+  a future action upgrade requires adding reviewed exact SHAs to the allowlist.
 - Updated `CODEX_CHECKPOINTS.md` to distinguish the PR CodeQL result, the
   default-branch alert backlog, and unfinished full CI.
 - Fixed Drive relay basename handling to interpret both slash styles as
@@ -68,6 +69,17 @@
   `startup_failure` run `38966565138`. GitHub still creates no jobs for the
   FAB workflow, while local integration coverage remains green. No provider
   writes or code-scanning alert suppressions were performed.
+
+## 2026-10-16 - Align Docker action pins with repository policy
+
+- Queried the repository's selected-action policy and confirmed it allows only
+  the prior exact Buildx/build-push SHAs, not the newly pinned Node 24 releases.
+  Restored the approved pins in CI and release workflows without changing
+  repository permissions.
+- The run failures began after the unallowlisted references were introduced;
+  this policy conflict is a likely cause, but requires a fresh hosted run to
+  confirm. The older pins emitted Node 20 deprecation warnings but built both
+  containers successfully on the earlier CI run.
 
 ## 2026-10-16 - Correct Drive archive recovery state and review PR security gate
 
