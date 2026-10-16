@@ -912,18 +912,27 @@ class LocalConnectorIntakeService:
             )
         return "supervised-picker"
 
-    def _download_root(self, source: str, document: Dict[str, Any]) -> str:
+    def _download_root(self, source: str, _document: Dict[str, Any]) -> str:
         keys = {
             "gmail": ("gmail_attachment_download_dir", "gmail_download_dir"),
             "google_drive": ("google_drive_download_dir", "drive_download_dir"),
             "freshdesk": ("freshdesk_download_dir",),
         }.get(source, ())
-        for key in keys:
-            value = self.config.get(key)
+        section = self.config.get(source)
+        section = section if isinstance(section, dict) else {}
+        candidates = [self.config.get(key) for key in keys]
+        candidates.extend((section.get("download_dir"), self.config.get("attachments_save_dir")))
+        for value in candidates:
             if str(value or "").strip():
                 return os.path.abspath(os.path.expanduser(os.path.expandvars(str(value))))
-        path = document.get("local_path") or document.get("storage_path") or "."
-        return os.path.dirname(os.path.abspath(str(path)))
+        default_directories = {
+            "gmail": "gmail",
+            "google_drive": "google-drive",
+            "freshdesk": "freshdesk",
+            "google_photos": "google-photos-picker",
+        }
+        directory = default_directories.get(source, "source")
+        return os.path.abspath(os.path.join("data", "source_downloads", directory))
 
 
 def _normalize_sources(values: Optional[Iterable[str]]) -> list:

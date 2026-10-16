@@ -319,6 +319,20 @@ class TestLocalConnectorIntake(unittest.TestCase):
             self.assertEqual(ledger.list_documents(), [])
             self.assertEqual(ledger.list_source_accounts(source_type="gmail")[0]["status"], "failed")
 
+    def test_unconfigured_download_root_does_not_trust_connector_document_path(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger, service = self._service(temp_dir, [])
+            service.config.pop("gmail_attachment_download_dir")
+
+            root = service._download_root("gmail", {
+                "local_path": os.path.join(temp_dir, "arbitrary.pdf"),
+            })
+
+            self.assertEqual(
+                root,
+                os.path.abspath(os.path.join("data", "source_downloads", "gmail")),
+            )
+
     def test_configured_connector_stays_disabled_without_explicit_opt_in(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             credentials_path = os.path.join(temp_dir, "gmail-credentials.json")
