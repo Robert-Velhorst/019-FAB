@@ -27,6 +27,19 @@ class TestLocalFolderIntake(unittest.TestCase):
             with self.assertRaisesRegex(OSError, "source_path_outside_root"):
                 local_intake_module._sha256_file(outside_path, source_root=source_root)
 
+    def test_hash_rejects_sibling_path_sharing_source_root_prefix(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_root = os.path.join(temp_dir, "intake")
+            sibling_root = os.path.join(temp_dir, "intake-archive")
+            os.makedirs(source_root)
+            os.makedirs(sibling_root)
+            sibling_path = os.path.join(sibling_root, "receipt.pdf")
+            with open(sibling_path, "wb") as handle:
+                handle.write(b"sibling must remain outside")
+
+            with self.assertRaisesRegex(OSError, "source_path_outside_root"):
+                local_intake_module._sha256_file(sibling_path, source_root=source_root)
+
     def test_hash_rejects_unexpected_eof_before_recorded_file_size(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             path = os.path.join(temp_dir, "receipt.pdf")

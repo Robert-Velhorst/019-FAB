@@ -453,14 +453,10 @@ class LocalFolderIntake:
         raw_path = _normalize_path(path)
         root = os.path.realpath(_normalize_path(root))
         path = os.path.realpath(raw_path)
-        try:
-            common_root = os.path.commonpath((root, path))
-            if (
-                os.path.islink(raw_path)
-                or os.path.normcase(common_root) != os.path.normcase(root)
-            ):
-                return {"skipped": {"path": path, "reason": "path_outside_source_root"}}
-        except ValueError:
+        normalized_root = os.path.normcase(root)
+        normalized_path = os.path.normcase(path)
+        root_prefix = normalized_root if normalized_root.endswith(os.sep) else normalized_root + os.sep
+        if os.path.islink(raw_path) or not normalized_path.startswith(root_prefix):
             return {"skipped": {"path": path, "reason": "path_outside_source_root"}}
         try:
             stat = os.stat(path, follow_symlinks=False)
@@ -798,11 +794,10 @@ def _sha256_file(
     if source_root is not None:
         path = os.path.realpath(_normalize_path(path))
         root = os.path.realpath(_normalize_path(source_root))
-        try:
-            common_root = os.path.commonpath((root, path))
-        except ValueError as exc:
-            raise OSError("source_path_outside_root") from exc
-        if os.path.normcase(common_root) != os.path.normcase(root):
+        normalized_root = os.path.normcase(root)
+        normalized_path = os.path.normcase(path)
+        root_prefix = normalized_root if normalized_root.endswith(os.sep) else normalized_root + os.sep
+        if not normalized_path.startswith(root_prefix):
             raise OSError("source_path_outside_root")
     before = os.stat(path, follow_symlinks=False)
     if not stat_module.S_ISREG(before.st_mode):
@@ -848,11 +843,10 @@ def _sha256_file(
 def _ensure_path_within_root(path: str, source_root: str) -> None:
     resolved_root = os.path.realpath(_normalize_path(source_root))
     resolved_path = os.path.realpath(_normalize_path(path))
-    try:
-        common_root = os.path.commonpath((resolved_root, resolved_path))
-    except ValueError as exc:
-        raise OSError("source_path_outside_root") from exc
-    if os.path.normcase(common_root) != os.path.normcase(resolved_root):
+    normalized_root = os.path.normcase(resolved_root)
+    normalized_path = os.path.normcase(resolved_path)
+    root_prefix = normalized_root if normalized_root.endswith(os.sep) else normalized_root + os.sep
+    if not normalized_path.startswith(root_prefix):
         raise OSError("source_path_outside_root")
 
 
