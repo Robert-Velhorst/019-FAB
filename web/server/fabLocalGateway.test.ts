@@ -1048,7 +1048,7 @@ describe("FAB local API gateway", () => {
     expect(result.connection.connected).toBe(true);
     expect(paths).toContain("/api/live");
     expect(paths.filter(path => path === "/api/control-center/resources")).toHaveLength(1);
-    expect(paths.length).toBe(30);
+    expect(paths.length).toBe(29);
   });
 
   it("does not fan out after a real HTTP service-unavailable response", async () => {
@@ -1118,7 +1118,7 @@ describe("FAB local API gateway", () => {
       "workflows", "masterLedger", "metrics", "notifications", "settings",
       "bankTransactions", "reconciliation", "activity", "sources",
       "waveReceiptExecutor", "sourceReadiness", "driveAuthorization",
-      "haiStatus", "haiManifest", "gmailAuthorization",
+      "haiStatus", "gmailAuthorization",
     ];
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const path = new URL(String(input)).pathname;
@@ -1142,6 +1142,8 @@ describe("FAB local API gateway", () => {
     const requestedPaths = fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname);
 
     expect(result.connection.connected).toBe(true);
+    expect(result).not.toHaveProperty("hai");
+    expect(result.connections.some((connection) => connection.id === "hai")).toBe(true);
     expect(requestedPaths).toContain("/api/control-center/resources");
     expect(requestedPaths).not.toContain("/api/dashboard");
     expect(requestedPaths).not.toContain("/api/health");

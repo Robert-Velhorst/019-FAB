@@ -856,7 +856,7 @@ class TestDriveWaveDeliveryService(unittest.TestCase):
             "payload": {"limit": 10, "dryRun": True},
         })
 
-        self.assertEqual(recorded.status_code, 200)
+        self.assertEqual(recorded.status_code, 409)
         self.assertEqual(recorded.get_json()["result"]["status"], "blocked")
         self.assertIn(
             "wave_attachment_readback_bytes_missing",
@@ -1024,6 +1024,11 @@ class TestDriveWaveDeliveryService(unittest.TestCase):
         }).test_client()
         response = client.post(f"/api/drive-wave/documents/{self.document_id}/attachment-readback",
             headers={"Authorization": "Bearer synthetic-hai"},
+            data={"attachment": (io.BytesIO(self.source_bytes), "invoice.pdf", "application/pdf"),
+                  "evidence": json.dumps(evidence)}, content_type="multipart/form-data")
+        self.assertEqual(response.status_code, 403)
+        response = client.post(f"/api/drive-wave/documents/{self.document_id}/attachment-readback",
+            headers={"Authorization": "Bearer synthetic-operator"},
             data={"attachment": (io.BytesIO(self.source_bytes), "invoice.pdf", "application/pdf"),
                   "evidence": json.dumps(evidence)}, content_type="multipart/form-data")
         self.assertEqual(response.status_code, 400)
@@ -1279,6 +1284,12 @@ class TestDriveWaveDeliveryService(unittest.TestCase):
         response = client.post(f"/api/drive-wave/documents/{self.document_id}/attachment-readback", headers=headers,
             data={"attachment": (io.BytesIO(self.source_bytes), "invoice.pdf", "application/pdf"),
                   "evidence": json.dumps(self._evidence())}, content_type="multipart/form-data")
+        self.assertEqual(response.status_code, 403)
+        operator_response = client.post(f"/api/drive-wave/documents/{self.document_id}/attachment-readback",
+            headers={"Authorization": "Bearer synthetic-operator"},
+            data={"attachment": (io.BytesIO(self.source_bytes), "invoice.pdf", "application/pdf"),
+                  "evidence": json.dumps(self._evidence())}, content_type="multipart/form-data")
+        response = operator_response
         self.assertEqual(response.status_code, 400)
         self.assertIn("source_size_missing", response.get_json()["reasons"])
         self.assertIsNone(self.ledger.find_audit_event("drive_wave.attachment_verified",
@@ -1310,6 +1321,70 @@ class TestDriveWaveDeliveryService(unittest.TestCase):
         self.assertFalse(archiver.archived)
         lifecycle = self.ledger.get_document(self.document_id)["metadata"]["driveWaveLifecycle"]
         self.assertEqual(lifecycle["status"], "attachment_verified")
+
+    def test_ambiguous_drive_move_response_triggers_compensating_restore(self):
+        archiver = FakeDriveArchiver(self.source_hash, self.source_size)
+        service = DriveWaveDeliveryService(self.ledger, self.config, drive_archiver=archiver)
+        service.record_attachment_readback(
+            self.document_id,
+            self.source_bytes,
+            filename="invoice.pdf",
+            mime_type="application/pdf",
+            evidence=self._evidence(),
+        )
+        original_move = archiver.move_file
+
+        def move_then_lose_response(*args):
+            original_move(*args)
+            raise TimeoutError("Drive move response was lost")
+
+        archiver.move_file = move_then_lose_response
+
+        result = service.archive_document(self.document_id)
+
+        self.assertFalse(result["success"])
+        self.assertEqual(archiver.restores, [("drive-file-1", SOURCE_FOLDER, ARCHIVE_FOLDER)])
+        self.assertFalse(archiver.archived)
+        self.assertEqual(result["externalSubmission"], "not_executed")
+        failure = self.ledger.find_audit_event(
+            "drive_wave.archive_failed", "bookkeeping_document", str(self.document_id)
+        )
+        self.assertTrue(failure["details"]["moveStarted"])
+        self.assertEqual(failure["details"]["rollback"]["status"], "restored")
+
+    def test_unconfirmed_drive_move_rollback_reports_unknown_external_outcome(self):
+        archiver = FakeDriveArchiver(self.source_hash, self.source_size)
+        service = DriveWaveDeliveryService(self.ledger, self.config, drive_archiver=archiver)
+        service.record_attachment_readback(
+            self.document_id,
+            self.source_bytes,
+            filename="invoice.pdf",
+            mime_type="application/pdf",
+            evidence=self._evidence(),
+        )
+        original_move = archiver.move_file
+
+        def move_then_lose_response(*args):
+            original_move(*args)
+            raise TimeoutError("Drive move response was lost")
+
+        def failed_restore(*args):
+            archiver.restores.append(args)
+            raise TimeoutError("Drive restore response was lost")
+
+        archiver.move_file = move_then_lose_response
+        archiver.restore_file = failed_restore
+
+        result = service.archive_document(self.document_id)
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["externalSubmission"], "unknown")
+        self.assertIn("archive_source_restore_failed", result["reasons"])
+        failure = self.ledger.find_audit_event(
+            "drive_wave.archive_failed", "bookkeeping_document", str(self.document_id)
+        )
+        self.assertEqual(failure["details"]["externalSubmission"], "unknown")
+        self.assertEqual(failure["details"]["rollback"]["status"], "failed")
 
     def test_archive_audit_commit_failure_restores_drive_source_and_keeps_ledger_unarchived(self):
         archiver = FakeDriveArchiver(self.source_hash, self.source_size)
@@ -1564,10 +1639,7 @@ class TestDriveWaveDeliveryService(unittest.TestCase):
         self.assertEqual(resource["resourceId"], "wave_attachment_work_orders")
         self.assertEqual(resource["path"], "/api/drive-wave/work-orders")
         self.assertEqual(resource["externalSubmission"], "not_executed")
-        self.assertEqual(
-            resources["wave_attachment_binary_readback"]["pathTemplate"],
-            "/api/drive-wave/documents/{documentId}/attachment-readback",
-        )
+        self.assertNotIn("wave_attachment_binary_readback", resources)
 
 
 if __name__ == "__main__":

@@ -456,15 +456,20 @@ def _parse_camt_transactions(text: str) -> List[Dict[str, Any]]:
         raise ValueError("CAMT/XML bank statement is not valid XML") from exc
     transactions: List[Dict[str, Any]] = []
     for entry in _iter_local(root, "Ntry"):
-        amount_text = _first_local_text(entry, "Amt")
+        amount_text = _first_path_text(entry, ("Amt",))
         amount = _parse_number(amount_text)
         credit_debit = (_first_local_text(entry, "CdtDbtInd") or "").upper()
         if amount is not None and credit_debit.startswith("DBIT"):
             amount = -abs(amount)
-        transaction = {
-            "transactionDate": _first_path_text(entry, ("BookgDt", "Dt")) or _first_path_text(entry, ("ValDt", "Dt")),
+        currency = _first_path_attribute(entry, ("Amt",), "Ccy") or "EUR"
+        transaction_date = (
+            _first_path_text(entry, ("BookgDt", "Dt"))
+            or _first_path_text(entry, ("ValDt", "Dt"))
+        )
+        entry_transaction = {
+            "transactionDate": transaction_date,
             "amount": amount,
-            "currency": _first_local_attribute(entry, "Amt", "Ccy") or "EUR",
+            "currency": currency,
             "description": _first_local_text(entry, "Ustrd") or _first_local_text(entry, "AddtlNtryInf"),
             "counterparty": _first_local_text(entry, "Nm"),
             "transactionId": (
@@ -473,7 +478,46 @@ def _parse_camt_transactions(text: str) -> List[Dict[str, Any]]:
                 or _first_local_text(entry, "EndToEndId")
             ),
         }
-        transactions.append(transaction)
+        details = list(_iter_local(entry, "TxDtls"))
+        if len(details) <= 1 or amount is None:
+            transactions.append(entry_transaction)
+            continue
+
+        detail_transactions = []
+        detail_total = Decimal("0")
+        safe_to_split = True
+        for detail in details:
+            detail_amount_text = (
+                _first_path_text(detail, ("AmtDtls", "TxAmt", "Amt"))
+                or _first_path_text(detail, ("AmtDtls", "InstdAmt", "Amt"))
+            )
+            detail_amount = _parse_number(detail_amount_text)
+            detail_currency = (
+                _first_path_attribute(detail, ("AmtDtls", "TxAmt", "Amt"), "Ccy")
+                or _first_path_attribute(detail, ("AmtDtls", "InstdAmt", "Amt"), "Ccy")
+            )
+            if detail_amount is None or (detail_currency and detail_currency.upper() != currency.upper()):
+                safe_to_split = False
+                break
+            detail_direction = (_first_local_text(detail, "CdtDbtInd") or credit_debit).upper()
+            signed_amount = -abs(detail_amount) if detail_direction.startswith("DBIT") else abs(detail_amount)
+            detail_total += Decimal(str(signed_amount))
+            detail_transactions.append({
+                "transactionDate": transaction_date,
+                "amount": signed_amount,
+                "currency": detail_currency or currency,
+                "description": _join_nonempty(_iter_local_texts(detail, "Ustrd")) or _first_local_text(detail, "AddtlNtryInf"),
+                "counterparty": _first_local_text(detail, "Nm"),
+                "transactionId": (
+                    _first_path_text(detail, ("Refs", "AcctSvcrRef"))
+                    or _first_path_text(detail, ("Refs", "EndToEndId"))
+                    or _first_path_text(detail, ("Refs", "TxId"))
+                ),
+            })
+        if not safe_to_split or detail_total != Decimal(str(amount)):
+            transactions.append(entry_transaction)
+            continue
+        transactions.extend(detail_transactions)
     return transactions
 
 
@@ -739,6 +783,32 @@ def _first_local_attribute(root: Element, local_name: str, attribute: str) -> Op
             if value:
                 return value
     return None
+
+
+def _first_path_attribute(root: Element, path: Iterable[str], attribute: str) -> Optional[str]:
+    current = root
+    for local_name in path:
+        next_child = next(
+            (child for child in current if _local_name(child.tag) == local_name),
+            None,
+        )
+        if next_child is None:
+            return None
+        current = next_child
+    return current.attrib.get(attribute)
+
+
+def _iter_local_texts(root: Element, local_name: str) -> Iterable[str]:
+    for element in root.iter():
+        if _local_name(element.tag) == local_name and element.text:
+            value = element.text.strip()
+            if value:
+                yield value
+
+
+def _join_nonempty(values: Iterable[str]) -> Optional[str]:
+    joined = " ".join(values)
+    return joined or None
 
 
 def _local_name(tag: Any) -> str:

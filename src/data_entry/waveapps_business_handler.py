@@ -85,8 +85,11 @@ class WaveappsBusinessHandler(BaseDataEntryHandler):
             response.raise_for_status()
             result = response.json()
         except (requests.exceptions.RequestException, ValueError) as exc:
+            failure = wave_request_failure(exc)
+            if failure.get("status") == "outcome_unknown":
+                failure["provider_external_id"] = transaction["input"]["externalId"]
             return {
-                **wave_request_failure(exc),
+                **failure,
                 "target_surface": destination["fallback_surface"],
                 "action_plan": plan_wave_action(destination["target_surface"], action_id, action_payload),
             }
@@ -116,6 +119,7 @@ class WaveappsBusinessHandler(BaseDataEntryHandler):
             "message": "Wave did not return a verifiable transaction result. Check Wave before taking further action.",
             "requires_manual_review": True,
             "review_reason": "wave_api_outcome_unknown",
+            "provider_external_id": transaction["input"]["externalId"],
             "target_surface": destination["fallback_surface"],
             "action_plan": plan_wave_action(destination["target_surface"], action_id, action_payload),
         }

@@ -90,8 +90,11 @@ class WaveappsPersonalHandler(BaseDataEntryHandler):
             response.raise_for_status()
             result = response.json()
         except (requests.exceptions.RequestException, ValueError) as exc:
+            failure = wave_request_failure(exc)
+            if failure.get("status") == "outcome_unknown":
+                failure["provider_external_id"] = transaction["input"]["externalId"]
             return {
-                **wave_request_failure(exc),
+                **failure,
                 "target_surface": destination["fallback_surface"],
                 "action_plan": plan_wave_action(destination["target_surface"], action_id, action_payload),
             }
@@ -106,7 +109,17 @@ class WaveappsPersonalHandler(BaseDataEntryHandler):
                 "target_surface": destination["target_surface"],
                 "action_plan": plan_wave_action(destination["target_surface"], action_id, action_payload, allow_write=True),
             }
-        return _failure(destination, action_id, action_payload, "Wave rejected the transaction. Review the provider response in Wave before retrying.")
+        if operation.get("didSucceed") is False:
+            return _failure(destination, action_id, action_payload, "Wave rejected the transaction. Review the provider response in Wave before retrying.")
+        return {
+            "status": "outcome_unknown",
+            "message": "Wave did not return a verifiable transaction result. Check Wave before taking further action.",
+            "requires_manual_review": True,
+            "review_reason": "wave_api_outcome_unknown",
+            "provider_external_id": transaction["input"]["externalId"],
+            "target_surface": destination["fallback_surface"],
+            "action_plan": plan_wave_action(destination["target_surface"], action_id, action_payload),
+        }
 
     def _generate_csv_fallback(self, data: Dict[str, Any], filename: str) -> str:
         csv_dir = self.config.get("temp_dir") or tempfile.gettempdir()

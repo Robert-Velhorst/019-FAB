@@ -1,5 +1,158 @@
 # Codex Worklog
 
+## 2026-10-16 - Measure rehearsal process resources
+
+- Added sampled CPU-time and working-set metrics for the isolated Python API and Node dashboard children to `scripts/run_stack_rehearsal.py`; unsupported/exited processes are reported as unavailable, not zero.
+- The final Windows 30-request / 6-client warm-cache rehearsal passed all synthetic end-to-end checks. At 50 ms sampling, six samples measured a 189,747,200-byte combined peak working set (API 76,197,888 bytes; dashboard 113,549,312 bytes), dashboard CPU 0.359375 seconds, and API CPU 0.0 seconds at the reported precision. Dashboard latency was 49.56 ms median / 66.27 ms p95; response body was 57,768 bytes.
+- The one-document fixture, warm cache, four-sample window, coarse sampling, and rate-limit-bounded request burst mean these figures are diagnostic only, not a scaled, cold, sustained, or application-wide resource baseline. An 80-request burst hit the existing rate limit; the combined rehearsal now rejects values above 30 before launching children.
+- Verification: resource sampler tests passed (`4 passed`), including a real Windows process-counter read and CLI rate-limit-bound regression; the full synthetic Windows stack rehearsal passed and reported `ownedChildrenStopped: true`; the full Python suite passed (`1,980 passed, 6 skipped, 219 subtests`) in 723.75 seconds; `git diff --check` passed.
+
+## 2026-10-16 - Precompute leave-one-out anomaly statistics
+
+- Profiling still showed repeated sorting/median absolute deviation work for
+  eligible amounts. Each vendor/category group now parses and sorts amounts
+  once, then calculates exact leave-one-out medians and deviations using
+  sorted order statistics. Duplicate IDs retain a brute-force compatibility
+  path; ties and the existing anomaly scoring/output are preserved.
+- A deterministic differential regression compared every precomputed
+  leave-one-out result with brute force across 60 randomized rows, including
+  duplicate IDs, invalid/zero/negative amounts, ties, and outliers. Controlled
+  interleaved 15-run measurements against the original checkout implementation
+  on 400 synthetic rows produced identical issue output; median fell from
+  42.022 ms to 9.719 ms and max from 64.491 ms to 11.207 ms. With 100
+  below-threshold rows, amount parsing fell from 20,000 calls to 200. These are
+  service-level synthetic measurements, not whole-app CPU/RSS or throughput.
+- Verification: full Python suite passed (`1,976 passed, 6 skipped, 219
+  subtests`) in 748.66 seconds; control-center batch API integration tests
+  passed. No provider actions or user-ledger access occurred.
+
+## 2026-10-16 - Reduce repeated low-value anomaly analysis
+
+- A profile of the uncached control-center batch with 400 synthetic
+  bookkeeping records and 2,000 synthetic bank transactions showed anomaly
+  analysis dominating the request. Low-value records were rebuilding vendor
+  and category histories despite being below the configured anomaly threshold.
+  They now return before history construction; anomaly scoring and evidence for
+  eligible amounts are unchanged.
+- Red-capable regression first failed at 20,000 amount-parser calls for 100
+  below-threshold records; after the change it passes at no more than 200, while
+  a high vendor outlier retains its prior median, sample count, ratio, and issue
+  identity. A same-process, interleaved 15-run comparison against the prior
+  implementation on 400 synthetic rows produced identical issue output and
+  reduced anomaly-service median from 85.377 ms to 66.14 ms (max 130.187 ms to
+  107.402 ms). This service-only fixture does not measure process CPU/RSS or
+  establish an application-wide speedup.
+- Verification: full Python suite passed (`1,975 passed, 6 skipped, 159
+  subtests`) in 781.64 seconds. The control-center resource manifest also
+  matches across frontend and backend (26 batch resources plus two direct
+  reads). No provider actions or user ledger access occurred.
+
+## 2026-10-16 - Triage dynamic SQL heuristics and lock down report exports
+
+- Reviewed every B608 finding from a fresh Bandit scan. The 26 remaining hits
+  are in `local_ledger.py`: query text is fixed or assembled from internal
+  predicates, generated placeholders bind user/data values, and dynamic
+  identifiers are syntax-validated or selected from fixed maps. No
+  request/document-controlled SQL syntax path was found. Replaced the legacy
+  reporting service's interpolated table name with fixed per-table SQL
+  statements and added hostile-name/allowed-name regression tests.
+- Verification: Bandit over `src` reported 0 high, 29 medium, and 16 low
+  heuristic findings (26 B608, 2 B104, 1 B113). Manual review confirmed the
+  B104 wildcard binds are explicit VM/container deployment paths gated by
+  strong-token preflight, and the B113 Photos request supplies a request
+  timeout. These are bounded heuristic matches, not a penetration-test result.
+  Focused SQL tests passed (`5 passed`, 3 subtests); Ruff passed on the touched
+  Python module and test; Bandit reported no finding in the reporting module.
+  A fresh full Python run passed (`1,976 passed, 6 skipped, 159 subtests`) in
+  776.57 seconds.
+
+## 2026-10-16 - Preserve HAI external-operation outcomes
+
+- Corrected HAI completion and idempotent replay responses to preserve the
+  executor's validated `externalSubmission` state instead of reporting
+  `not_executed` after a Drive archive may have run.
+- For policy-gated commands, executor exceptions and executions lacking a
+  durable outcome now report `unknown`; local-only commands remain
+  `not_executed`. Added regression coverage for success, replay, and exception
+  paths without performing a live Drive operation.
+- Verification: the full Python suite passed (`1,955 passed, 5 skipped, 159
+  subtests`); the web suite passed (`459 passed, 5 skipped`); direct TypeScript
+  checking, Vite production build, configured production bundle budgets, both
+  production server bundles, Python compilation, and `git diff --check` passed.
+  The standard `pnpm check` wrapper hit a Windows `EPERM` while refreshing
+  `.package-map.json`; running the installed TypeScript/Vitest binaries directly
+  succeeded without changing the lockfile. No live Drive operation was performed.
+
+## 2026-10-16 - Preserve Wave references for uncertain writes
+
+- Wave's published GraphQL schema documents transaction creation but does not
+  expose a business transaction list/readback or an `externalId` lookup; the
+  returned Transaction object exposes only its ID. Automated provider absence
+  and attachment verification therefore remain unsupported and fail closed.
+- Ambiguous business/personal Wave writes and executor exceptions now retain
+  the exact `fab:<operation>` external reference sent with the request. The
+  export attempt stores it in execution metadata and shows it in the dashboard
+  only as a search aid, never as a confirmed Wave transaction ID.
+- Fixed the personal handler to classify missing/incomplete GraphQL mutation
+  results as `outcome_unknown`; only an explicit provider rejection is treated
+  as a definitive failure. Unknown attempts remain terminal and non-retryable.
+- Verification: the full Python suite passed with `1,953 passed, 5 skipped,
+  159 subtests` in 527.08 seconds, including the timeout → exact request
+  reference → ledger persistence → no-retry API integration test. Python
+  compilation and `git diff --check` passed. Live provider readback, attachment
+  readback, automated reconciliation, and retry recovery remain
+  unverified/unsupported.
+
+## 2026-10-16 - Full-suite regression and security evidence
+
+- A fresh full Python run initially exposed repeated autonomy workflow creation
+  for an empty watched folder. Restored content-aware intake change detection
+  and added a no-extra-hash fast path for empty folders; this preserves content
+  hash checks for populated folders while avoiding empty-cycle workflow/audit
+  growth.
+- Full Python suite after the fix: `1,950 passed`, `5 skipped`, `159 subtests`
+  in 554.30 seconds. Affected intake/worker modules passed `31 passed, 1
+  skipped`; complete web suite passed `459 passed, 5 skipped`; TypeScript,
+  production build/budgets, PowerShell AST parsing, Python compilation and
+  `git diff --check` passed.
+- Completed Codex Security diff scan `dacda496-dffd-4eed-9671-ff8730e566f3`
+  against the exact working-tree snapshot. All 17 changed-file inventory items
+  were reviewed; zero reportable findings. This did not cover live providers,
+  ngrok, HAI runtime, or deployment acceptance. Report:
+  `C:\Users\NO\.codex\state\plugins\codex-security\scans\019-FAB\dbe3a8a6383c88ad926a707ff7d8975561c99327_20261016T085229Z_atjno6di\report.md`.
+- Read-only GitHub recheck: PR #118 remains open; its 13 displayed checks pass.
+  The preview release and both private GHCR images are present; both grant the
+  repository Actions Write. No commit, push, merge, release, provider mutation,
+  or local user-ledger startup was performed.
+- At the initial audit baseline the local API was not running. The checkout's
+  `data/` contains real user-state files, including a 237 MB ledger; it remained
+  untouched. Isolated runtime and browser acceptance performed afterward are
+  recorded below.
+
+## 2026-10-16 - Isolated Windows production acceptance
+
+- Created a disposable source copy with its own Python 3.13.14 environment,
+  empty intake folder, isolated SQLite ledger, and no copied provider credentials
+  or user ledger. Hash-locked `requirements-local.lock` installation passed.
+- The isolated production client/server/standalone build passed, including the
+  2,432-module and bundle-size budgets. Production launcher acceptance
+  initially exposed a Windows-specific bug: esbuild marks output artifacts
+  hidden, `Test-Path` found them, but `Get-Item` without `-Force` treated them
+  as absent. The launcher now reads hidden outputs and retries transient file
+  metadata races before treating a build as stale. A regression test covers
+  both hidden current artifacts and genuinely missing artifacts; the Windows
+  launcher suite passed 16 tests.
+- Production `Start-FAB.ps1 -NoBrowser` started API, dashboard, and worker.
+  Authenticated `/api/live` returned `fab-ledger-api` status `ok`; dashboard
+  returned HTTP 200; authenticated HAI status and manifest returned `ready`
+  with 14 allowlisted commands and external submission not executed. Browser
+  checks at 1280x720 and 390x844 found no horizontal overflow or console errors.
+  Startup correctly reported unconfigured Gmail, Drive, and Wave credentials.
+- `Stop-FAB.ps1` released the local-autonomy worker lease. All recorded service
+  PIDs exited and test ports 3001/5001 were released. The isolated ledger only
+  contained test/runtime state; the 237 MB project ledger was not opened. No
+  live provider, tunnel, or cloud operation was performed.
+
 ## 2026-10-15 - Remove pandas from the bookkeeping runtime
 
 - Replaced pandas CSV loading with the existing delimiter-aware standard-library
@@ -489,6 +642,314 @@
   `31335374005` passed the frontend, Linux backend, and all four Windows jobs.
 - No real bank statement was selected in browser QA, no provider record was
   changed, no Drive source was archived, and no external submission occurred.
+
+## 2026-10-16 - Windows stack rehearsal and dependency-audit coverage
+
+- Re-ran the built production dashboard, Flask API, and SQLite ledger together
+  on Windows using `scripts/run_stack_rehearsal.py` and isolated synthetic data.
+  The complete rehearsal passed, including managed login/session revocation,
+  HAI credential scoping and actor binding, verified source-byte delivery and
+  tamper rejection, statement import, reconciliation approvals, stale-evidence
+  rejection, and owned-child process shutdown.
+- The rehearsal explicitly reports `syntheticOnly`, `loopbackOnly`, and
+  `providerWrites: false`; it is local integration evidence, not public ngrok,
+  live-provider, or cloud-host acceptance.
+- Found that CI's Python dependency audit omitted `requirements-ml.lock`.
+  Updated the existing audit command to cover all four lock sets and regenerated
+  the stale `platformdirs` pin in `requirements-test.lock` with the repository's
+  pinned lock compiler.
+- Verified all Python lockfiles with `scripts/compile_python_locks.py --verify`
+  and audited all four sets with hash enforcement; no known vulnerabilities
+  were reported. `git diff --check` passed with only existing line-ending
+  normalization warnings.
+- Fresh focused regressions passed: 101 Python tests, 8 subtests, and 2
+  optional skips across document processing, intake, cloud access, HAI, and
+  master-ledger suites; 54 web tests passed across auth/logout, managed auth,
+  public-form rate limiting, and Stripe customer ownership.
+- No application provider writes, live tunnel changes, commit, or push were
+  performed.
+
+## 2026-10-16 - Stripe customer lookup fail-closed
+
+- Traced a duplicate-customer risk in the checkout path: transient failures
+  retrieving a stored Stripe customer or searching by email were caught and
+  followed by a new customer creation. The search warning also logged the
+  customer's email address.
+- Added tests that reproduced duplicate creation on both failure paths. The
+  helper now propagates transient lookup failures and only replaces a stored
+  customer when Stripe returns HTTP 404 with `resource_missing`; removed email
+  from lookup warning context.
+- Regression verification passed: `stripe.customer.test.ts` (5 tests) and
+  `tsc --noEmit`. The focused test was observed failing against the old behavior
+  before the fix and passing afterward.
+- After the fix, the full web suite passed (468 tests, 5 skipped); the Vite
+  asset-budget check and both general/standalone server bundles built. The
+  Windows production-stack rehearsal passed again against these freshly built
+  artifacts and stopped all owned child processes.
+- A whole-repository Codex Security Deep Scan did not start: the scanner
+  requires a managed read-only filesystem profile, and the scoped permission
+  request returned no filesystem grant. The earlier diff scan remains partial;
+  no whole-repository scan result is claimed.
+
+## 2026-10-16 - Reconciliation allocation experiment
+
+- Re-ran the synthetic reconciliation benchmark on Python 3.13.14; the indexed
+  2,000x400 sparse case remained about 19-20 ms median with identical output.
+- Tested replacing the per-row candidate-index sort with a lazy generator and
+  explicit original-index tie-breaking. The 24 reconciliation equivalence and
+  tie-order tests passed, but the sparse-case median regressed to 37.91 ms and
+  traced peak allocation did not improve (`848,199` versus `848,007` bytes).
+- Reverted that experiment. The original candidate ordering and faster indexed
+  path are retained; no matcher code change is part of this experiment.
+
+## 2026-10-16 - Stripe concurrent-customer idempotency
+
+- Added a stable per-user Stripe idempotency key to customer creation. A
+  regression simulates two concurrent callers that both see an empty customer
+  search and verifies the same key is sent for both requests; it failed before
+  the change and passes afterward.
+- Replaced the first-page-only email lookup with the SDK's streaming
+  `autoPagingEach` and early stop when `metadata.user_id` matches. A regression
+  with 100 unrelated matches before the owned customer reproduced the previous
+  false miss and now passes without creating a new customer.
+- Stripe's official API reference documents idempotent POST result reuse for
+  matching parameters and notes keys may be pruned after at least 24 hours. This
+  reduces short-window duplicates but is not permanent database uniqueness or
+  provider readback; no live Stripe request was made.
+- Verification passed: all 470 web tests (5 skipped), TypeScript check, and
+  production client/general-server/standalone-server build with asset budgets.
+
+## 2026-10-16 - Reject nested encoding in public tRPC paths
+
+- The public-form limiter decoded `req.originalUrl` once. A direct request to
+  `/api/trpc/contact%252Esubmit` therefore evaded its standard 20-per-15-minute
+  limiter and passed to downstream routing; the regression returned HTTP 200
+  instead of rejecting the ambiguous path.
+- Added a fail-closed 400 response when a tRPC path still contains a percent
+  escape after canonical decoding. Double- and triple-encoded procedure names
+  are now rejected before either the public form limiter or tRPC routing.
+- The regression failed before the code change and passed afterward. Full web
+  verification passed: 471 tests, 5 skipped; TypeScript check and client,
+  general-server, and standalone-server production build with asset budgets.
+- No live provider or ngrok request was made.
+
+## 2026-10-16 - Concurrent Windows dashboard baseline
+
+- Extended the isolated Windows production-stack rehearsal with opt-in
+  `--benchmark-requests` and `--benchmark-concurrency` arguments. It measures
+  authenticated full control-center reads, reports median/p95/max latency and
+  response size by projected field, and closes its per-thread HTTP sessions.
+  The default integration rehearsal remains unchanged when the option is not
+  supplied.
+- Rehearsed the final harness against the production dashboard bundle, real
+  Flask API, and disposable synthetic SQLite ledger: all end-to-end checks
+  passed, provider writes were disabled, and owned child processes stopped.
+- Thirty warm-cache control-center reads at six concurrent clients measured
+  33.17 ms median, 50.34 ms p95, and 67,105 uncompressed response bytes. The
+  largest projected sections were autonomy (12,081 bytes) and HAI (10,226
+  bytes). This one-document integration fixture does not establish cold-cache,
+  scaled-ledger, CPU/RSS, or sustained-load performance.
+- No real user ledger, provider account, or public ngrok tunnel was used.
+
+## 2026-10-16 - Trim unused HAI manifest from dashboard refresh
+
+- The measured warm control-center response included a full HAI manifest even
+  though the operator UI only needs HAI connection status; its connector drawer
+  opens `/api/hai/manifest` directly. The manifest therefore duplicated data
+  on every dashboard refresh.
+- Removed that manifest from the dashboard gateway type/projection and the
+  Flask control-center batch. HAI status remains available in Connections, and
+  the standalone manifest route and HAI authentication contract are unchanged.
+- A regression first failed because the manifest was still projected; after
+  the change, all 64 `fabLocalGateway` tests passed. Python route-contract and
+  local API suites passed (121 tests, 2 subtests); the full web suite passed
+  (471 tests, 5 skipped), TypeScript check and production builds passed.
+- Repeated the isolated Windows production-stack benchmark with 30 concurrent
+  warm-cache refreshes at concurrency 6. The response fell from 67,105 to
+  56,750 bytes (15.4%); post-change median/p95 were 31.20/37.26 ms. This is a
+  one-document synthetic workload, not a scaled or sustained performance
+  claim. All rehearsal checks passed and owned processes stopped; no real user
+  ledger, provider, or public tunnel was used.
+
+## 2026-10-16 - Bound master-ledger lookup for older SQLite builds
+
+- The projection's latest-export lookup used two bound SQL variables per
+  selected record. A 500-record projection exceeded SQLite builds configured
+  with the legacy 999-variable limit. A regression test constrained the live
+  SQLite connection to 999 and reproduced `too many SQL variables` before the
+  fix.
+- The lookup now processes at most 400 records per query on one reused
+  connection. Typical small projections remain one query; larger projections
+  stay below the legacy SQLite parameter cap without changing output ordering.
+- Verification passed: `tests/test_local_master_ledger.py` and
+  `tests/test_local_operations_ledger.py` (47 tests, 3 subtests). The Windows
+  production-stack rehearsal also passed all checks, with 30 concurrent warm
+  dashboard reads at concurrency 6 (33.03 ms median, 51.60 ms p95, 56,750
+  response bytes). It used a synthetic one-document ledger; no provider writes,
+  live ledger, or public tunnel were used.
+
+## 2026-10-16 - Full current-worktree verification
+
+- The complete Python suite passed on the current worktree: 1,965 tests passed,
+  6 skipped, and 159 subtests passed in 719.36 seconds. The current web suite
+  passed 471 tests with 5 skipped across 39 passing files and 1 skipped file.
+- TypeScript checking and the Vite, production-budget, general-server, and
+  standalone-server builds passed. The full pnpm advisory audit and its
+  production-only form reported no known vulnerabilities. The synthetic
+  Windows production-stack rehearsal passed its complete end-to-end checks.
+- A repository-wide Codex Security Deep Scan did not start because its worker
+  requires a managed read-only filesystem profile that this session could not
+  obtain. The local `.venv` also does not contain the `pip-audit` module, so no
+  fresh Python advisory scan is claimed here. No live provider, account, or
+  public tunnel was exercised.
+
+## 2026-10-16 - Bound Drive archive hashing memory
+
+- `DriveArchiveClient.download_sha256()` used `BytesIO` with the Google client
+  library's 100 MiB default download chunk, retaining each complete receipt in
+  memory. Archival hashes the source before and after the move, so large
+  documents could cause repeated high transient memory use.
+- Replaced the full in-memory buffer with an incremental SHA-256 sink, set the
+  downloader chunk size to 8 MiB, and enforce the existing 100 MiB source
+  document limit while bytes arrive. This bounds retained application memory
+  and rejects an unexpectedly oversized provider response before proceeding
+  with archive verification.
+- Verification passed: Drive archiver and Drive-to-Wave suites (56 tests, 32
+  subtests). No live Google Drive request or archive move was made.
+
+## 2026-10-16 - Isolated Python dependency advisory audit
+
+- The repository `.venv` did not include `pip-audit`, so ran the pinned
+  `pip-audit==2.10.1` through `uvx` rather than modifying the FAB environment.
+  Audited all four hash-locked sets (`requirements.lock`, `requirements-local.lock`,
+  `requirements-ml.lock`, and `requirements-test.lock`) with dependency
+  resolution disabled and hashes required.
+- Result: no known vulnerabilities found. This checks package advisories for
+  the locked Python dependencies; it does not replace source security review or
+  live deployment testing.
+
+## 2026-10-16 - Recover ambiguous Drive archive move responses
+
+- The archive service marked a move as started only after `move_file()`
+  returned. If Drive applied the move but the response timed out, the caller
+  skipped compensation and reported `not_executed`, despite an unknown remote
+  state. Regressions reproduced both the missing restore and false status.
+- The service now records the attempt before calling Drive and tries an
+  idempotent restore after every ambiguous move failure. A verified restore
+  reports `not_executed`; absent/failed/unverified compensation adds
+  `archive_source_restore_failed` and reports `unknown` in the API response and
+  audit event, while opening the review gate.
+- The Flask archive route had separately hardcoded every failed result to
+  `not_executed`; an API regression reproduced this state loss. The route now
+  preserves the service's `unknown` result and defaults unexpected outcomes to
+  `unknown`, without exposing raw failure details.
+- Verification passed: `tests/test_local_operations_api.py`,
+  `tests/test_drive_archiver.py`, and `tests/test_drive_wave_delivery.py` (177
+  tests, 34 subtests). No live Drive move was attempted.
+
+## 2026-10-16 - Bind Windows ngrok verification to the FAB checkout
+
+- The temporary Windows ngrok verifier checked only the API service name before
+  exposing the local port. A different FAB instance could therefore satisfy the
+  preflight without proving it was the checkout being verified. The verifier
+  now requires strong runtime credentials, validates a plain HTTP loopback API
+  origin, and matches both local and tunneled liveness identity/authentication
+  to the current checkout before reporting success.
+- Quoted both ngrok config paths passed through `Start-Process`, so user-profile
+  or temporary-directory paths containing spaces remain single arguments.
+- Verification passed: `tests/test_ngrok_windows_scripts.py` and
+  `tests/test_local_cloud_access.py` (31 tests). The initial combined run emitted
+  a pytest cache permission warning; tests themselves passed. No public tunnel
+  was started.
+
+## 2026-10-16 - Remove unused OpenCV from the core runtime
+
+- Repository search found no OpenCV imports; core OpenCV was retained only by
+  a stale requirement comment. The previously tagged API image's installed
+  `cv2` and OpenCV native-library directories occupied about 153 MB. Removed
+  OpenCV from `requirements.txt`, regenerated the hash locks, and updated the
+  dependency guide. NumPy is no longer pulled into core/test locks and remains
+  isolated in the optional ML lock.
+- `scripts/compile_python_locks.py --verify` passed. The current dirty-checkout
+  ML-disabled container built successfully at 140,805,983 bytes versus
+  242,575,002 bytes for the tagged older image (about 42% smaller; not a
+  controlled comparison because the source and Python base revisions differ).
+  Container checks confirmed core/OCR/intake imports work without OpenCV or
+  NumPy, and authenticated `/api/live` returned `ok`. The temporary container
+  used an isolated `/tmp` SQLite ledger and was stopped; no project data volume
+  was mounted. Focused OCR/intake tests passed (54 tests, 2 skipped, 9
+  subtests).
+
+## 2026-10-16 - Preserve CAMT batch transaction amounts
+
+- Deep import-path review found CAMT parsing reduced each `<Ntry>` to a single
+  row, even when it contained multiple `<TxDtls>` with separately identified
+  transaction amounts. This could hide the underlying ledger detail.
+- The parser now splits only when every detail amount is present, each detail
+  currency agrees with the entry currency, and signed detail totals exactly
+  match the statement entry. Missing, mixed-currency, or unreconciled detail
+  totals retain the entry-level aggregate row rather than fabricate splits.
+- Verification passed: bank-import/reconciliation unit suite (21 tests) and
+  bank-import/reconciliation API coverage (10 tests). The Python environment
+  emitted a pytest-cache permission warning; tests passed. No live bank/provider
+  data was imported.
+
+## 2026-10-16 - Preserve returned HAI executor failures
+
+- A regression against an executor that returned `success: false` reproduced a
+  contract error: FAB recorded `hai.command.completed` and returned
+  `success: true`, so a replay claimed the failed command had executed.
+- Returned non-success results now create a durable `hai.command.failed` event,
+  return `success: false`, preserve an executor's `blocked`/`needs_review`
+  status, retain its result and external-submission state, and replay as
+  `previously_failed` without re-running the executor. Structured blocks return
+  HTTP 409; unexpected executor exceptions remain HTTP 500.
+- The first complete Python run surfaced a regression where a normal blocked
+  result was mapped to HTTP 500. The route/result mapping was corrected, and
+  focused HAI, Drive/Wave, and bank/reconciliation cases passed.
+- Final full Python verification passed: 1,974 passed, 6 skipped, and 159
+  subtests in 678.06 seconds. Python compilation and `git diff --check` passed.
+  The returned-failure regression failed before its fix. No provider action was
+  run.
+- Web verification also passed: TypeScript, all 471 Vitest tests (5 skipped),
+  Vite production build and asset budgets, and both general and standalone
+  server bundles. `pnpm check` again failed before TypeScript because Windows
+  denied writes to generated `web/node_modules/.package-map.json`; the installed
+  local binaries ran directly, with no tracked package or lockfile changes.
+- Extended the isolated Windows stack rehearsal to send a deliberately
+  incomplete attachment attestation through the live synthetic HAI API. The
+  API returned HTTP 409 with `blocked`, recorded a durable failed outcome,
+  reported `externalSubmission: not_executed`, and replayed as
+  `previously_failed` without another executor call. The full built-dashboard,
+  API, and SQLite rehearsal passed with `syntheticOnly: true`,
+  `loopbackOnly: true`, `providerWrites: false`, and owned child processes
+  stopped. The complete HAI connector test file passed (24 tests, 8 subtests).
+
+## 2026-10-16 - Preserve indeterminate provider outcomes in generic API errors
+
+- Audit review found the Flask catch-all handler recorded
+  `externalSubmission: not_executed` for every unexpected route exception. A
+  provider can accept a write and the route can fail before recording its
+  result, so that audit state was not defensible.
+- Catch-all failures now record `unknown`. The regression test simulates a
+  provider-side effect before raising, and verifies the correlated audit event
+  preserves uncertainty without disclosing exception content.
+- The local-operations API suite passed (119 tests, 2 subtests). The separate
+  full Python suite passed before this narrow fix (1,974 passed, 6 skipped,
+  159 subtests); the synthetic Windows stack rehearsal passed 75 checks with
+  provider writes disabled and owned children stopped.
+- Removed an unused `os` import and two dead local assignments found by Ruff;
+  the relevant Drive archive/autonomy/processing tests passed (75 tests), and
+  Ruff's undefined/unused-name rules passed on those files.
+- A 40-request/16-client warm-cache dashboard run passed at 125.49 ms median,
+  139.01 ms p95, and 57,768 response bytes. It uses a changed fixture and
+  concurrency relative to the prior six-client result and is not a controlled
+  speed comparison or CPU/RSS measurement.
+- Read-only GitHub state shows PR #125 is open with merge state `DIRTY`; this
+  worktree remains unpushed. Local Bandit reported heuristic findings
+  (0 high, 30 medium, 16 low), which remain under review. The managed Deep
+  Security Scan did not start because the required filesystem permission
+  profile is unavailable in this session.
 
 ## Explicitly not performed
 

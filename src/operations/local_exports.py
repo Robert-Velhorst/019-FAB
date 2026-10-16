@@ -1231,6 +1231,9 @@ class LocalExportAttemptService:
             execution_metadata["mappedStatus"] = mapped_status
             execution_metadata["operation"] = operation
             execution_metadata["masterLedgerChecksum"] = master_ledger_checksum
+            provider_external_id = provider_result.get("provider_external_id")
+            if execution_status == "outcome_unknown" and provider_external_id:
+                execution_metadata["providerExternalId"] = str(provider_external_id)[:200]
             retry_state = None
             if mapped_status == "deferred":
                 retry_state = _next_retry_state(metadata, provider_result, self.config, now)
@@ -1329,6 +1332,7 @@ class LocalExportAttemptService:
                     "externalSubmission": external_submission,
                     "executionStatus": execution_status,
                     "externalId": external_id,
+                    "providerExternalId": provider_external_id,
                     "targetSystem": target_system,
                     "masterLedgerChecksum": master_ledger_checksum,
                     "reviewItemId": review_id,

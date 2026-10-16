@@ -115,10 +115,6 @@ export type FabControlCenter = {
   notifications: JsonRecord[];
   reconciliation: JsonRecord[];
   activity: JsonRecord[];
-  hai: {
-    status: JsonRecord;
-    manifest: JsonRecord;
-  };
   resourceStates: Record<FabResourceKey, FabResourceState>;
   partialErrors: Array<{ resource: FabResourceKey; error: string; state: FabDataState; updatedAt: string | null }>;
 };
@@ -167,7 +163,6 @@ const READ_PATHS = {
   sourceReadiness: "/api/sources/readiness",
   driveAuthorization: "/api/connectors/google-drive/authorization",
   haiStatus: "/api/hai/status",
-  haiManifest: "/api/hai/manifest",
   cloudStatus: "/api/cloud/status",
   gmailAuthorization: "/api/connectors/gmail/authorization",
 } as const;
@@ -707,10 +702,6 @@ async function buildFabControlCenter(generation: number): Promise<FabControlCent
     notifications: arrayValue(resources.notifications?.notifications),
     reconciliation: arrayValue(resources.reconciliation?.reconciliationMatches),
     activity: arrayValue(resources.activity?.auditEvents),
-    hai: {
-      status: resources.haiStatus || {},
-      manifest: resources.haiManifest || {},
-    },
     resourceStates,
     partialErrors,
   };
@@ -1025,7 +1016,6 @@ function disconnectedControlCenter(endpoint: string, checkedAt: string, error: s
     notifications: [],
     reconciliation: [],
     activity: [],
-    hai: { status: {}, manifest: {} },
     resourceStates,
     partialErrors: [],
   };

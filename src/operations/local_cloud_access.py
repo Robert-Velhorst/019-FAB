@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import (
     HTTPRedirectHandler,
@@ -35,6 +36,7 @@ class LocalCloudAccessService:
         runtime_path: Optional[Path] = None,
         api_token_configured: bool = False,
         inspector_fetch: Optional[InspectorFetch] = None,
+        unauthenticated_status_fetch: Optional[Callable[[str, float], Optional[int]]] = None,
         inspector_timeout_seconds: float = 0.75,
         shared_inspector_url: Optional[str] = None,
     ) -> None:
@@ -44,6 +46,9 @@ class LocalCloudAccessService:
         )
         self.api_token_configured = bool(api_token_configured)
         self.inspector_fetch = inspector_fetch or _fetch_inspector_json
+        self.unauthenticated_status_fetch = (
+            unauthenticated_status_fetch or _fetch_unauthenticated_status
+        )
         self.shared_inspector_url = _loopback_inspector_url(
             shared_inspector_url or DEFAULT_SHARED_INSPECTOR_URL
         )
@@ -127,6 +132,25 @@ class LocalCloudAccessService:
                 return self._result(
                     status="stale",
                     next_action="The recorded FAB dashboard endpoint is not active. Stop the stale tunnel state and start it again.",
+                    started_at=validated["startedAt"],
+                    verified_at=validated["verifiedAt"],
+                    local_api_base_url=validated["localApiBaseUrl"],
+                )
+            try:
+                dashboard_status = self.unauthenticated_status_fetch(
+                    f"{validated['dashboardUrl']}/admin/operations",
+                    self.inspector_timeout_seconds,
+                )
+            except Exception:
+                dashboard_status = None
+            if dashboard_status != 401:
+                return self._result(
+                    status="stale",
+                    blocker_code="dashboard_auth_not_verified",
+                    next_action=(
+                        "The remote dashboard did not confirm its unauthenticated access block. "
+                        "Stop the managed tunnel and recreate it with dashboard Basic Auth enabled."
+                    ),
                     started_at=validated["startedAt"],
                     verified_at=validated["verifiedAt"],
                     local_api_base_url=validated["localApiBaseUrl"],
@@ -275,6 +299,21 @@ def _fetch_inspector_json(url: str, timeout_seconds: float) -> Mapping[str, Any]
     if not isinstance(result, dict):
         raise ValueError("ngrok inspector response must be an object")
     return result
+
+
+def _fetch_unauthenticated_status(url: str, timeout_seconds: float) -> Optional[int]:
+    request = Request(url, headers={"Accept": "text/html"}, method="GET")
+    opener = build_opener(ProxyHandler({}), _NoRedirectHandler())
+    try:
+        with opener.open(request, timeout=timeout_seconds) as response:
+            return int(response.status)
+    except HTTPError as error:
+        try:
+            return int(error.code)
+        finally:
+            error.close()
+    except (OSError, URLError, TimeoutError, ValueError):
+        return None
 
 
 def _tunnels(payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:

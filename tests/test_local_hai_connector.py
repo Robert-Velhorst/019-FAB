@@ -20,7 +20,6 @@ class TestLocalHaiConnector(unittest.TestCase):
             ("GET", r"^/api/backups$"),
             ("POST", r"^/api/connectors/google-drive/relay$"),
             ("GET", r"^/api/drive-wave/work-orders$"),
-            ("POST", r"^/api/drive-wave/documents/[1-9][0-9]*/attachment-readback$"),
             ("GET", r"^/api/wave/receipt-executor/status$"),
             ("POST", r"^/api/wave/receipt-executor/(?:session|claim|release)$"),
         )
@@ -339,6 +338,132 @@ class TestLocalHaiConnector(unittest.TestCase):
             self.assertEqual(changed_payload["status"], "idempotency_conflict")
             self.assertEqual(changed_command["status"], "idempotency_conflict")
 
+    def test_hai_archive_external_status_is_audited_and_preserved_on_replay(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger_path = os.path.join(temp_dir, "fab.sqlite3")
+            app = create_app({
+                "fab_local_ledger_path": ledger_path,
+                "fab_hai_connector_enabled": True,
+                "fab_hai_allowed_commands": "archive_verified_drive_sources",
+            })
+            client = app.test_client()
+            with patch("src.operations.local_api.DriveWaveDeliveryService.archive_ready") as archive:
+                archive.return_value = {
+                    "success": True,
+                    "status": "completed",
+                    "archived": 1,
+                    "externalSubmission": "executed",
+                }
+                first = client.post("/api/hai/commands/execute", json={
+                    "requestId": "hai-drive-archive-result",
+                    "commandId": "archive_verified_drive_sources",
+                    "payload": {"dryRun": False},
+                })
+                replay = client.post("/api/hai/commands/execute", json={
+                    "requestId": "hai-drive-archive-result",
+                    "commandId": "archive_verified_drive_sources",
+                    "payload": {"dryRun": False},
+                })
+
+            ledger = LocalOperationsLedger(ledger_path)
+            event = ledger.find_audit_event(
+                action="hai.command.completed",
+                entity_type="hai_command_request",
+                entity_id="hai-drive-archive-result",
+            )
+            self.assertEqual(first.status_code, 200)
+            self.assertEqual(first.get_json()["externalSubmission"], "executed")
+            self.assertEqual(replay.get_json()["status"], "already_executed")
+            self.assertEqual(replay.get_json()["externalSubmission"], "executed")
+            self.assertEqual(event["details"]["externalSubmission"], "executed")
+            archive.assert_called_once()
+
+    def test_hai_archive_exception_reports_indeterminate_effect_on_replay(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger_path = os.path.join(temp_dir, "fab.sqlite3")
+            app = create_app({
+                "fab_local_ledger_path": ledger_path,
+                "fab_hai_connector_enabled": True,
+                "fab_hai_allowed_commands": "archive_verified_drive_sources",
+            })
+            client = app.test_client()
+            with patch(
+                "src.operations.local_api.DriveWaveDeliveryService.archive_ready",
+                side_effect=RuntimeError("post-move error"),
+            ) as archive:
+                first = client.post("/api/hai/commands/execute", json={
+                    "requestId": "hai-drive-archive-error",
+                    "commandId": "archive_verified_drive_sources",
+                    "payload": {"dryRun": False},
+                })
+                replay = client.post("/api/hai/commands/execute", json={
+                    "requestId": "hai-drive-archive-error",
+                    "commandId": "archive_verified_drive_sources",
+                    "payload": {"dryRun": False},
+                })
+
+            ledger = LocalOperationsLedger(ledger_path)
+            event = ledger.find_audit_event(
+                action="hai.command.failed",
+                entity_type="hai_command_request",
+                entity_id="hai-drive-archive-error",
+            )
+            self.assertEqual(first.get_json()["status"], "failed")
+            self.assertEqual(first.get_json()["externalSubmission"], "unknown")
+            self.assertEqual(replay.get_json()["status"], "previously_failed")
+            self.assertEqual(replay.get_json()["externalSubmission"], "unknown")
+            self.assertEqual(event["details"]["externalSubmission"], "unknown")
+            archive.assert_called_once()
+
+    def test_executor_failure_result_is_not_reported_as_completed_or_reexecuted(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            executions = []
+
+            def executor(payload, actor):
+                executions.append(actor)
+                return {
+                    "success": False,
+                    "status": "blocked",
+                    "reason": "source_evidence_changed",
+                    "externalSubmission": "not_executed",
+                }
+
+            connector = LocalHaiConnector(
+                ledger,
+                {
+                    "fab_hai_connector_enabled": True,
+                    "fab_hai_allowed_commands": "archive_verified_drive_sources",
+                },
+                executors={"archive_verified_drive_sources": executor},
+            )
+
+            first = connector.execute(
+                "hai-blocked-executor-result",
+                "archive_verified_drive_sources",
+                {"dryRun": False},
+            )
+            replay = connector.execute(
+                "hai-blocked-executor-result",
+                "archive_verified_drive_sources",
+                {"dryRun": False},
+            )
+
+            event = ledger.find_audit_event(
+                "hai.command.failed",
+                "hai_command_request",
+                "hai-blocked-executor-result",
+            )
+            self.assertFalse(first["success"])
+            self.assertEqual(first["status"], "blocked")
+            self.assertEqual(first["result"]["status"], "blocked")
+            self.assertEqual(first["externalSubmission"], "not_executed")
+            self.assertEqual(replay["status"], "previously_failed")
+            self.assertEqual(replay["result"]["status"], "blocked")
+            self.assertEqual(replay["externalSubmission"], "not_executed")
+            self.assertEqual(event["details"]["externalSubmission"], "not_executed")
+            self.assertEqual(executions, ["hai"])
+
     def test_idempotent_result_replay_rechecks_current_connector_policy(self):
         revoked_policies = (
             ({"fab_hai_connector_enabled": False, "fab_hai_allowed_commands": "refresh_notifications"}, "connector_disabled"),
@@ -590,11 +715,11 @@ class TestLocalHaiConnector(unittest.TestCase):
             resources = {
                 item["resourceId"] for item in manifest.get_json()["resources"]
             }
-            self.assertEqual(len(resources), 8)
+            self.assertEqual(len(resources), 7)
             self.assertIn("backup_recovery_status", resources)
             self.assertIn("google_drive_binary_relay", resources)
             self.assertIn("wave_attachment_work_orders", resources)
-            self.assertIn("wave_attachment_binary_readback", resources)
+            self.assertNotIn("wave_attachment_binary_readback", resources)
             self.assertIn("wave_receipt_executor_status", resources)
             self.assertIn("wave_receipt_executor_session", resources)
             self.assertIn("wave_receipt_executor_claim", resources)
@@ -759,7 +884,7 @@ class TestLocalHaiConnector(unittest.TestCase):
 
             self.assertEqual(
                 [response.status_code for response in responses],
-                [200, 200, 200, 200, 201],
+                [200, 200, 200, 403, 201],
             )
             self.assertEqual(operator_response.status_code, 200)
             self.assertEqual(hai_execute_response.status_code, 200)
@@ -786,12 +911,9 @@ class TestLocalHaiConnector(unittest.TestCase):
             )
             self.assertEqual(
                 [call.kwargs["actor"] for call in executor.return_value.release.call_args_list],
-                ["fab_hai_api:hai", "fab_hai_api:hai"],
+                ["fab_hai_api:hai"],
             )
-            self.assertEqual(
-                delivery.return_value.record_attachment_readback.call_args.kwargs["actor"],
-                "fab_hai_api:hai",
-            )
+            delivery.return_value.record_attachment_readback.assert_not_called()
             self.assertEqual(
                 drive_relay.return_value.ingest.call_args.kwargs["actor"],
                 "fab_hai_api:hai",

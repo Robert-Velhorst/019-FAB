@@ -7,7 +7,8 @@ import { registerOAuthRoutes } from "./oauth";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic } from "./static";
-import { webhookLimiter, relaxedLimiter } from "../lib/rateLimiter";
+import { webhookLimiter, relaxedLimiter, standardLimiter } from "../lib/rateLimiter";
+import { createPublicFormRateLimitMiddleware } from "../lib/publicFormRateLimit";
 import { createLogger } from "../lib/logger";
 import { registerFabOperationsRoutes } from "../fabOperations";
 import { registerFabRuntimeRoute } from "../fabRuntime";
@@ -54,6 +55,19 @@ async function startServer() {
 
   // ── Body parsers ──────────────────────────────────────────────
   // 10mb limit is generous for form data; file uploads go to S3
+  const parsePublicFormBody: express.RequestHandler = (req, res, next) => {
+    express.json({ limit: "64kb" })(req, res, (jsonError?: unknown) => {
+      if (jsonError) {
+        next(jsonError);
+        return;
+      }
+      express.urlencoded({ limit: "64kb", extended: true })(req, res, next);
+    });
+  };
+  app.use(
+    "/api/trpc",
+    createPublicFormRateLimitMiddleware(standardLimiter, parsePublicFormBody),
+  );
   app.use(express.json({ limit: "10mb" }));
   app.use(express.urlencoded({ limit: "10mb", extended: true }));
 

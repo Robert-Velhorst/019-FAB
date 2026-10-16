@@ -84,6 +84,44 @@ class TestWindowsLauncher(unittest.TestCase):
         script = (ROOT / "Start-FAB.ps1").read_text(encoding="utf-8")
         self.assertIn('The saved FAB dashboard uses a different production port', script)
 
+    def test_production_build_check_handles_hidden_and_missing_artifacts(self):
+        script = (ROOT / "Start-FAB.ps1").read_text(encoding="utf-8")
+        start = script.index("function Test-FabWebBuildCurrent {")
+        end = script.index("\nfunction ", start + 1)
+        helper = script[start:end]
+        shell = shutil.which("pwsh") or shutil.which("powershell")
+        if not shell:
+            self.skipTest("PowerShell is unavailable")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = str(Path(directory) / "web").replace("'", "''")
+            missing_root = str(Path(directory) / "missing").replace("'", "''")
+            command = f"""
+            $ErrorActionPreference = 'Stop'
+            {helper}
+            $webRoot = '{root}'
+            foreach ($path in @('dist\\public', 'client', 'server', 'shared')) {{
+                New-Item -ItemType Directory -Path (Join-Path $webRoot $path) -Force | Out-Null
+            }}
+            foreach ($path in @('dist\\fab-standalone.js', 'dist\\public\\index.html', 'package.json', 'pnpm-lock.yaml', 'vite.config.ts', 'tsconfig.json', 'server\\entry.ts')) {{
+                Set-Content -LiteralPath (Join-Path $webRoot $path) -Value 'test'
+            }}
+            foreach ($path in @('dist\\fab-standalone.js', 'dist\\public\\index.html')) {{
+                $artifact = Join-Path $webRoot $path
+                [IO.File]::SetAttributes($artifact, [IO.File]::GetAttributes($artifact) -bor [IO.FileAttributes]::Hidden)
+                [IO.File]::SetLastWriteTimeUtc($artifact, [DateTime]::UtcNow.AddMinutes(1))
+            }}
+            if (-not (Test-FabWebBuildCurrent -ExpectedWebRoot $webRoot)) {{ throw 'Hidden production artifacts were treated as stale.' }}
+            function Test-Path {{ return $true }}
+            $result = Test-FabWebBuildCurrent -ExpectedWebRoot '{missing_root}'
+            if ($result) {{ throw 'A missing production artifact was treated as current.' }}
+            'verified'
+            """
+            result = subprocess.run([shell, "-NoProfile", "-NonInteractive", "-Command", command],
+                                    capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), "verified")
+
     def test_all_windows_scripts_parse_without_running_them(self):
         shells = {path for name in ("pwsh", "powershell") if (path := shutil.which(name))}
         if not shells:

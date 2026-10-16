@@ -95,6 +95,26 @@ function Test-CleanHttpsOrigin {
     )
 }
 
+function Test-FabExistingCloudRequestMatches {
+    param(
+        [Parameter(Mandatory = $true)][object]$CloudStatus,
+        [string]$RequestedApiUrl = "",
+        [string]$RequestedDashboardUrl = ""
+    )
+
+    if ([string]$CloudStatus.status -ne "active" -or -not [bool]$CloudStatus.active) {
+        return $false
+    }
+    $apiMatches = -not $RequestedApiUrl -or [string]$CloudStatus.publicUrl -eq $RequestedApiUrl
+    $dashboardMatches = if ($RequestedDashboardUrl) {
+        [string]$CloudStatus.dashboardUrl -eq $RequestedDashboardUrl
+    }
+    else {
+        -not [string]$CloudStatus.dashboardUrl
+    }
+    return $apiMatches -and $dashboardMatches
+}
+
 function Get-HttpStatusCode {
     param(
         [Parameter(Mandatory = $true)][string]$RequestUrl,
@@ -268,13 +288,11 @@ if (
 if (Test-Path -LiteralPath $cloudRuntimePath) {
     try {
         $cloudStatus = Invoke-RestMethod -Uri "$apiBaseUrl/api/cloud/status" -Headers $headers -TimeoutSec 5
-        $dashboardMatches = if ($DashboardUrl) {
-            [string]$cloudStatus.dashboardUrl -eq $DashboardUrl
-        }
-        else {
-            -not [string]$cloudStatus.dashboardUrl
-        }
-        if ([string]$cloudStatus.status -eq "active" -and [bool]$cloudStatus.active -and $dashboardMatches) {
+        if (Test-FabExistingCloudRequestMatches `
+            -CloudStatus $cloudStatus `
+            -RequestedApiUrl $Url `
+            -RequestedDashboardUrl $DashboardUrl
+        ) {
             Write-Host "FAB cloud access is already active." -ForegroundColor Green
             Write-Host "Endpoint: $($cloudStatus.publicUrl)"
             if ($cloudStatus.dashboardUrl) {

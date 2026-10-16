@@ -11,6 +11,7 @@ from src.operations.local_api import create_app
 from src.operations.local_cloud_access import (
     LocalCloudAccessService,
     _fetch_inspector_json,
+    _fetch_unauthenticated_status,
 )
 from src.utils.runtime_identity import local_instance_id
 
@@ -91,6 +92,25 @@ class TestLocalCloudAccessService(unittest.TestCase):
         opener.open.assert_called_once()
         self.assertEqual(result, {"tunnels": []})
 
+    def test_dashboard_probe_sends_no_credentials_and_disables_redirects_and_proxies(self):
+        opener = MagicMock()
+        opener.open.return_value.__enter__.return_value.status = 401
+
+        with patch("src.operations.local_cloud_access.build_opener", return_value=opener) as build_opener:
+            status = _fetch_unauthenticated_status(
+                "https://dashboard.example.test/admin/operations",
+                0.75,
+            )
+
+        self.assertEqual(status, 401)
+        handlers = build_opener.call_args.args
+        self.assertIsInstance(handlers[0], ProxyHandler)
+        self.assertEqual(handlers[0].proxies, {})
+        self.assertIsInstance(handlers[1], HTTPRedirectHandler)
+        request = opener.open.call_args.args[0]
+        self.assertIsNone(request.get_header("Authorization"))
+        self.assertEqual(request.method, "GET")
+
     def test_valid_owned_tunnel_is_active_and_sanitized(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -127,6 +147,9 @@ class TestLocalCloudAccessService(unittest.TestCase):
                 project_root=root,
                 runtime_path=runtime_path,
                 api_token_configured=True,
+                unauthenticated_status_fetch=lambda url, _timeout: (
+                    401 if url == "https://dashboard.example.test/admin/operations" else None
+                ),
                 inspector_fetch=lambda _url, _timeout: {
                     "tunnels": [
                         {
@@ -146,6 +169,37 @@ class TestLocalCloudAccessService(unittest.TestCase):
         self.assertEqual(result["status"], "active")
         self.assertEqual(result["dashboardUrl"], "https://dashboard.example.test")
         self.assertEqual(result["dashboardAuthMode"], "ngrok_basic_auth")
+
+    def test_remote_dashboard_is_not_active_when_public_auth_gate_is_missing(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            runtime_path = self._write_runtime(root, dashboard_url="https://dashboard.example.test")
+            result = LocalCloudAccessService(
+                project_root=root,
+                runtime_path=runtime_path,
+                api_token_configured=True,
+                unauthenticated_status_fetch=lambda _url, _timeout: 200,
+                inspector_fetch=lambda _url, _timeout: {
+                    "tunnels": [
+                        {
+                            "name": "fab-managed",
+                            "public_url": "https://fab.example.test",
+                            "config": {"addr": "http://127.0.0.1:5001"},
+                        },
+                        {
+                            "name": "fab-managed-dashboard",
+                            "public_url": "https://dashboard.example.test",
+                            "config": {"addr": "http://127.0.0.1:3000"},
+                        },
+                    ],
+                },
+            ).summarize()
+
+        self.assertEqual(result["status"], "stale")
+        self.assertEqual(result["blockerCode"], "dashboard_auth_not_verified")
+        self.assertFalse(result["active"])
+        self.assertIsNone(result["dashboardUrl"])
+        self.assertIsNone(result["publicUrl"])
 
     def test_remote_dashboard_missing_inspector_endpoint_is_stale(self):
         with tempfile.TemporaryDirectory() as temp_dir:

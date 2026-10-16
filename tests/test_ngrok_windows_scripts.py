@@ -12,6 +12,94 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class TestNgrokWindowsScripts(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "PowerShell is required for Windows script behavior")
+    def test_temporary_verification_binds_authenticated_live_probe_to_this_checkout(self):
+        script = (ROOT / "Test-FAB-Ngrok.ps1").read_text(encoding="utf-8")
+        start = script.index("function Get-FabInstanceId {")
+        end = script.index("\nif (-not (Test-Path -LiteralPath $runtimePath))", start)
+        helper = script[start:end]
+        shell = shutil.which("pwsh") or shutil.which("powershell")
+        if not shell:
+            self.skipTest("PowerShell is unavailable")
+
+        expected_root = str(ROOT).replace("'", "''")
+        other_root = str(ROOT.parent / "different-fab-checkout").replace("'", "''")
+        command = f"""
+        $ErrorActionPreference = 'Stop'
+        {helper}
+        $expected = Get-FabInstanceId -Path '{expected_root}'
+        $actual = Get-FabInstanceId -Path ([System.IO.Path]::GetFullPath('{expected_root}'))
+        $other = Get-FabInstanceId -Path '{other_root}'
+        if ($expected -ne $actual) {{ throw 'The normalized checkout identity changed.' }}
+        if ($expected -eq $other) {{ throw 'A different checkout shared this instance identity.' }}
+        'verified'
+        """
+        result = subprocess.run([shell, "-NoProfile", "-NonInteractive", "-Command", command],
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "verified")
+        self.assertIn("$apiUri.Scheme -ne \"http\"", script)
+        self.assertIn("$apiUri.AbsolutePath -ne \"/\"", script)
+        self.assertIn("--require-strong", script)
+        self.assertIn("$localLive.instanceId", script)
+        self.assertIn("$authorized.instanceId", script)
+
+    @unittest.skipUnless(os.name == "nt", "PowerShell is required for Windows script behavior")
+    def test_existing_tunnel_is_reused_only_when_requested_origins_match(self):
+        script = (ROOT / "Start-FAB-Ngrok.ps1").read_text(encoding="utf-8")
+        start = script.index("function Test-FabExistingCloudRequestMatches {")
+        end = script.index("\nfunction Get-HttpStatusCode", start)
+        helper = script[start:end]
+        shell = shutil.which("pwsh") or shutil.which("powershell")
+        if not shell:
+            self.skipTest("PowerShell is unavailable")
+
+        command = f"""
+        $ErrorActionPreference = 'Stop'
+        {helper}
+        $active = [pscustomobject]@{{ status = 'active'; active = $true; publicUrl = 'https://api-old.example.test'; dashboardUrl = $null }}
+        if (-not (Test-FabExistingCloudRequestMatches -CloudStatus $active -RequestedApiUrl 'https://api-old.example.test')) {{ throw 'A matching API origin was rejected.' }}
+        if (Test-FabExistingCloudRequestMatches -CloudStatus $active -RequestedApiUrl 'https://api-new.example.test') {{ throw 'A different requested API origin was silently reused.' }}
+        if (-not (Test-FabExistingCloudRequestMatches -CloudStatus $active)) {{ throw 'An existing API origin should be reused when none was requested.' }}
+        if (Test-FabExistingCloudRequestMatches -CloudStatus $active -RequestedDashboardUrl 'https://dash.example.test') {{ throw 'A missing requested dashboard origin was silently reused.' }}
+        $active.dashboardUrl = 'https://dash.example.test'
+        if (-not (Test-FabExistingCloudRequestMatches -CloudStatus $active -RequestedDashboardUrl 'https://dash.example.test')) {{ throw 'A matching dashboard origin was rejected.' }}
+        'verified'
+        """
+        result = subprocess.run([shell, "-NoProfile", "-NonInteractive", "-Command", command],
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "verified")
+
+    @unittest.skipUnless(os.name == "nt", "process inspection is Windows-specific")
+    def test_temporary_inspector_requires_owning_process_and_clean_https_origin(self):
+        script = (ROOT / "Test-FAB-Ngrok.ps1").read_text(encoding="utf-8")
+        start = script.index("function Assert-FabNgrokInspectorOwned {")
+        end = script.index("\n$inspectionPort = Find-AvailableLoopbackPort", start)
+        helpers = script[start:end]
+        shell = shutil.which("pwsh") or shutil.which("powershell")
+        if not shell:
+            self.skipTest("PowerShell is unavailable")
+
+        command = f"""
+        $ErrorActionPreference = 'Stop'
+        {helpers}
+        $script:connection = [pscustomobject]@{{ LocalAddress = '127.0.0.1'; OwningProcess = 2468 }}
+        function Get-NetTCPConnection {{ return $script:connection }}
+        Assert-FabNgrokInspectorOwned -Port 4041 -ProcessId 2468
+        $script:connection = [pscustomobject]@{{ LocalAddress = '127.0.0.1'; OwningProcess = 1357 }}
+        try {{ Assert-FabNgrokInspectorOwned -Port 4041 -ProcessId 2468; throw 'Foreign inspector accepted.' }}
+        catch {{ if ($_.Exception.Message -notlike '*not owned by the launched ngrok process*') {{ throw }} }}
+        if (-not (Test-FabCleanHttpsOrigin -Uri ([uri]'https://fab.example.test/'))) {{ throw 'Clean HTTPS origin rejected.' }}
+        if (Test-FabCleanHttpsOrigin -Uri ([uri]'https://fab.example.test/path')) {{ throw 'URL path accepted.' }}
+        if (Test-FabCleanHttpsOrigin -Uri ([uri]'https://user@fab.example.test/')) {{ throw 'URL credentials accepted.' }}
+        'verified'
+        """
+        result = subprocess.run([shell, "-NoProfile", "-NonInteractive", "-Command", command],
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "verified")
+
     @unittest.skipUnless(os.name == "nt", "process inspection is Windows-specific")
     def test_private_inspector_must_belong_to_managed_ngrok_process(self):
         script = (ROOT / "Start-FAB-Ngrok.ps1").read_text(encoding="utf-8")
@@ -318,11 +406,14 @@ if (-not (Test-Path -LiteralPath '{overlay}')) {{ throw 'The ngrok overlay was r
     def test_cmd_launchers_forward_operator_arguments(self):
         start_cmd = (ROOT / "Start-FAB-Ngrok.cmd").read_text(encoding="utf-8")
         stop_cmd = (ROOT / "Stop-FAB-Ngrok.cmd").read_text(encoding="utf-8")
+        verification = (ROOT / "Test-FAB-Ngrok.ps1").read_text(encoding="utf-8")
 
         self.assertIn("Start-FAB-Ngrok.ps1", start_cmd)
         self.assertIn("Stop-FAB-Ngrok.ps1", stop_cmd)
         self.assertIn("%*", start_cmd)
         self.assertIn("%*", stop_cmd)
+        self.assertIn("'\"' + $mainConfig + '\"'", verification)
+        self.assertIn("'\"' + $overlayPath + '\"'", verification)
 
     def test_managed_and_verification_tunnels_refuse_maintenance_mode(self):
         managed = (ROOT / "Start-FAB-Ngrok.ps1").read_text(encoding="utf-8")

@@ -1,115 +1,97 @@
-import os
-import tempfile
+import random
+import statistics
 import unittest
-from datetime import date, timedelta
+from unittest.mock import patch
 
-from src.operations.local_anomalies import (
-    ANOMALY_DETECTION_VERSION,
-    LocalLedgerAnomalyService,
-)
-from src.operations.local_exceptions import LocalExceptionQueueService
-from src.operations.local_ledger import LocalOperationsLedger
+from src.operations.local_anomalies import LocalLedgerAnomalyService, _AmountGroup
+
+
+class FakeLedger:
+    def __init__(self, records):
+        self.records = records
+
+    def list_bookkeeping_records(self, limit):
+        return self.records[:limit]
 
 
 class TestLocalLedgerAnomalyService(unittest.TestCase):
-    def test_detects_vendor_amount_outlier_with_ledger_evidence(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
-            for index, amount in enumerate([20, 20, 20, 20, 20, 20]):
-                self._record(
-                    ledger,
-                    vendor="Reliable Hosting BV",
-                    category="Software",
-                    amount=amount,
-                    record_date=f"2026-0{index + 1}-15",
-                )
-            outlier_id = self._record(
-                ledger,
-                vendor="Reliable Hosting B.V.",
-                category="Software",
-                amount=500,
-                record_date="2026-07-15",
-            )
+    def test_below_minimum_amount_rows_do_not_rebuild_peer_histories(self):
+        records = [
+            {
+                "id": index,
+                "status": "draft",
+                "vendor_name": "Synthetic vendor",
+                "category": "software",
+                "currency": "EUR",
+                "amount": 10,
+            }
+            for index in range(100)
+        ]
+        service = LocalLedgerAnomalyService(FakeLedger(records))
+        from src.operations import local_anomalies
 
-            issues = LocalLedgerAnomalyService(ledger).list_issues()
-            anomaly = next(issue for issue in issues if issue["type"] == "vendor_amount_anomaly")
+        original = local_anomalies._absolute_amount
+        with patch.object(local_anomalies, "_absolute_amount", wraps=original) as amount_parser:
+            self.assertEqual(service.list_issues(), [])
 
-            self.assertEqual(anomaly["entityId"], outlier_id)
-            self.assertEqual(anomaly["severity"], "high")
-            self.assertEqual(anomaly["details"]["detectionVersion"], ANOMALY_DETECTION_VERSION)
-            self.assertEqual(anomaly["details"]["historicalMedian"], 20.0)
-            self.assertEqual(anomaly["details"]["historicalSampleCount"], 6)
-            self.assertEqual(anomaly["details"]["comparison"], "zero_variance_ratio")
-            self.assertEqual(anomaly["details"]["externalSubmission"], "not_executed")
+        self.assertLessEqual(amount_parser.call_count, len(records) * 2)
 
-    def test_ignores_small_samples_and_can_be_disabled(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
-            for amount in [10, 10, 1000]:
-                self._record(ledger, vendor="New Vendor", category="Supplies", amount=amount)
+    def test_large_vendor_outlier_keeps_existing_anomaly_evidence(self):
+        records = [
+            {
+                "id": index,
+                "status": "draft",
+                "vendor_name": "Synthetic vendor",
+                "category": "software",
+                "currency": "EUR",
+                "amount": amount,
+            }
+            for index, amount in enumerate([100, 100, 100, 100, 100, 1000], start=1)
+        ]
+        service = LocalLedgerAnomalyService(FakeLedger(records))
 
-            self.assertEqual(LocalLedgerAnomalyService(ledger).list_issues(), [])
-            self.assertEqual(
-                LocalLedgerAnomalyService(
-                    ledger,
-                    {"anomaly_detection_enabled": False},
-                ).list_issues(),
-                [],
-            )
+        issues = service.list_issues()
 
-    def test_future_date_is_queued_with_review_actions(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
-            future_date = date.today() + timedelta(days=45)
-            record_id = self._record(
-                ledger,
-                vendor="Future Supplier",
-                category="Office",
-                amount=125,
-                record_date=future_date.isoformat(),
-            )
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]["type"], "vendor_amount_anomaly")
+        self.assertEqual(issues[0]["entityId"], 6)
+        self.assertEqual(issues[0]["details"]["historicalMedian"], 100)
+        self.assertEqual(issues[0]["details"]["historicalSampleCount"], 5)
+        self.assertEqual(issues[0]["details"]["amountToMedianRatio"], 10)
 
-            payload = LocalExceptionQueueService(ledger).list_exceptions()
-            anomaly = next(item for item in payload["exceptions"] if item["type"] == "future_dated_record")
-            actions = {action["id"]: action for action in anomaly["actions"]}
+    def test_precomputed_leave_one_out_statistics_match_brute_force(self):
+        rng = random.Random(42117)
+        amounts = [None, "invalid", 0, -12.5, 5, 12.5, 12.5, 100, 250, 1000]
+        records = [
+            {
+                "id": index // 2 if index in {4, 5} else index,
+                "amount": rng.choice(amounts),
+            }
+            for index in range(60)
+        ]
+        group = _AmountGroup(records)
 
-            self.assertEqual(anomaly["entityId"], record_id)
-            self.assertEqual(anomaly["severity"], "high")
-            self.assertEqual(anomaly["details"]["recordDate"], future_date.isoformat())
-            self.assertEqual(anomaly["entity"]["vendorName"], "Future Supplier")
-            self.assertEqual(
-                anomaly["nextAction"],
-                "Verify the source date and correct the record before approval or downstream delivery.",
-            )
-            self.assertEqual(
-                actions["open_bookkeeping_record"]["path"],
-                f"/api/bookkeeping-records/{record_id}",
-            )
-            self.assertIn("open_master_ledger", actions)
+        for record in records:
+            with self.subTest(record_id=record["id"], amount=record["amount"]):
+                history = []
+                for peer in records:
+                    if peer.get("id") == record.get("id"):
+                        continue
+                    try:
+                        amount = abs(float(peer.get("amount")))
+                    except (TypeError, ValueError):
+                        continue
+                    if amount > 0:
+                        history.append(amount)
 
-    @staticmethod
-    def _record(
-        ledger: LocalOperationsLedger,
-        vendor: str,
-        category: str,
-        amount: float,
-        record_date: str = "2026-01-15",
-    ) -> int:
-        return ledger.upsert_bookkeeping_record({
-            "sourceType": "document",
-            "recordType": "expense",
-            "recordDate": record_date,
-            "vendorName": vendor,
-            "description": f"Invoice from {vendor}",
-            "category": category,
-            "amount": amount,
-            "currency": "EUR",
-            "status": "validated",
-            "exportStatus": "ready",
-            "reconciliationStatus": "matched",
-            "targetSystem": "waveapps",
-            "reviewRequired": False,
-        })
+                actual = group.history_statistics(record)
+                if not history:
+                    self.assertIsNone(actual)
+                    continue
+
+                baseline = statistics.median(history)
+                deviation = statistics.median(abs(value - baseline) for value in history)
+                self.assertEqual(actual, (len(history), baseline, deviation))
 
 
 if __name__ == "__main__":

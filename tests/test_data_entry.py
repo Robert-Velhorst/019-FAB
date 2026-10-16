@@ -192,6 +192,11 @@ class TestDataEntry(unittest.TestCase):
         self.assertEqual(result["status"], "outcome_unknown")
         self.assertEqual(result["review_reason"], "wave_api_outcome_unknown")
         self.assertTrue(result["requires_manual_review"])
+        self.assertEqual(result["provider_external_id"], f"fab:{data['document_id']}")
+        self.assertEqual(
+            mock_post.call_args.kwargs["json"]["variables"]["input"]["externalId"],
+            result["provider_external_id"],
+        )
         self.assertNotIn("secret-token", result["message"])
         self.assertNotIn("private-receipt", result["message"])
 
@@ -429,8 +434,28 @@ class TestDataEntry(unittest.TestCase):
         self.assertEqual(result["status"], "outcome_unknown")
         self.assertEqual(result["review_reason"], "wave_api_outcome_unknown")
         self.assertTrue(result["requires_manual_review"])
+        self.assertEqual(result["provider_external_id"], f"fab:{data['document_id']}")
+        self.assertEqual(
+            mock_post.call_args.kwargs["json"]["variables"]["input"]["externalId"],
+            result["provider_external_id"],
+        )
         self.assertNotIn("secret-token", result["message"])
         self.assertNotIn("private-receipt", result["message"])
+
+    @patch("src.data_entry.waveapps_personal_handler.requests.post")
+    def test_waveapps_personal_incomplete_mutation_response_stays_unknown(self, mock_post):
+        response = MagicMock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {"errors": [{"message": "response interrupted"}], "data": {}}
+        mock_post.return_value = response
+        data = {**self.dummy_processed_data, "category": "Handicaps"}
+
+        result = WaveappsPersonalHandler(self.config).enter_data(data)
+
+        self.assertEqual(result["status"], "outcome_unknown")
+        self.assertEqual(result["review_reason"], "wave_api_outcome_unknown")
+        self.assertEqual(result["provider_external_id"], f"fab:{data['document_id']}")
+        self.assertNotIn("response interrupted", result["message"])
 
     def test_waveapps_surface_catalog(self):
         receipt_destination = classify_wave_destination({"document_type": "receipt"})

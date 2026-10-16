@@ -907,6 +907,7 @@ class DriveWaveDeliveryService:
             self.drive_archiver = DriveArchiveClient(self.config)
         archiver = self.drive_archiver
         move_result = None
+        move_started = False
         try:
             current = archiver.inspect_file(provider_id)
             current_sha256 = archiver.download_sha256(provider_id)
@@ -921,6 +922,7 @@ class DriveWaveDeliveryService:
                 return {"success": False, **final_plan, "externalSubmission": "not_executed"}
             plan = final_plan
             heartbeat.assert_owned()
+            move_started = True
             move_result = archiver.move_file(
                 provider_id,
                 str(plan["sourceFolderId"]),
@@ -940,7 +942,7 @@ class DriveWaveDeliveryService:
         except Exception as exc:
             reason = _safe_reason(exc)
             rollback = None
-            if move_result is not None and hasattr(archiver, "restore_file"):
+            if move_started and hasattr(archiver, "restore_file"):
                 try:
                     rollback = archiver.restore_file(
                         provider_id,
@@ -949,7 +951,21 @@ class DriveWaveDeliveryService:
                     )
                 except Exception as rollback_exc:
                     rollback = {"status": "failed", "reason": _safe_reason(rollback_exc)}
-            self._ensure_review_item(document_id, [reason])
+            rollback_status = (
+                str(rollback.get("status") or "").lower()
+                if isinstance(rollback, dict)
+                else ""
+            )
+            rollback_confirmed = rollback_status in {
+                "restored", "already_restored", "moved", "ok", "success"
+            }
+            external_submission = (
+                "unknown" if move_started and not rollback_confirmed else "not_executed"
+            )
+            reasons = [reason]
+            if move_started and not rollback_confirmed:
+                reasons.append("archive_source_restore_failed")
+            self._ensure_review_item(document_id, reasons)
             audit_event_id = self.ledger.record_audit_event({
                 "action": "drive_wave.archive_failed",
                 "entityType": "bookkeeping_document",
@@ -957,17 +973,18 @@ class DriveWaveDeliveryService:
                 "details": {
                     "actor": actor,
                     "reason": reason,
-                    "moveStarted": move_result is not None,
+                    "moveStarted": move_started,
                     "rollback": rollback,
-                    "externalSubmission": "not_executed",
+                    "externalSubmission": external_submission,
                 },
             })
             return {
                 "success": False,
                 "status": "blocked",
-                "reasons": [reason],
+                "reasons": reasons,
+                "rollback": rollback,
                 "auditEventId": audit_event_id,
-                "externalSubmission": "not_executed",
+                "externalSubmission": external_submission,
             }
 
         evidence = (

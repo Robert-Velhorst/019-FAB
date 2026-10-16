@@ -8,10 +8,33 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from src.operations.local_ledger import LocalOperationsLedger
+from src.operations.local_ledger import (
+    LEDGER_SCHEMA_MIGRATIONS,
+    LocalOperationsLedger,
+    SourceScanManifestLimitError,
+)
 
 
 class TestLocalOperationsLedger(unittest.TestCase):
+    def test_manifest_limit_cleans_up_previously_committed_chunks(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            source_id = ledger.upsert_source_account({
+                "sourceType": "local_folder",
+                "sourceIdentifier": os.path.join(temp_dir, "receipts"),
+                "status": "ready",
+            })
+
+            with self.assertRaises(SourceScanManifestLimitError):
+                ledger.rebuild_source_scan_manifest(
+                    source_id,
+                    (f"receipt-{index}.pdf" for index in range(502)),
+                    max_entries=501,
+                    max_path_bytes=100_000,
+                )
+
+            self.assertEqual(ledger.get_source_scan_batch(source_id, None, 10), [])
+
     def test_credential_url_redaction_is_linear_for_long_scheme_like_text(self):
         secret_url = LocalOperationsLedger._redact_sensitive(
             "https://operator:secret@example.test/path"
@@ -162,18 +185,70 @@ class TestLocalOperationsLedger(unittest.TestCase):
             connection = sqlite3.connect(ledger_path)
             try:
                 user_version = connection.execute("PRAGMA user_version").fetchone()[0]
-                migration = connection.execute(
-                    "SELECT version, name, checksum FROM schema_migrations"
-                ).fetchone()
+                migrations = connection.execute(
+                    "SELECT version, name, checksum FROM schema_migrations ORDER BY version"
+                ).fetchall()
             finally:
                 connection.close()
 
             self.assertEqual(status["status"], "current")
-            self.assertEqual(status["currentVersion"], 1)
+            self.assertEqual(status["currentVersion"], 2)
             self.assertTrue(status["historyComplete"])
-            self.assertEqual(user_version, 1)
-            self.assertEqual(migration[0], 1)
-            self.assertEqual(len(migration[2]), 64)
+            self.assertEqual(user_version, 2)
+            self.assertEqual([migration[0] for migration in migrations], [1, 2])
+            self.assertTrue(all(len(migration[2]) == 64 for migration in migrations))
+
+    def test_version_one_ledger_gets_verified_backup_before_scan_manifest_upgrade(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger_path = os.path.join(temp_dir, "fab.sqlite3")
+            connection = sqlite3.connect(ledger_path)
+            try:
+                connection.execute("CREATE TABLE legacy_evidence (value TEXT NOT NULL)")
+                connection.execute("INSERT INTO legacy_evidence (value) VALUES ('retained')")
+                connection.execute(
+                    """
+                    CREATE TABLE schema_migrations (
+                        version INTEGER PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        checksum TEXT NOT NULL,
+                        applied_at TEXT NOT NULL
+                    )
+                    """
+                )
+                migration = LEDGER_SCHEMA_MIGRATIONS[1]
+                connection.execute(
+                    "INSERT INTO schema_migrations VALUES (1, ?, ?, '2026-08-09T00:00:00Z')",
+                    (migration["name"], migration["checksum"]),
+                )
+                connection.execute("PRAGMA user_version = 1")
+                connection.commit()
+            finally:
+                connection.close()
+
+            ledger = LocalOperationsLedger(ledger_path)
+            status = ledger.schema_status()
+            backup_dir = os.path.join(temp_dir, "schema_backups")
+            manifests = [name for name in os.listdir(backup_dir) if name.endswith(".json")]
+            self.assertEqual(len(manifests), 1)
+            with open(os.path.join(backup_dir, manifests[0]), "r", encoding="utf-8") as handle:
+                backup_manifest = json.load(handle)
+            backup_path = os.path.join(backup_dir, backup_manifest["backupFilename"])
+            backup = sqlite3.connect(backup_path)
+            try:
+                retained = backup.execute("SELECT value FROM legacy_evidence").fetchone()[0]
+                old_manifest_table = backup.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'source_scan_manifest'"
+                ).fetchone()
+                integrity = backup.execute("PRAGMA integrity_check").fetchone()[0]
+            finally:
+                backup.close()
+            self.assertEqual(status["currentVersion"], 2)
+            self.assertTrue(status["historyComplete"])
+            self.assertEqual(backup_manifest["sourceSchemaVersion"], 1)
+            self.assertEqual(backup_manifest["targetSchemaVersion"], 2)
+            self.assertEqual(retained, "retained")
+            self.assertIsNone(old_manifest_table)
+            self.assertEqual(integrity, "ok")
 
     def test_existing_unversioned_ledger_gets_verified_pre_migration_backup(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -202,7 +277,7 @@ class TestLocalOperationsLedger(unittest.TestCase):
                 backup.close()
 
             self.assertEqual(manifest["sourceSchemaVersion"], 0)
-            self.assertEqual(manifest["targetSchemaVersion"], 1)
+            self.assertEqual(manifest["targetSchemaVersion"], 2)
             self.assertEqual(manifest["sha256"], digest)
             self.assertEqual(retained, "retained")
             self.assertEqual(integrity, "ok")

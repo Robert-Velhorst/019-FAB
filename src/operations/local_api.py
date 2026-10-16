@@ -176,7 +176,7 @@ HAI_ROUTE_RULES = (
     ("GET", re.compile(r"^/api/backups$")),
     ("POST", re.compile(r"^/api/connectors/google-drive/relay$")),
     ("GET", re.compile(r"^/api/drive-wave/work-orders$")),
-    ("POST", re.compile(r"^/api/drive-wave/documents/[1-9][0-9]*/attachment-readback$")),
+    # Binary Wave readback is operator-only; HAI cannot self-attest archival evidence.
     ("GET", re.compile(r"^/api/wave/receipt-executor/status$")),
     ("POST", re.compile(r"^/api/wave/receipt-executor/(?:session|claim|release)$")),
 )
@@ -206,7 +206,6 @@ CONTROL_CENTER_BATCH_PATHS = {
     "sourceReadiness": "/api/sources/readiness",
     "driveAuthorization": "/api/connectors/google-drive/authorization",
     "haiStatus": "/api/hai/status",
-    "haiManifest": "/api/hai/manifest",
     "gmailAuthorization": "/api/connectors/gmail/authorization",
 }
 
@@ -2335,6 +2334,9 @@ DASHBOARD_TEMPLATE = """
                 {% if export.external_id %}
                 <div class="muted">Wave ID</div>
                 <div class="muted mono">{{ export.external_id }}</div>
+                {% elif export.metadata and export.metadata.lastExecution and export.metadata.lastExecution.providerExternalId %}
+                <div class="muted">FAB external reference (not confirmation)</div>
+                <div class="muted mono">{{ export.metadata.lastExecution.providerExternalId }}</div>
                 {% endif %}
                 {% if export.metadata and export.metadata.masterLedgerDraft %}
                 <div class="muted">Master ledger {{ export.metadata.masterLedgerDraft.draftType }}</div>
@@ -4655,7 +4657,9 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
                     "method": request.method,
                     "endpoint": request.endpoint or "unmatched",
                     "errorType": type(exc).__name__,
-                    "externalSubmission": "not_executed",
+                    # A route may have reached a provider before an unexpected
+                    # exception prevented it from recording its own outcome.
+                    "externalSubmission": "unknown",
                 },
             })
         except Exception:
@@ -5320,6 +5324,8 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             "execution_indeterminate",
             "idempotency_conflict",
             "previously_failed",
+            "blocked",
+            "needs_review",
         }:
             status_code = 409
         else:
@@ -5509,12 +5515,15 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             if isinstance(audit_event_id, int) and not isinstance(audit_event_id, bool):
                 response["auditEventId"] = audit_event_id
             return jsonify(response), 200
+        external_submission = result.get("externalSubmission")
+        if external_submission not in {"not_executed", "unknown"}:
+            external_submission = "unknown"
         return jsonify({
             "success": False,
             "status": "blocked",
             "documentId": document_id,
             "reasons": ["Archive did not complete. Review the audit record."],
-            "externalSubmission": "not_executed",
+            "externalSubmission": external_submission,
         }), 409
 
     @app.get("/api/workflows")
@@ -7927,6 +7936,12 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             reconciliation_match_id,
             status=status,
             resolution=payload.get("resolution"),
+            actor=(
+                f"local_{g.fab_api_principal}"
+                if getattr(g, "fab_api_principal", None) in {"operator", "hai"}
+                else "local_operator_session"
+            ),
+            request_id=getattr(g, "fab_request_id", None),
         )
         status_code = 404 if result.get("status") == "not_found" else 200
         if result.get("status") == "invalid_status":
@@ -7944,6 +7959,12 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             reconciliation_match_id,
             status=status,
             resolution=f"Resolved from FAB dashboard as {status}.",
+            actor=(
+                f"local_{g.fab_api_principal}"
+                if getattr(g, "fab_api_principal", None) in {"operator", "hai"}
+                else "local_operator_session"
+            ),
+            request_id=getattr(g, "fab_request_id", None),
         )
         if not result.get("success"):
             return jsonify(result), {"not_found": 404, "invalid_status": 400}.get(result.get("status"), 409)

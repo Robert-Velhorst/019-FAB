@@ -1,6 +1,8 @@
+import hashlib
 import unittest
+from unittest.mock import patch
 
-from src.document_fetchers.drive_archiver import DriveArchiveClient
+from src.document_fetchers.drive_archiver import DRIVE_HASH_CHUNK_BYTES, DriveArchiveClient
 
 
 class FakeRequest:
@@ -30,6 +32,9 @@ class FakeDriveFiles:
     def get(self, **kwargs):
         return FakeRequest(self.file)
 
+    def get_media(self, **kwargs):
+        return FakeRequest()
+
     def update(self, **kwargs):
         self.updates.append(dict(kwargs))
 
@@ -50,7 +55,54 @@ class FakeDriveService:
         return self.resource
 
 
+class FakeMediaIoBaseDownload:
+    payload = b""
+    chunk_sizes = []
+
+    def __init__(self, sink, _request, chunksize):
+        self.sink = sink
+        self.chunksize = chunksize
+        self.offset = 0
+        type(self).chunk_sizes.append(chunksize)
+
+    def next_chunk(self):
+        chunk = type(self).payload[self.offset : self.offset + self.chunksize]
+        self.sink.write(chunk)
+        self.offset += len(chunk)
+        return None, self.offset >= len(type(self).payload)
+
+
 class TestDriveArchiveClient(unittest.TestCase):
+    def test_download_sha256_hashes_incremental_chunks_with_a_bounded_chunk_size(self):
+        payload = b"FAB receipt evidence" * 100_000
+        FakeMediaIoBaseDownload.payload = payload
+        FakeMediaIoBaseDownload.chunk_sizes = []
+        client = DriveArchiveClient(service=FakeDriveService(["source-folder"]))
+
+        with patch(
+            "src.document_fetchers.drive_archiver.MediaIoBaseDownload",
+            FakeMediaIoBaseDownload,
+        ):
+            digest = client.download_sha256("file-1")
+
+        self.assertEqual(digest, hashlib.sha256(payload).hexdigest())
+        self.assertEqual(FakeMediaIoBaseDownload.chunk_sizes, [DRIVE_HASH_CHUNK_BYTES])
+
+    def test_download_sha256_rejects_content_above_the_source_document_limit(self):
+        FakeMediaIoBaseDownload.payload = b"123456"
+        FakeMediaIoBaseDownload.chunk_sizes = []
+        client = DriveArchiveClient(service=FakeDriveService(["source-folder"]))
+
+        with (
+            patch(
+                "src.document_fetchers.drive_archiver.MediaIoBaseDownload",
+                FakeMediaIoBaseDownload,
+            ),
+            patch("src.document_fetchers.drive_archiver.MAX_SOURCE_DOCUMENT_BYTES", 5),
+        ):
+            with self.assertRaisesRegex(ValueError, "drive_archive_document_exceeds_limit"):
+                client.download_sha256("file-1")
+
     def test_restore_moves_same_file_back_to_intake(self):
         service = FakeDriveService(["archive-folder"])
         client = DriveArchiveClient(service=service)

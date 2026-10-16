@@ -156,6 +156,7 @@ class TestWaveappsApiExecutor(unittest.TestCase):
 
         self.assertEqual(result["status"], "outcome_unknown")
         self.assertEqual(result["review_reason"], "wave_api_outcome_unknown")
+        self.assertEqual(result["provider_external_id"], "fab:wave:unknown-outcome")
         self.assertNotIn("secret-token", result["message"])
         self.assertNotIn("private receipt", result["message"])
 
