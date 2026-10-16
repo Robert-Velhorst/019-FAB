@@ -223,16 +223,19 @@ class LocalFolderIntake:
 
     def register_local_file(self, root: str, path: str) -> Dict[str, Any]:
         """Register one newly uploaded file without rescanning its whole folder."""
-        normalized_root = _normalize_path(root)
-        normalized_path = _normalize_path(path)
+        raw_root = _normalize_path(root)
+        raw_path = _normalize_path(path)
+        normalized_root = os.path.realpath(raw_root)
+        normalized_path = os.path.realpath(raw_path)
         try:
-            if os.path.commonpath((normalized_root, normalized_path)) != normalized_root:
+            common_root = os.path.commonpath((normalized_root, normalized_path))
+            if os.path.normcase(common_root) != os.path.normcase(normalized_root):
                 return {"skipped": {"reason": "path_outside_source_root"}}
         except ValueError:
             return {"skipped": {"reason": "path_outside_source_root"}}
         if (
             not os.path.isdir(normalized_root)
-            or os.path.islink(normalized_path)
+            or os.path.islink(raw_path)
             or not os.path.isfile(normalized_path)
         ):
             return {"skipped": {"reason": "local_file_unavailable"}}
@@ -447,6 +450,18 @@ class LocalFolderIntake:
         source_document: Optional[Dict[str, Any]] = None,
         read_budget: Optional["_SourceReadBudget"] = None,
     ) -> Dict[str, Any]:
+        raw_path = _normalize_path(path)
+        root = os.path.realpath(_normalize_path(root))
+        path = os.path.realpath(raw_path)
+        try:
+            common_root = os.path.commonpath((root, path))
+            if (
+                os.path.islink(raw_path)
+                or os.path.normcase(common_root) != os.path.normcase(root)
+            ):
+                return {"skipped": {"path": path, "reason": "path_outside_source_root"}}
+        except ValueError:
+            return {"skipped": {"path": path, "reason": "path_outside_source_root"}}
         try:
             stat = os.stat(path, follow_symlinks=False)
             if not stat_module.S_ISREG(stat.st_mode):

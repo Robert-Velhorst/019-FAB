@@ -18,8 +18,23 @@
   stack-trace exposure in `local_api.py`. This is an active security blocker;
   the passing analysis jobs are not a clean security result. Triage and fix the
   findings before describing the PR as security-clean.
-- Next code and regression update is prepared locally; this log/checkpoint must
-  be pushed with it so the hosted checks rerun against the actual updated head.
+- At this point `11d124b` is pushed; the Drive correction is hosted and the next
+  intake security correction is local pending its commit and hosted scan.
+
+## 2026-10-16 - Confine local intake paths after symlink resolution
+
+- Hardened single-file and shared intake registration to resolve candidate and
+  source-root paths before checking containment. Files resolving outside the
+  configured root, including through a symlinked parent, are rejected before
+  they are statted or hashed. Added a parent-symlink escape regression with a
+  Windows fallback that simulates the resolved target.
+- Verification: local intake suite passed (`17 passed, 2 skipped`); combined
+  intake, connector, Drive relay, photo picker, and upload API tests passed
+  (`44 passed, 2 skipped`). Python compilation and `git diff --check` passed.
+  Ruff is not installed in this checkout runtime.
+- The then-current PR head `11d124b` still had the previously observed five
+  high path-flow and one medium exception-exposure CodeQL alerts; the path
+  hardening is in this local update and must be assessed by the next hosted scan.
 
 ## 2026-10-16 - Refresh PR state and continue security review
 

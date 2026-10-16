@@ -93,6 +93,46 @@ class TestLocalFolderIntake(unittest.TestCase):
             self.assertEqual(result["skipped"]["reason"], "path_outside_source_root")
             self.assertEqual(ledger.list_documents(), [])
 
+    def test_register_local_file_rejects_parent_symlink_outside_source_root(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            source_root = os.path.join(temp_dir, "uploads")
+            outside_root = os.path.join(temp_dir, "outside")
+            os.makedirs(source_root)
+            os.makedirs(outside_root)
+            outside_path = os.path.join(outside_root, "receipt.pdf")
+            with open(outside_path, "wb") as handle:
+                handle.write(b"must not be registered")
+            linked_dir = os.path.join(source_root, "linked")
+            linked_path = os.path.join(linked_dir, "receipt.pdf")
+            try:
+                os.symlink(outside_root, linked_dir, target_is_directory=True)
+            except (OSError, NotImplementedError):
+                realpath = os.path.realpath
+
+                def resolve_with_parent_link(path):
+                    if path == linked_path:
+                        return outside_path
+                    return realpath(path)
+
+                with mock.patch.object(
+                    local_intake_module.os.path,
+                    "realpath",
+                    side_effect=resolve_with_parent_link,
+                ):
+                    result = LocalFolderIntake(ledger).register_local_file(
+                        source_root,
+                        linked_path,
+                    )
+            else:
+                result = LocalFolderIntake(ledger).register_local_file(
+                    source_root,
+                    linked_path,
+                )
+
+            self.assertEqual(result["skipped"]["reason"], "path_outside_source_root")
+            self.assertEqual(ledger.list_documents(), [])
+
     def test_rescan_imports_documents_flags_duplicates_and_is_idempotent(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
