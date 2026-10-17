@@ -54,6 +54,13 @@ export function createFabServerLifecycle(server: Server, options: { timeoutMs?: 
   let serverClosed = false;
   let complete: ((code: number) => void) | undefined;
   let disposeSignals = () => {};
+  let afterShutdown: (() => Promise<void>) | undefined;
+  let cleanupPromise: Promise<void> | undefined;
+
+  const cleanup = () => {
+    cleanupPromise ??= Promise.resolve().then(() => afterShutdown?.());
+    return cleanupPromise;
+  };
 
   const drained = () => {
     if (serverClosed && sockets.size === 0) complete?.(0);
@@ -84,7 +91,7 @@ export function createFabServerLifecycle(server: Server, options: { timeoutMs?: 
         disposeSignals();
         server.off("connection", connection);
         server.off("request", request);
-        resolve(code);
+        void cleanup().then(() => resolve(code), () => resolve(1));
       };
       const timer = setTimeout(() => {
         // closeAllConnections excludes upgraded sockets; track all TCP peers too.
@@ -114,21 +121,17 @@ export function createFabServerLifecycle(server: Server, options: { timeoutMs?: 
   function installSignalHandlers(
     signals: Pick<EventEmitter, "on" | "off"> = process,
     exit: (code: number) => void = code => process.exit(code),
-    afterShutdown?: () => Promise<void>,
+    cleanupAfterShutdown?: () => Promise<void>,
   ): () => void {
     disposeSignals();
+    afterShutdown = cleanupAfterShutdown;
     let requested = false;
     const onSignal = () => {
       if (requested) return;
       requested = true;
-      void shutdown().then(async code => {
-        try {
-          await afterShutdown?.();
-          exit(code);
-        } catch {
-          exit(1);
-        }
-      });
+      void shutdown().then(code => {
+        try { exit(code); } catch { exit(1); }
+      }, () => exit(1));
     };
     signals.on("SIGTERM", onSignal);
     signals.on("SIGINT", onSignal);

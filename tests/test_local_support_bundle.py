@@ -38,6 +38,7 @@ class TestLocalSupportBundleService(unittest.TestCase):
                 "fab_local_ledger_path": ledger_path,
                 "fab_support_bundle_dir": output_dir,
                 "fab_support_health_issue_limit": 1,
+                "fab_local_api_base_url": "https://sensitive-tenant.example.invalid",
                 "waveapps_business_access_token": secret,
                 "waveapps_business_id": "private-business-id",
             }
@@ -62,6 +63,7 @@ class TestLocalSupportBundleService(unittest.TestCase):
 
             self.assertNotIn(secret, rendered)
             self.assertNotIn("private-business-id", rendered)
+            self.assertNotIn("sensitive-tenant.example.invalid", rendered)
             self.assertNotIn(sensitive_filename, rendered)
             self.assertNotIn("private-source-id", rendered)
             self.assertFalse(doctor["privacy"]["containsFinancialDocuments"])

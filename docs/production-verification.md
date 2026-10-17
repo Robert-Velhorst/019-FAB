@@ -2297,3 +2297,31 @@ formatting and whitespace checks passed. No local MySQL listener was
 available, so these changes have not yet been exercised against a real MySQL
 server; the first hosted CI run remains the acceptance gate. No live or user
 database was used.
+
+## 2026-10-17 - Full Backend and Runtime Revalidation
+
+- The full Windows Python suite passed **1,999 tests, 8 skipped, and 222
+  subtests** in 943.15 seconds. Skips are environment-dependent; this is local
+  regression evidence, not hosted CI or provider acceptance.
+- The current web worktree passed **480 Vitest tests with 6 skipped**, the
+  TypeScript check, and the production build including asset budgets and both
+  server bundles. The database integration tests are opt-in and were skipped in
+  this web-suite run; a separate disposable MySQL 8.4 run had previously applied
+  the tracked migrations and passed all six database integration tests.
+- `scripts/run_stack_rehearsal.py` passed all **71 synthetic checks** on Windows.
+  It used loopback listeners, a synthetic ledger, and a simulated trusted proxy;
+  it performed no provider writes and did not open an ngrok tunnel.
+- The built standalone dashboard returned HTTP 200 for `/admin/operations` on
+  isolated loopback port 49137 and shut down with status 0. `DATABASE_URL` was
+  deliberately empty, so this smoke test did not exercise closing a live MySQL
+  pool or prove a fresh Windows installation.
+- Read-only inspection of GitHub code scanning found 100 open alerts in the
+  first results page on `main` at `6445f876bc2cece049628b1b5e9efcb43706eb3f`
+  (36 high, 64 medium). The current local branch contains changes relevant to
+  several of those findings, including hardened CAMT/XML parsing and an
+  enforcing content security policy. No alert was dismissed, and no claim is
+  made that the remote default branch has been rescanned or cleared.
+
+These checks do not establish public ngrok routing, external HAI-peer
+acceptance, live provider correctness, installed Windows 11 acceptance, a
+production deployment, or disaster-recovery acceptance.
