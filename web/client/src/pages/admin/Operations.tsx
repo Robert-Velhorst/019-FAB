@@ -18,6 +18,7 @@ import { FabOperationsPanels } from "@/components/fab/FabOperationsPanels";
 import { FabOperatorShell } from "@/components/fab/FabOperatorShell";
 import { FabReportingCenter } from "@/components/fab/FabReportingCenter";
 import { FabReviewWorkspace, type FabReviewResolution } from "@/components/fab/FabReviewWorkspace";
+import { refreshFabReviewPages } from "@/components/fab/fabReviewPages";
 import { FabWaveReceiptExecutorDrawer } from "@/components/fab/FabWaveReceiptExecutorDrawer";
 import { FabWaveSetupDrawer, type FabWaveSetupSaveInput } from "@/components/fab/FabWaveSetupDrawer";
 import type { FabCommandId, FabRecord } from "@/components/fab/fabView";
@@ -335,20 +336,15 @@ export default function AdminOperations() {
     let cancelled = false;
     const sequence = ++reviewRefreshSequence.current;
     const limit = Math.max(1, count(firstPagePagination.limit) || 50);
-    void Promise.all(offsets.map(offset =>
-      utils.fab.reviewPage.fetch({ offset, limit })
-    )).then((pages) => {
+    void refreshFabReviewPages(
+      { workItems: firstPage, pagination: firstPagePagination },
+      offsets,
+      limit,
+      (offset, pageLimit) => utils.fab.reviewPage.fetch({ offset, limit: pageLimit }),
+    ).then((refreshed) => {
       if (cancelled || sequence !== reviewRefreshSequence.current) return;
-      const allPages = [
-        { workItems: firstPage, pagination: firstPagePagination },
-        ...pages,
-      ];
-      const merged = new Map<string, FabRecord>();
-      allPages.forEach(page => records(page.workItems).forEach(item => {
-        merged.set(text(item.id), item);
-      }));
-      setReviewWorkItems(Array.from(merged.values()));
-      setReviewPagination(asRecord(allPages[allPages.length - 1]?.pagination));
+      setReviewWorkItems(refreshed.workItems);
+      setReviewPagination(refreshed.pagination);
     }).catch(() => {
       // Keep the last successfully loaded pages if a background refresh fails.
     });
