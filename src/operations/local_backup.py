@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 from src.operations.local_ledger import LocalOperationsLedger
+from src.operations.runtime_lease import RuntimeLeaseHeartbeat
 from src.security.deployment_secrets import read_secret, strong_secret
 from src.security.local_secret_store import LocalSecretStore
 from src.worker.runtime import WorkerAlreadyRunningError, managed_worker_maintenance
@@ -39,6 +40,7 @@ SOURCE_EVIDENCE_FORMATS = {BACKUP_FORMAT_V2, BACKUP_FORMAT_V3}
 SOURCE_EVIDENCE_PREFIX = "source_evidence/"
 RESTORED_SOURCE_DIR_PREFIX = "fab-source-evidence-"
 SCHEDULED_BACKUP_LEASE_NAME = "local_scheduled_backup"
+SCHEDULED_BACKUP_LEASE_TTL_SECONDS = 1800
 MAX_BACKUP_ARCHIVE_FILES = 10_000
 MAX_BACKUP_CENTRAL_DIRECTORY_BYTES = 8 * 1024 * 1024
 MAX_BACKUP_EVIDENCE_FILE_BYTES = 250 * 1024 * 1024
@@ -530,7 +532,7 @@ class LocalBackupService:
         lease = self.ledger.acquire_runtime_lease(
             SCHEDULED_BACKUP_LEASE_NAME,
             owner_token,
-            ttl_seconds=1800,
+            ttl_seconds=SCHEDULED_BACKUP_LEASE_TTL_SECONDS,
             metadata={"actor": str(actor or "local_worker")[:200]},
         )
         if not lease.get("acquired"):
@@ -542,16 +544,24 @@ class LocalBackupService:
                 "externalSubmission": "not_executed",
             }
         try:
-            backup = self.create_backup(
-                note="Automatic scheduled source-complete recovery package.",
-                require_complete_source_evidence=_bool_config(
-                    self.config,
-                    "backup_require_complete_source_evidence",
-                    "fab_backup_require_complete_source_evidence",
-                    default=True,
-                ),
-                actor=actor,
-            )
+            with RuntimeLeaseHeartbeat(
+                self.ledger,
+                SCHEDULED_BACKUP_LEASE_NAME,
+                owner_token,
+                SCHEDULED_BACKUP_LEASE_TTL_SECONDS,
+                thread_name="fab-scheduled-backup-lease-heartbeat",
+            ) as heartbeat:
+                backup = self.create_backup(
+                    note="Automatic scheduled source-complete recovery package.",
+                    require_complete_source_evidence=_bool_config(
+                        self.config,
+                        "backup_require_complete_source_evidence",
+                        "fab_backup_require_complete_source_evidence",
+                        default=True,
+                    ),
+                    actor=actor,
+                )
+                heartbeat.assert_owned()
             return {
                 "success": True,
                 "status": "created",

@@ -2366,14 +2366,15 @@ acceptance, live provider correctness, or production deployment acceptance.
 
 ## 2026-10-17 - Long-Running Runtime Lease Renewal
 
-Introduced a shared heartbeat for the autonomous cycle, connector intake, and
-Drive-to-Wave archival. It renews only the lease still owned by the current
-owner token, keeps Drive archival's established error codes, and checks
-autonomy lease ownership immediately before running each action. This prevents
-a configured short lease from expiring during otherwise healthy long work and
-allowing a second worker to start the same workflow.
+Introduced a shared heartbeat for the autonomous cycle, connector intake,
+Drive-to-Wave archival, local folder scans, and scheduled source-complete
+backups. It renews only the lease still owned by the current owner token, keeps
+Drive archival's established error codes, and checks lease ownership at action
+boundaries and before successful completion. This prevents configured leases
+from expiring during otherwise healthy long work and allowing a second worker
+to start the same operation; a lost lease is not silently reported as success.
 
-The focused autonomy, connector-intake, and Drive-delivery suites passed **101
-tests and 32 subtests** on Windows. The full Python suite was not rerun for this
-change. These tests do not exercise concurrent live provider writes, hosted
-CI, or production worker behavior.
+The focused autonomy, connector-intake, Drive-delivery, folder-intake, and
+backup suites passed **143 tests, 4 skipped, and 32 subtests** on Windows. The
+full Python suite was not rerun for this change. These tests do not exercise
+concurrent live provider writes, hosted CI, or production worker behavior.

@@ -1,7 +1,9 @@
 import json
 import hashlib
 import os
+import threading
 import tempfile
+import time
 import unittest
 import zipfile
 from unittest.mock import patch
@@ -707,6 +709,52 @@ class TestLocalBackupService(unittest.TestCase):
             )
             self.assertEqual(second["status"], "not_due")
             self.assertFalse(second["schedule"]["due"])
+
+    def test_run_due_renews_short_lease_while_backup_is_running(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            service = LocalBackupService(ledger, {
+                "fab_local_backup_dir": os.path.join(temp_dir, "backups"),
+            })
+            backup_started = threading.Event()
+            finish_backup = threading.Event()
+            outcome = {}
+            errors = []
+
+            def slow_backup(**_kwargs):
+                backup_started.set()
+                if not finish_backup.wait(timeout=5):
+                    raise TimeoutError("test did not release scheduled backup")
+                return {"backupFilename": "test.zip"}
+
+            service.create_backup = slow_backup
+
+            def run_backup():
+                try:
+                    outcome["result"] = service.run_due(actor="test-worker")
+                except Exception as exc:
+                    errors.append(exc)
+
+            with patch("src.operations.local_backup.SCHEDULED_BACKUP_LEASE_TTL_SECONDS", 1):
+                worker = threading.Thread(target=run_backup)
+                worker.start()
+                try:
+                    self.assertTrue(backup_started.wait(timeout=5))
+                    time.sleep(1.25)
+                    competitor = ledger.acquire_runtime_lease(
+                        "local_scheduled_backup",
+                        "competing-backup",
+                        ttl_seconds=60,
+                    )
+                    self.assertFalse(competitor["acquired"])
+                finally:
+                    finish_backup.set()
+                    worker.join(timeout=10)
+
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(errors, [])
+            self.assertEqual(outcome["result"]["status"], "created")
+            self.assertIsNone(ledger.get_runtime_lease("local_scheduled_backup"))
 
 
 if __name__ == "__main__":

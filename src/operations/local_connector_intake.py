@@ -140,7 +140,7 @@ class LocalConnectorIntakeService:
                 owner_token,
                 lease_ttl_seconds,
                 thread_name="fab-connector-intake-lease-heartbeat",
-            ):
+            ) as heartbeat:
                 result = self._sync_once(
                     sources=sources,
                     actor=actor,
@@ -148,6 +148,7 @@ class LocalConnectorIntakeService:
                     workflow_metadata=workflow_metadata,
                     step_attempts=step_attempts,
                 )
+                heartbeat.assert_owned()
                 return result
         finally:
             released = self.ledger.release_runtime_lease(

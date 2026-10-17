@@ -1,6 +1,8 @@
 import os
 import sqlite3
+import threading
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -14,6 +16,52 @@ from src.operations.local_ledger import LocalOperationsLedger
 
 
 class TestLocalFolderIntake(unittest.TestCase):
+    def test_rescan_renews_short_lease_while_scan_is_running(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            intake = LocalFolderIntake(ledger)
+            scan_started = threading.Event()
+            finish_scan = threading.Event()
+            outcome = {}
+            errors = []
+
+            def slow_scan(_roots):
+                scan_started.set()
+                if not finish_scan.wait(timeout=5):
+                    raise TimeoutError("test did not release folder scan")
+                return {"status": "completed", "scanned": 0}
+
+            def run_scan():
+                try:
+                    outcome["result"] = intake.rescan([temp_dir])
+                except Exception as exc:
+                    errors.append(exc)
+
+            with mock.patch.object(
+                local_intake_module,
+                "LOCAL_FOLDER_INTAKE_LEASE_TTL_SECONDS",
+                1,
+            ), mock.patch.object(intake, "_rescan_with_lease", side_effect=slow_scan):
+                worker = threading.Thread(target=run_scan)
+                worker.start()
+                try:
+                    self.assertTrue(scan_started.wait(timeout=5))
+                    time.sleep(1.25)
+                    competitor = ledger.acquire_runtime_lease(
+                        LOCAL_FOLDER_INTAKE_LEASE_NAME,
+                        "competing-scan",
+                        ttl_seconds=60,
+                    )
+                    self.assertFalse(competitor["acquired"])
+                finally:
+                    finish_scan.set()
+                    worker.join(timeout=10)
+
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(errors, [])
+            self.assertEqual(outcome["result"]["status"], "completed")
+            self.assertIsNone(ledger.get_runtime_lease(LOCAL_FOLDER_INTAKE_LEASE_NAME))
+
     def test_hash_rejects_path_outside_explicit_source_root(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             source_root = os.path.join(temp_dir, "intake")

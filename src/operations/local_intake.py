@@ -14,6 +14,7 @@ from src.document_processors.document_resource_limits import (
 )
 from src.operations.local_ledger import LocalOperationsLedger, SourceScanManifestLimitError
 from src.operations.local_targets import resolve_document_target_system
+from src.operations.runtime_lease import RuntimeLeaseHeartbeat
 
 
 DEFAULT_ALLOWED_EXTENSIONS = {
@@ -28,6 +29,7 @@ DEFAULT_ALLOWED_EXTENSIONS = {
     ".txt",
 }
 LOCAL_FOLDER_INTAKE_LEASE_NAME = "local_folder_intake"
+LOCAL_FOLDER_INTAKE_LEASE_TTL_SECONDS = 21600
 
 
 class LocalFolderIntake:
@@ -56,7 +58,7 @@ class LocalFolderIntake:
         lease = self.ledger.acquire_runtime_lease(
             LOCAL_FOLDER_INTAKE_LEASE_NAME,
             owner_token,
-            ttl_seconds=21600,
+            ttl_seconds=LOCAL_FOLDER_INTAKE_LEASE_TTL_SECONDS,
             metadata={"source": self.source, "folderCount": len(roots)},
         )
         if not lease.get("acquired"):
@@ -73,7 +75,16 @@ class LocalFolderIntake:
                 "runtimeLease": lease.get("lease"),
             }
         try:
-            return self._rescan_with_lease(roots)
+            with RuntimeLeaseHeartbeat(
+                self.ledger,
+                LOCAL_FOLDER_INTAKE_LEASE_NAME,
+                owner_token,
+                LOCAL_FOLDER_INTAKE_LEASE_TTL_SECONDS,
+                thread_name="fab-folder-intake-lease-heartbeat",
+            ) as heartbeat:
+                result = self._rescan_with_lease(roots)
+                heartbeat.assert_owned()
+                return result
         finally:
             self.ledger.release_runtime_lease(
                 LOCAL_FOLDER_INTAKE_LEASE_NAME,
