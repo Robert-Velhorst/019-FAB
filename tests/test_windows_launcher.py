@@ -299,6 +299,14 @@ class TestWindowsLauncher(unittest.TestCase):
         self.assertIn("-m pip check", script)
         self.assertIn("Set-Content -LiteralPath $venvRequirementsMarker", script)
 
+    def test_launcher_reports_missing_dashboard_runtime_prerequisites(self):
+        script = (ROOT / "Start-FAB.ps1").read_text(encoding="utf-8")
+
+        self.assertIn('Get-Command node -ErrorAction SilentlyContinue', script)
+        self.assertIn('Get-Command pnpm.cmd -ErrorAction SilentlyContinue', script)
+        self.assertIn("dashboard requires Node.js 22.12 or newer", script)
+        self.assertIn("dashboard requires pnpm 11.20.0 or newer", script)
+
     def test_maintenance_launcher_is_quiescent_local_and_argument_aware(self):
         script = (ROOT / "Start-FAB.ps1").read_text(encoding="utf-8")
         start_cmd = (ROOT / "Start-FAB.cmd").read_text(encoding="utf-8")

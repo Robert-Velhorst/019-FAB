@@ -2410,3 +2410,8 @@ session. No deep-scan report or zero-findings result was produced. These local
 checks do not establish a fresh Windows 11 installation, external HAI-peer
 acceptance, public ngrok routing, live provider correctness, or production
 deployment acceptance.
+
+The Windows operator quick start now lists the Node.js and pnpm versions the
+launcher requires for the dashboard, and the launcher reports actionable
+errors when either runtime is missing. The focused Windows launcher suite passed
+**17 tests** after this change. This is not a fresh-machine install test.

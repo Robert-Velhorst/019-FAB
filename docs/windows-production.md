@@ -4,6 +4,12 @@ This profile is for one Windows account, one business, one local API, and one
 worker. It is not a public or multi-tenant deployment. The existing local profile
 remains the default; selecting Windows production does not migrate any data.
 
+The Windows launcher also requires Node.js 22.12 or newer and pnpm 11.20.0 or
+newer to build and run the production operator dashboard. FAB provisions its
+project-local Python runtime when a supported Python installer is available,
+but does not install Node.js or pnpm. Missing dashboard runtimes are reported
+before startup continues.
+
 ## Storage and Credentials
 
 Before switching an existing installation, stop it with its previous configuration

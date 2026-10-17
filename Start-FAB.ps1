@@ -614,8 +614,14 @@ $python = Get-Command $venvPython -ErrorAction Stop
 if ($LASTEXITCODE -ne 0) {
     throw "The FAB .venv is not Python 3.13. Remove only the .venv directory, install Python 3.13, and run Start-FAB.cmd again."
 }
-$node = Get-Command node -ErrorAction Stop
-$pnpm = Get-Command pnpm.cmd -ErrorAction Stop
+$node = Get-Command node -ErrorAction SilentlyContinue
+if (-not $node) {
+    throw "FAB's dashboard requires Node.js 22.12 or newer. Install Node.js, reopen the terminal, and run Start-FAB.cmd again."
+}
+$pnpm = Get-Command pnpm.cmd -ErrorAction SilentlyContinue
+if (-not $pnpm) {
+    throw "FAB's dashboard requires pnpm 11.20.0 or newer. Install pnpm, reopen the terminal, and run Start-FAB.cmd again."
+}
 
 & $python.Source -c "import importlib.util,sys; modules=('flask','waitress','PIL','pytesseract','pdf2image','langdetect','googleapiclient'); sys.exit(0 if all(importlib.util.find_spec(module) for module in modules) else 1)" 2>$null
 if ($LASTEXITCODE -ne 0) {
