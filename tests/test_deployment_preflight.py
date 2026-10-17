@@ -90,6 +90,23 @@ def test_local_profile_can_keep_weak_token_for_loopback_only_api():
     assert not any(issue["id"] == "deployment_api_secret" for issue in report["issues"])
 
 
+@pytest.mark.parametrize("profile", ["local", "windows", "vm"])
+def test_hai_token_must_differ_from_operator_token_in_every_profile(tmp_path, profile):
+    config = production(tmp_path, profile)
+    config["fab_hai_api_token"] = config["fab_local_api_token"]
+
+    report = deployment_preflight(config)
+
+    assert report["status"] == "blocked"
+    assert any(issue["id"] == "deployment_hai_secret" for issue in report["issues"])
+
+    from src.operations.local_api import create_app
+
+    with pytest.raises(ValueError, match="startup blocked"):
+        create_app(config)
+    assert not (tmp_path / "data" / "ledger.sqlite3").exists()
+
+
 @pytest.mark.parametrize("key,value", [
     ("fab_local_api_host", "0.0.0.0"), ("fab_local_api_port", "3000oops"),
     ("fab_local_api_port", "0"), ("fab_local_api_port", 65536),

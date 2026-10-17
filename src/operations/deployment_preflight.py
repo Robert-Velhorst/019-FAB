@@ -34,7 +34,8 @@ def deployment_preflight(config):
         add("deployment_api_secret", "Configure a random API token of at least 32 characters.")
     hai_token = _value(config, "fab_hai_api_token", "operations_hai_api_token", "hai_api_token", default="")
     if hai_token != "" and (not valid_api_token(hai_token)
-                            or (profile != "local" and (not strong_secret(hai_token) or hai_token == token))):
+                            or hai_token == token
+                            or (profile != "local" and not strong_secret(hai_token))):
         add("deployment_hai_secret", "Configure a separate HAI token using printable ASCII without whitespace, at most 8192 characters; production requires a random token of at least 32 characters.")
     if profile not in {"local", "windows", "vm"}:
         add("deployment_profile", "Set FAB_DEPLOYMENT_PROFILE to local, windows, or vm.")
