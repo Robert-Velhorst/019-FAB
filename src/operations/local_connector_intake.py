@@ -19,6 +19,7 @@ from src.operations.local_bookkeeping_records import LocalBookkeepingRecordServi
 from src.operations.local_intake import LocalFolderIntake
 from src.operations.local_ledger import LocalOperationsLedger
 from src.operations.local_targets import resolve_document_target_system
+from src.operations.runtime_lease import RuntimeLeaseHeartbeat
 from src.security.google_oauth_store import GoogleOAuthTokenStore
 
 
@@ -95,16 +96,17 @@ class LocalConnectorIntakeService:
         step_attempts: Optional[Dict[str, int]] = None,
     ) -> Dict[str, Any]:
         owner_token = uuid4().hex
+        lease_ttl_seconds = _positive_float_config(
+            self.config,
+            "fab_connector_intake_lease_seconds",
+            "operations_connector_intake_lease_seconds",
+            "connector_intake_lease_seconds",
+            default=21600.0,
+        )
         lease = self.ledger.acquire_runtime_lease(
             CONNECTOR_INTAKE_LEASE_NAME,
             owner_token,
-            ttl_seconds=_positive_float_config(
-                self.config,
-                "fab_connector_intake_lease_seconds",
-                "operations_connector_intake_lease_seconds",
-                "connector_intake_lease_seconds",
-                default=21600.0,
-            ),
+            ttl_seconds=lease_ttl_seconds,
             metadata={"actor": actor, "trigger": trigger_source},
         )
         if not lease.get("acquired"):
@@ -132,14 +134,21 @@ class LocalConnectorIntakeService:
 
         result = None
         try:
-            result = self._sync_once(
-                sources=sources,
-                actor=actor,
-                trigger_source=trigger_source,
-                workflow_metadata=workflow_metadata,
-                step_attempts=step_attempts,
-            )
-            return result
+            with RuntimeLeaseHeartbeat(
+                self.ledger,
+                CONNECTOR_INTAKE_LEASE_NAME,
+                owner_token,
+                lease_ttl_seconds,
+                thread_name="fab-connector-intake-lease-heartbeat",
+            ):
+                result = self._sync_once(
+                    sources=sources,
+                    actor=actor,
+                    trigger_source=trigger_source,
+                    workflow_metadata=workflow_metadata,
+                    step_attempts=step_attempts,
+                )
+                return result
         finally:
             released = self.ledger.release_runtime_lease(
                 CONNECTOR_INTAKE_LEASE_NAME,

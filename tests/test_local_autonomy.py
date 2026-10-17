@@ -1,5 +1,7 @@
 import os
 import tempfile
+import threading
+import time
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -382,6 +384,53 @@ class TestLocalAutonomousService(unittest.TestCase):
             self.assertTrue(
                 ledger.release_runtime_lease("local_autonomous_cycle", "existing-owner")
             )
+
+    def test_autonomy_renews_short_lease_while_cycle_is_running(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            service = LocalAutonomousService(
+                ledger,
+                {"fab_autonomy_lease_seconds": 1},
+                intake_paths=[],
+            )
+            cycle_started = threading.Event()
+            finish_cycle = threading.Event()
+            outcome = {}
+            errors = []
+
+            def slow_cycle(**_kwargs):
+                cycle_started.set()
+                if not finish_cycle.wait(timeout=5):
+                    raise TimeoutError("test did not release autonomous cycle")
+                return {"success": True, "status": "completed", "plan": {}}
+
+            service._run_cycle_once = slow_cycle
+
+            def run_cycle():
+                try:
+                    outcome["result"] = service.run_cycle()
+                except Exception as exc:
+                    errors.append(exc)
+
+            worker = threading.Thread(target=run_cycle)
+            worker.start()
+            try:
+                self.assertTrue(cycle_started.wait(timeout=5))
+                time.sleep(1.25)
+                competitor = ledger.acquire_runtime_lease(
+                    "local_autonomous_cycle",
+                    "competing-cycle",
+                    ttl_seconds=60,
+                )
+                self.assertFalse(competitor["acquired"])
+            finally:
+                finish_cycle.set()
+                worker.join(timeout=10)
+
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(errors, [])
+            self.assertTrue(outcome["result"]["success"])
+            self.assertIsNone(ledger.get_runtime_lease("local_autonomous_cycle"))
 
     def test_autonomy_dry_run_does_not_acquire_runtime_lease(self):
         with tempfile.TemporaryDirectory() as temp_dir:

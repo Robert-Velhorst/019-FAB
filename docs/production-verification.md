@@ -2329,8 +2329,10 @@ production deployment, or disaster-recovery acceptance.
 ## 2026-10-17 - PR Head Windows and Standalone Revalidation
 
 The application checks below ran against application code at
-`1a32d887f0ccdbfb55f37060ee20988a8dbec0d3`. Subsequent commits only update
-this verification record.
+`1a32d887f0ccdbfb55f37060ee20988a8dbec0d3`. At the time of those checks,
+subsequent commits only updated this verification record. The later runtime
+lease heartbeat change is documented separately below and has its own focused
+regression run.
 
 - The complete Windows Python suite reported **1,998 passed, 6 skipped, and 4
   failed** in 1,096.18 seconds. All four failures were the same Windows worker
@@ -2361,3 +2363,17 @@ this verification record.
 This evidence improves confidence in the current PR head but does not establish
 hosted-CI acceptance, a fresh Windows 11 install, public ngrok routing, HAI peer
 acceptance, live provider correctness, or production deployment acceptance.
+
+## 2026-10-17 - Long-Running Runtime Lease Renewal
+
+Introduced a shared heartbeat for the autonomous cycle, connector intake, and
+Drive-to-Wave archival. It renews only the lease still owned by the current
+owner token, keeps Drive archival's established error codes, and checks
+autonomy lease ownership immediately before running each action. This prevents
+a configured short lease from expiring during otherwise healthy long work and
+allowing a second worker to start the same workflow.
+
+The focused autonomy, connector-intake, and Drive-delivery suites passed **101
+tests and 32 subtests** on Windows. The full Python suite was not rerun for this
+change. These tests do not exercise concurrent live provider writes, hosted
+CI, or production worker behavior.

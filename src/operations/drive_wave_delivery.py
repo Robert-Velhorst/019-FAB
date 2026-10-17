@@ -5,7 +5,6 @@ import json
 import math
 import os
 import re
-import threading
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -18,6 +17,7 @@ from src.operations.local_wave_receipt_executor import (
     wave_business_uuid,
 )
 from src.operations.local_wave_setup import LocalWaveSetupService
+from src.operations.runtime_lease import RuntimeLeaseHeartbeat
 from src.security.google_oauth_store import GoogleOAuthTokenStore
 
 if TYPE_CHECKING:
@@ -50,59 +50,6 @@ WAVE_RECEIPT_ALLOWED_MIME_TYPES = {
     "image/tiff",
 }
 ARCHIVE_LEASE_TTL_SECONDS = 300
-
-
-class _RuntimeLeaseHeartbeat:
-    def __init__(self, ledger: LocalOperationsLedger, lease_name: str, owner_token: str, ttl_seconds: float):
-        self.ledger = ledger
-        self.lease_name = lease_name
-        self.owner_token = owner_token
-        self.ttl_seconds = ttl_seconds
-        self.interval_seconds = max(0.01, min(float(ttl_seconds) / 3, 30.0))
-        self._stop = threading.Event()
-        self._lost = threading.Event()
-        self._thread = threading.Thread(
-            target=self._run,
-            name="fab-drive-archive-lease-heartbeat",
-            daemon=True,
-        )
-
-    def __enter__(self):
-        self._thread.start()
-        return self
-
-    def __exit__(self, *_exc_info):
-        self._stop.set()
-        self._thread.join()
-
-    def _renew(self) -> bool:
-        acquired = self.ledger.heartbeat_runtime_lease(
-            self.lease_name,
-            self.owner_token,
-            ttl_seconds=self.ttl_seconds,
-        )
-        if not acquired:
-            self._lost.set()
-        return acquired
-
-    def _run(self) -> None:
-        while not self._stop.wait(self.interval_seconds):
-            try:
-                if not self._renew():
-                    return
-            except Exception:
-                self._lost.set()
-                return
-
-    def assert_owned(self) -> None:
-        if self._lost.is_set():
-            raise RuntimeError("archive_lease_lost")
-        try:
-            if self._renew():
-                return
-        except Exception as exc:
-            raise RuntimeError("archive_lease_heartbeat_failed") from exc
-        raise RuntimeError("archive_lease_lost")
 
 
 class DriveWaveDeliveryService:
@@ -873,11 +820,14 @@ class DriveWaveDeliveryService:
                 "externalSubmission": "not_executed",
             }
         try:
-            with _RuntimeLeaseHeartbeat(
+            with RuntimeLeaseHeartbeat(
                 self.ledger,
                 lease_name,
                 owner_token,
                 lease_ttl_seconds,
+                thread_name="fab-drive-archive-lease-heartbeat",
+                lost_error="archive_lease_lost",
+                heartbeat_error="archive_lease_heartbeat_failed",
             ) as heartbeat:
                 return self._archive_document_with_lease(document_id, actor, heartbeat)
         finally:
@@ -887,7 +837,7 @@ class DriveWaveDeliveryService:
         self,
         document_id: int,
         actor: str,
-        heartbeat: _RuntimeLeaseHeartbeat,
+        heartbeat: RuntimeLeaseHeartbeat,
     ) -> Dict[str, Any]:
         plan = self.plan_archive(document_id)
         if plan.get("status") == "not_applicable":

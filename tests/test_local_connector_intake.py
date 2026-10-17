@@ -1,5 +1,7 @@
 import os
 import tempfile
+import threading
+import time
 import unittest
 
 from src.operations.local_connector_intake import (
@@ -203,6 +205,54 @@ class TestLocalConnectorIntake(unittest.TestCase):
             self.assertTrue(
                 ledger.release_runtime_lease(CONNECTOR_INTAKE_LEASE_NAME, "other-owner")
             )
+
+    def test_sync_renews_short_lease_while_connector_fetch_is_running(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger, service = self._service(temp_dir, [])
+            service.config["fab_connector_intake_lease_seconds"] = 1
+            fetch_started = threading.Event()
+            finish_fetch = threading.Event()
+            outcome = {}
+            errors = []
+
+            def slow_sync(**_kwargs):
+                fetch_started.set()
+                if not finish_fetch.wait(timeout=5):
+                    raise TimeoutError("test did not release connector fetch")
+                return {
+                    "success": True,
+                    "status": "completed",
+                    "summary": {},
+                    "results": [],
+                }
+
+            service._sync_once = slow_sync
+
+            def sync():
+                try:
+                    outcome["result"] = service.sync(["gmail"], actor="test")
+                except Exception as exc:
+                    errors.append(exc)
+
+            worker = threading.Thread(target=sync)
+            worker.start()
+            try:
+                self.assertTrue(fetch_started.wait(timeout=5))
+                time.sleep(1.25)
+                competitor = ledger.acquire_runtime_lease(
+                    CONNECTOR_INTAKE_LEASE_NAME,
+                    "competing-sync",
+                    ttl_seconds=60,
+                )
+                self.assertFalse(competitor["acquired"])
+            finally:
+                finish_fetch.set()
+                worker.join(timeout=10)
+
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(errors, [])
+            self.assertTrue(outcome["result"]["success"])
+            self.assertIsNone(ledger.get_runtime_lease(CONNECTOR_INTAKE_LEASE_NAME))
 
     def test_changed_provider_document_creates_reviewable_revision(self):
         with tempfile.TemporaryDirectory() as temp_dir:

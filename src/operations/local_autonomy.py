@@ -25,6 +25,7 @@ from src.operations.local_processing import (
 )
 from src.operations.local_readiness import LocalReadinessService
 from src.operations.local_reconciliation import LocalReconciliationService
+from src.operations.runtime_lease import RuntimeLeaseHeartbeat
 from src.operations.local_targets import resolve_document_target_system
 from src.operations.local_routing import (
     PREPARED_ROUTING_STATUSES,
@@ -553,15 +554,16 @@ class LocalAutonomousService:
                 recovery_continuation_action_ids=recovery_continuation_action_ids,
             )
         owner_token = uuid4().hex
+        lease_ttl_seconds = _positive_float_config(
+            self.config,
+            "fab_autonomy_lease_seconds",
+            "operations_autonomy_lease_seconds",
+            default=21600.0,
+        )
         lease = self.ledger.acquire_runtime_lease(
             AUTONOMY_LEASE_NAME,
             owner_token,
-            ttl_seconds=_positive_float_config(
-                self.config,
-                "fab_autonomy_lease_seconds",
-                "operations_autonomy_lease_seconds",
-                default=21600.0,
-            ),
+            ttl_seconds=lease_ttl_seconds,
             metadata={"trigger": trigger_source},
         )
         if not lease.get("acquired"):
@@ -592,22 +594,30 @@ class LocalAutonomousService:
             }
         result = None
         try:
-            result = self._run_cycle_once(
-                limit=limit,
-                bank_transactions=bank_transactions,
-                include_wave_plan=include_wave_plan,
-                dry_run=False,
-                include_wave_sync=include_wave_sync,
-                include_connector_sync=include_connector_sync,
-                allowed_action_ids=allowed_action_ids,
-                trigger_source=trigger_source,
-                workflow_metadata=workflow_metadata,
-                step_attempts=step_attempts,
-                recovery_mode=recovery_mode,
-                recovery_action_id=recovery_action_id,
-                recovery_continuation_action_ids=recovery_continuation_action_ids,
-            )
-            return result
+            with RuntimeLeaseHeartbeat(
+                self.ledger,
+                AUTONOMY_LEASE_NAME,
+                owner_token,
+                lease_ttl_seconds,
+                thread_name="fab-autonomy-lease-heartbeat",
+            ) as lease_heartbeat:
+                result = self._run_cycle_once(
+                    limit=limit,
+                    bank_transactions=bank_transactions,
+                    include_wave_plan=include_wave_plan,
+                    dry_run=False,
+                    include_wave_sync=include_wave_sync,
+                    include_connector_sync=include_connector_sync,
+                    allowed_action_ids=allowed_action_ids,
+                    trigger_source=trigger_source,
+                    workflow_metadata=workflow_metadata,
+                    step_attempts=step_attempts,
+                    recovery_mode=recovery_mode,
+                    recovery_action_id=recovery_action_id,
+                    recovery_continuation_action_ids=recovery_continuation_action_ids,
+                    lease_heartbeat=lease_heartbeat,
+                )
+                return result
         finally:
             released = self.ledger.release_runtime_lease(AUTONOMY_LEASE_NAME, owner_token)
             released_lease = {
@@ -642,6 +652,7 @@ class LocalAutonomousService:
         recovery_mode: bool = False,
         recovery_action_id: Optional[str] = None,
         recovery_continuation_action_ids: Optional[List[str]] = None,
+        lease_heartbeat: Optional[RuntimeLeaseHeartbeat] = None,
     ) -> Dict[str, Any]:
         limit = _bounded_limit(limit, default=25, maximum=100)
         selected_action_ids = (
@@ -877,6 +888,8 @@ class LocalAutonomousService:
                 "startedAt": started_at,
             })
             try:
+                if lease_heartbeat is not None:
+                    lease_heartbeat.assert_owned()
                 result = callback()
             except Exception as exc:
                 failed_step_key = action_id
