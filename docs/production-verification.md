@@ -2325,3 +2325,33 @@ database was used.
 These checks do not establish public ngrok routing, external HAI-peer
 acceptance, live provider correctness, installed Windows 11 acceptance, a
 production deployment, or disaster-recovery acceptance.
+
+## 2026-10-17 - PR Head Windows and Standalone Revalidation
+
+These checks ran against PR head `1a32d887f0ccdbfb55f37060ee20988a8dbec0d3`.
+
+- The complete Windows Python suite reported **1,998 passed, 6 skipped, and 4
+  failed** in 1,096.18 seconds. All four failures were the same Windows worker
+  ownership cases: the isolated worktree had no `.venv\Scripts\python.exe`,
+  which those tests launch. After exposing the existing repository venv to the
+  isolated checkout with a local junction, all four cases passed. The full run
+  was not repeated after correcting that test-only environment prerequisite.
+- The full web suite passed **477 tests with 5 skipped**. TypeScript checking
+  and the production build, including frontend budgets and both server bundles,
+  passed on this PR head.
+- The Windows stack rehearsal passed **71 synthetic, loopback-only checks**
+  across the dashboard, SQLite ledger, HAI authorization boundaries, and
+  verified source bytes. It used no provider writes and opened no tunnel.
+- The built standalone dashboard returned HTTP 200 for `/admin/operations`;
+  its programmatic shutdown returned 0. `DATABASE_URL` was unset, so this did
+  not test closing an initialized MySQL pool.
+- GitHub Actions run `39007816089` completed with `startup_failure` and no
+  jobs. An older workflow-dispatch run at the previous PR head remained queued
+  with no jobs. These runs did not execute CI steps and do not indicate a test
+  failure. The current status page showed GitHub Actions operational, but no
+  run-specific cause was available. See the
+  [GitHub Status page](https://www.githubstatus.com/).
+
+This evidence improves confidence in the current PR head but does not establish
+hosted-CI acceptance, a fresh Windows 11 install, public ngrok routing, HAI peer
+acceptance, live provider correctness, or production deployment acceptance.
