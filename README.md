@@ -24,6 +24,10 @@ Check the repository's Actions page for the current main-branch CI status. A gre
 
 Direct SVB submissions, official tax filing, complete multi-tenant permissions, and automatic bank feeds are not represented as implemented. Drive source archival is allowed only after the configured flow proves the exact downstream record and stored attachment; a visible attachment icon alone is not proof.
 
+### Preview release
+
+The first development preview, [`v0.1.0-preview.1`](https://github.com/Robert-Velhorst/019-FAB/releases/tag/v0.1.0-preview.1), provides checksum-verified Windows and Docker Compose source bundles. Each archive contains a `RELEASE-MANIFEST.json` with per-file hashes and has a matching `.sha256` sidecar. These are source packages, not signed installers or prebuilt container images. Verify the checksum before extracting and read the security policy before connecting live financial sources.
+
 ## Operator Quick Start (Windows 11)
 
 Requirements: Git, Python 3.13 (the launcher may provision it using the Windows Python launcher or uv), Tesseract with Dutch and English language data, and Poppler for PDF OCR. The launcher installs dependencies in a project-local environment.
