@@ -2328,9 +2328,9 @@ production deployment, or disaster-recovery acceptance.
 
 ## 2026-10-17 - PR Head Windows and Standalone Revalidation
 
-The application checks below ran against code at PR head
-`1a32d887f0ccdbfb55f37060ee20988a8dbec0d3`; the current PR head
-`c325ab110b13b372d79921ee0d50add6303a8f3f` adds verification notes only.
+The application checks below ran against application code at
+`1a32d887f0ccdbfb55f37060ee20988a8dbec0d3`. Subsequent commits only update
+this verification record.
 
 - The complete Windows Python suite reported **1,998 passed, 6 skipped, and 4
   failed** in 1,096.18 seconds. All four failures were the same Windows worker
@@ -2347,9 +2347,10 @@ The application checks below ran against code at PR head
 - The built standalone dashboard returned HTTP 200 for `/admin/operations`;
   its programmatic shutdown returned 0. `DATABASE_URL` was unset, so this did
   not test closing an initialized MySQL pool.
-- On the current PR head, a disposable loopback-only MySQL 8.4 container with
-  no persistent volume accepted all tracked Drizzle migrations, and all **5
-  MySQL integration tests** passed. The container was stopped and removed.
+- On the same application-code state, a disposable loopback-only MySQL 8.4
+  container with no persistent volume accepted all tracked Drizzle migrations,
+  and all **5 MySQL integration tests** passed. The container was stopped and
+  removed.
 - GitHub Actions run `39007816089` completed with `startup_failure` and no
   jobs. An older workflow-dispatch run at the previous PR head remained queued
   with no jobs. These runs did not execute CI steps and do not indicate a test
