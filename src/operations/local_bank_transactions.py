@@ -3,10 +3,13 @@ import hashlib
 import io
 import json
 import re
-import xml.etree.ElementTree as ET
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, Iterable, List, Optional
+from xml.etree.ElementTree import Element
+
+from defusedxml import ElementTree as ET
+from defusedxml.common import DefusedXmlException
 
 from src.operations.local_ledger import LocalOperationsLedger
 from src.validation.financial_consistency import finite_number
@@ -443,8 +446,13 @@ def _parse_csv_transactions(text: str) -> List[Dict[str, Any]]:
 
 def _parse_camt_transactions(text: str) -> List[Dict[str, Any]]:
     try:
-        root = ET.fromstring(text)
-    except ET.ParseError as exc:
+        root = ET.fromstring(
+            text,
+            forbid_dtd=True,
+            forbid_entities=True,
+            forbid_external=True,
+        )
+    except (ET.ParseError, DefusedXmlException) as exc:
         raise ValueError("CAMT/XML bank statement is not valid XML") from exc
     transactions: List[Dict[str, Any]] = []
     for entry in _iter_local(root, "Ntry"):
@@ -650,20 +658,20 @@ def _key(value: Any) -> str:
     return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
 
 
-def _iter_local(root: ET.Element, local_name: str) -> Iterable[ET.Element]:
+def _iter_local(root: Element, local_name: str) -> Iterable[Element]:
     for element in root.iter():
         if _local_name(element.tag) == local_name:
             yield element
 
 
-def _first_local_text(root: ET.Element, local_name: str) -> Optional[str]:
+def _first_local_text(root: Element, local_name: str) -> Optional[str]:
     for element in root.iter():
         if _local_name(element.tag) == local_name and element.text:
             return element.text.strip()
     return None
 
 
-def _first_path_text(root: ET.Element, path: Iterable[str]) -> Optional[str]:
+def _first_path_text(root: Element, path: Iterable[str]) -> Optional[str]:
     current = root
     for local_name in path:
         next_child = None
@@ -677,7 +685,7 @@ def _first_path_text(root: ET.Element, path: Iterable[str]) -> Optional[str]:
     return current.text.strip() if current.text else None
 
 
-def _first_local_attribute(root: ET.Element, local_name: str, attribute: str) -> Optional[str]:
+def _first_local_attribute(root: Element, local_name: str, attribute: str) -> Optional[str]:
     for element in root.iter():
         if _local_name(element.tag) == local_name:
             value = element.attrib.get(attribute)

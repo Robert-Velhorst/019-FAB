@@ -14,3 +14,4 @@ openpyxl # For reading .xlsx files with pandas
 Flask>=3.1,<4 # Authenticated local operations API and retained compatibility dashboard
 waitress # Production WSGI server for the local FAB API
 cryptography # For SecurityManager
+defusedxml # Hardened parsing for untrusted CAMT/XML bank statements

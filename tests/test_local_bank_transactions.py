@@ -310,6 +310,20 @@ class TestLocalBankTransactionImportService(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "not valid XML"):
                 service.import_statement_text("<Document>", format="camt")
 
+    def test_camt_rejects_internal_entity_declarations(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            service = LocalBankTransactionImportService(ledger, {})
+            statement = """<!DOCTYPE Document [
+                <!ENTITY amount "42.50">
+            ]>
+            <Document><Ntry><Amt>&amount;</Amt></Ntry></Document>"""
+
+            with self.assertRaisesRegex(ValueError, "not valid XML"):
+                service.import_statement_text(statement, format="camt")
+
+            self.assertEqual(ledger.list_bank_transactions(), [])
+
 
 if __name__ == "__main__":
     unittest.main()
