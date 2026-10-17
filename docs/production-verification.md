@@ -2378,3 +2378,35 @@ The focused autonomy, connector-intake, Drive-delivery, folder-intake, and
 backup suites passed **143 tests, 4 skipped, and 32 subtests** on Windows. The
 full Python suite was not rerun for this change. These tests do not exercise
 concurrent live provider writes, hosted CI, or production worker behavior.
+
+## 2026-10-17 - PR Review Refresh and Full Local Regression
+
+Fixed the Operations dashboard's 60-second control-center refresh so it
+preserves and refreshes review pages already loaded by the operator. Explicit
+bookkeeping actions reset the page set after mutation. The page refetch and
+merge behavior now has focused tests for loaded offsets, updated and duplicate
+records, missing identifiers, and pagination metadata.
+
+- The full Windows Python suite passed **2,006 tests, 6 skipped, and 219
+  subtests** at PR commit `997f6e9`. The subsequent `70acc8c` change only touched
+  the TypeScript dashboard helper, its tests, and the dashboard wiring; no
+  Python source changed after that run.
+- The web suite passed **479 tests, 5 skipped**; TypeScript checking, the Vite
+  production build and asset budgets, and both server bundles passed against
+  the `70acc8c` source tree.
+- The Windows synthetic stack rehearsal passed all **71 checks** at
+  `997f6e9`, including the dashboard/API/SQLite workflow and HAI authorization
+  boundaries. It used synthetic records, loopback listeners and no provider
+  writes. The later dashboard-only helper change does not alter this backend
+  rehearsal, but the rehearsal is not browser rendering or live acceptance.
+- GitHub Actions run `39012001217` for `70acc8c` ended as `startup_failure`
+  with no jobs. It did not run CI steps and is neither a pass nor a test
+  failure. CodeQL run `39011998633` was still in progress at the time of this
+  record.
+
+The Codex Security Deep Scan could not start because its read-only workers
+require a managed filesystem permission profile that was unavailable in this
+session. No deep-scan report or zero-findings result was produced. These local
+checks do not establish a fresh Windows 11 installation, external HAI-peer
+acceptance, public ngrok routing, live provider correctness, or production
+deployment acceptance.
