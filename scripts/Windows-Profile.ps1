@@ -9,6 +9,7 @@ function Invoke-FabWithServiceCredentials {
     # Resolve file credentials once, then pass identical values to every child.
     $values = @{
         FAB_LOCAL_API_TOKEN = $ApiToken
+        FAB_OPERATIONS_SERVICE_TOKEN_FILE = $null
         FAB_HAI_API_TOKEN = $HaiApiToken
         FAB_LOCAL_API_TOKEN_FILE = $null
         FAB_HAI_API_TOKEN_FILE = $null
@@ -23,13 +24,23 @@ function Invoke-FabWithServiceCredentials {
     }
     try {
         foreach ($name in $values.Keys) {
-            [Environment]::SetEnvironmentVariable($name, $values[$name], "Process")
+            if ($null -eq $values[$name]) {
+                Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue
+            }
+            else {
+                [Environment]::SetEnvironmentVariable($name, $values[$name], "Process")
+            }
         }
         & $Action
     }
     finally {
         foreach ($name in $values.Keys) {
-            [Environment]::SetEnvironmentVariable($name, $previous[$name], "Process")
+            if ($null -eq $previous[$name]) {
+                Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue
+            }
+            else {
+                [Environment]::SetEnvironmentVariable($name, $previous[$name], "Process")
+            }
         }
     }
 }

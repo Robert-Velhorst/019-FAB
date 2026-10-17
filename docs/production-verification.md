@@ -2254,3 +2254,164 @@ remain inspectable. The backup, restore, API, autonomy and component suites
 passed **193 tests with one platform skip**. This bounds central-directory
 metadata allocation; it does not add an overall time or process-memory limit to
 deep checksum reads or SQLite integrity checks.
+## Sparse Reconciliation Candidate Index (2026-10-15)
+
+Added a per-call sorted index of valid document amounts. The default matcher
+queries only rows within the configured amount tolerance on sparse workloads,
+then restores original document order before scoring so first-in-order ties and
+duplicate-ID behavior remain unchanged. Dense candidate ranges and custom score
+overrides keep their previous full-scan behavior. When the combined Decimal
+exponent/precision range could round the query bounds, matching also falls back
+to the full scan. A large exact-decimal regression was found by comparing the
+new path to the old prepared scorer and is now covered.
+
+Focused reconciliation, financial-boundary, and component tests passed **65
+passed**. The full Windows Python suite then passed **1,887 passed, 7 skipped,
+137 subtests** in 965.55 seconds.
+
+The synthetic benchmark compared identical complete result lists against the
+unprepared scorer. Median times: 500x100 different amounts, 4.17 ms indexed vs
+86.27 ms unprepared; 500x100 dense ties, 14.64 ms vs 107.11 ms; 2,000x400
+sparse rows, 33.79 ms vs 1.91 seconds. `tracemalloc` peak increased by about
+193 KB for the larger case; it is Python allocation measurement, not process
+RSS. These fixtures do not establish a whole-application speed or memory
+improvement, production latency SLA, or provider behavior. Whitespace checks
+passed for the changed matcher, test, and benchmark files. No live ledger,
+provider, tunnel, service, commit, or deployment was changed.
+
+## Web MySQL Migration and Transaction Gate (2026-10-15)
+
+Added a dedicated CI job using an ephemeral MySQL 8.4 service. It applies the
+tracked Drizzle migration journal before running integration tests for
+idempotent source-document registration, workflow metadata compare-and-swap,
+dashboard tRPC registration through MySQL, review status/audit persistence,
+and rollback when an audit insert collides. The test refuses a non-loopback
+host or a database other than `fab_test`.
+
+Local verification passed direct TypeScript checking and 13 focused mocked
+database tests; all five real-MySQL cases correctly skipped without an opt-in
+database URL. The earlier full **448 web tests**, production Vite/server build
+and size budgets, and synthetic Windows frontend-to-Python-API-to-SQLite
+rehearsal passed before the new tRPC integration case. The CI YAML parsed and
+formatting and whitespace checks passed. No local MySQL listener was
+available, so these changes have not yet been exercised against a real MySQL
+server; the first hosted CI run remains the acceptance gate. No live or user
+database was used.
+
+## 2026-10-17 - Full Backend and Runtime Revalidation
+
+- The full Windows Python suite passed **1,999 tests, 8 skipped, and 222
+  subtests** in 943.15 seconds. Skips are environment-dependent; this is local
+  regression evidence, not hosted CI or provider acceptance.
+- The current web worktree passed **480 Vitest tests with 6 skipped**, the
+  TypeScript check, and the production build including asset budgets and both
+  server bundles. The database integration tests are opt-in and were skipped in
+  this web-suite run; a separate disposable MySQL 8.4 run had previously applied
+  the tracked migrations and passed all six database integration tests.
+- `scripts/run_stack_rehearsal.py` passed all **71 synthetic checks** on Windows.
+  It used loopback listeners, a synthetic ledger, and a simulated trusted proxy;
+  it performed no provider writes and did not open an ngrok tunnel.
+- The built standalone dashboard returned HTTP 200 for `/admin/operations` on
+  isolated loopback port 49137 and shut down with status 0. `DATABASE_URL` was
+  deliberately empty, so this smoke test did not exercise closing a live MySQL
+  pool or prove a fresh Windows installation.
+- Read-only inspection of GitHub code scanning found 100 open alerts in the
+  first results page on `main` at `6445f876bc2cece049628b1b5e9efcb43706eb3f`
+  (36 high, 64 medium). The current local branch contains changes relevant to
+  several of those findings, including hardened CAMT/XML parsing and an
+  enforcing content security policy. No alert was dismissed, and no claim is
+  made that the remote default branch has been rescanned or cleared.
+
+These checks do not establish public ngrok routing, external HAI-peer
+acceptance, live provider correctness, installed Windows 11 acceptance, a
+production deployment, or disaster-recovery acceptance.
+
+## 2026-10-17 - PR Head Windows and Standalone Revalidation
+
+The application checks below ran against application code at
+`1a32d887f0ccdbfb55f37060ee20988a8dbec0d3`. At the time of those checks,
+subsequent commits only updated this verification record. The later runtime
+lease heartbeat change is documented separately below and has its own focused
+regression run.
+
+- The complete Windows Python suite reported **1,998 passed, 6 skipped, and 4
+  failed** in 1,096.18 seconds. All four failures were the same Windows worker
+  ownership cases: the isolated worktree had no `.venv\Scripts\python.exe`,
+  which those tests launch. After exposing the existing repository venv to the
+  isolated checkout with a local junction, all four cases passed. The full run
+  was not repeated after correcting that test-only environment prerequisite.
+- The full web suite passed **477 tests with 5 skipped**. TypeScript checking
+  and the production build, including frontend budgets and both server bundles,
+  passed on this PR head.
+- The Windows stack rehearsal passed **71 synthetic, loopback-only checks**
+  across the dashboard, SQLite ledger, HAI authorization boundaries, and
+  verified source bytes. It used no provider writes and opened no tunnel.
+- The built standalone dashboard returned HTTP 200 for `/admin/operations`;
+  its programmatic shutdown returned 0. `DATABASE_URL` was unset, so this did
+  not test closing an initialized MySQL pool.
+- On the same application-code state, a disposable loopback-only MySQL 8.4
+  container with no persistent volume accepted all tracked Drizzle migrations,
+  and all **5 MySQL integration tests** passed. The container was stopped and
+  removed.
+- GitHub Actions run `39007816089` completed with `startup_failure` and no
+  jobs. An older workflow-dispatch run at the previous PR head remained queued
+  with no jobs. These runs did not execute CI steps and do not indicate a test
+  failure. The current status page showed GitHub Actions operational, but no
+  run-specific cause was available. See the
+  [GitHub Status page](https://www.githubstatus.com/).
+
+This evidence improves confidence in the current PR head but does not establish
+hosted-CI acceptance, a fresh Windows 11 install, public ngrok routing, HAI peer
+acceptance, live provider correctness, or production deployment acceptance.
+
+## 2026-10-17 - Long-Running Runtime Lease Renewal
+
+Introduced a shared heartbeat for the autonomous cycle, connector intake,
+Drive-to-Wave archival, local folder scans, and scheduled source-complete
+backups. It renews only the lease still owned by the current owner token, keeps
+Drive archival's established error codes, and checks lease ownership at action
+boundaries and before successful completion. This prevents configured leases
+from expiring during otherwise healthy long work and allowing a second worker
+to start the same operation; a lost lease is not silently reported as success.
+
+The focused autonomy, connector-intake, Drive-delivery, folder-intake, and
+backup suites passed **143 tests, 4 skipped, and 32 subtests** on Windows. The
+full Python suite was not rerun for this change. These tests do not exercise
+concurrent live provider writes, hosted CI, or production worker behavior.
+
+## 2026-10-17 - PR Review Refresh and Full Local Regression
+
+Fixed the Operations dashboard's 60-second control-center refresh so it
+preserves and refreshes review pages already loaded by the operator. Explicit
+bookkeeping actions reset the page set after mutation. The page refetch and
+merge behavior now has focused tests for loaded offsets, updated and duplicate
+records, missing identifiers, and pagination metadata.
+
+- The full Windows Python suite passed **2,006 tests, 6 skipped, and 219
+  subtests** at PR commit `997f6e9`. The subsequent `70acc8c` change only touched
+  the TypeScript dashboard helper, its tests, and the dashboard wiring; no
+  Python source changed after that run.
+- The web suite passed **479 tests, 5 skipped**; TypeScript checking, the Vite
+  production build and asset budgets, and both server bundles passed against
+  the `70acc8c` source tree.
+- The Windows synthetic stack rehearsal passed all **71 checks** at
+  `997f6e9`, including the dashboard/API/SQLite workflow and HAI authorization
+  boundaries. It used synthetic records, loopback listeners and no provider
+  writes. The later dashboard-only helper change does not alter this backend
+  rehearsal, but the rehearsal is not browser rendering or live acceptance.
+- GitHub Actions run `39012001217` for `70acc8c` ended as `startup_failure`
+  with no jobs. It did not run CI steps and is neither a pass nor a test
+  failure. CodeQL run `39011998633` was still in progress at the time of this
+  record.
+
+The Codex Security Deep Scan could not start because its read-only workers
+require a managed filesystem permission profile that was unavailable in this
+session. No deep-scan report or zero-findings result was produced. These local
+checks do not establish a fresh Windows 11 installation, external HAI-peer
+acceptance, public ngrok routing, live provider correctness, or production
+deployment acceptance.
+
+The Windows operator quick start now lists the Node.js and pnpm versions the
+launcher requires for the dashboard, and the launcher reports actionable
+errors when either runtime is missing. The focused Windows launcher suite passed
+**17 tests** after this change. This is not a fresh-machine install test.

@@ -125,8 +125,8 @@ graph TD
 
 *   **Purpose**: Fetches email attachments from Gmail using the Gmail API.
 *   **Dependencies**: `google-api-python-client`, `google-auth-oauthlib`.
-*   **Configuration**: `gmail_credentials_file`, `gmail_token_file`, `gmail_attachment_download_dir`, `gmail_search_query`, `gmail_scanner_mode`, `gmail_trusted_senders`, `gmail_max_attachment_bytes`.
-*   **Runtime Behavior**: Follows Gmail `nextPageToken` pages up to configured limits, traverses nested MIME parts, writes content-addressed files, and refuses to start interactive OAuth from an unattended worker unless `interactive_auth=true` is explicitly selected for supervised setup. Scanner mode additionally enforces an exact sender allowlist, PDF filename/MIME/magic-byte checks, bounded attachment size, stable message/attachment identity, per-item failure isolation, and read-only source retention. After a complete run, connector metadata advances a durable last-successful checkpoint; subsequent queries include a configurable overlap. A page/message cap is a partial run and never advances that checkpoint.
+*   **Configuration**: `gmail_credentials_file`, `gmail_token_file`, `gmail_attachment_download_dir`, `gmail_search_query`, `gmail_scanner_mode`, `gmail_trusted_senders`, `gmail_max_attachment_bytes`, `gmail_max_run_bytes`, and `gmail_max_run_attachments`.
+*   **Runtime Behavior**: Follows Gmail `nextPageToken` pages up to configured limits, traverses nested MIME parts, writes content-addressed files, and refuses to start interactive OAuth from an unattended worker unless `interactive_auth=true` is explicitly selected for supervised setup. Scanner mode additionally enforces an exact sender allowlist, PDF filename/MIME/magic-byte checks, bounded per-attachment and per-run size/count limits, stable message/attachment identity, per-item failure isolation, and read-only source retention. Reaching a byte or attachment run cap marks the scan partial and prevents checkpoint advancement. After a complete run, connector metadata advances a durable last-successful checkpoint; subsequent queries include a configurable overlap. A page/message cap is also partial and never advances that checkpoint.
 
 ### 2.6.1. Gmail scanner activation
 
@@ -147,7 +147,7 @@ The scanner profile replaces the Gmail-to-Drive Apps Script from `Noodzakelijk-O
 
 *   **Purpose**: Fetches immutable ticket-description and attachment evidence from Freshdesk using a read-only API profile. The optional repository-025 financial profile searches configured ticket statuses, keyword-matches subject/description text, forces ticket descriptions to non-posting supporting evidence, verifies bounded PDF attachments, isolates per-ticket failures, records source commit provenance, and never closes tickets or copies evidence to Drive.
 *   **Dependencies**: `requests`.
-*   **Configuration**: `freshdesk_api_key`; either `freshdesk_domain` or `freshdesk_api_url`; `freshdesk_download_dir`; `freshdesk_ticket_statuses`; `freshdesk_financial_filter_enabled`; `freshdesk_financial_keywords`; `freshdesk_include_ticket_description`; `freshdesk_pdf_only`; `freshdesk_require_https_attachments`; and `freshdesk_max_attachment_bytes`.
+*   **Configuration**: `freshdesk_api_key`; either `freshdesk_domain` or `freshdesk_api_url`; `freshdesk_download_dir`; `freshdesk_ticket_statuses`; `freshdesk_financial_filter_enabled`; `freshdesk_financial_keywords`; `freshdesk_include_ticket_description`; `freshdesk_pdf_only`; `freshdesk_attachment_allowed_hosts`; and `freshdesk_max_attachment_bytes`.
 *   **Runtime Behavior**: Traverses bounded ticket pages, includes ticket and conversation attachments, deduplicates provider attachment IDs, enforces request timeouts, and records partial provider failures without discarding evidence already fetched.
 
 ### 2.9. `src/document_fetchers/photos_fetcher.py` (`PhotosFetcher`)
@@ -197,7 +197,7 @@ The scanner profile replaces the Gmail-to-Drive Apps Script from `Noodzakelijk-O
 ### 2.16. `src/document_processors/line_item_extractor.py` (`LineItemExtractor`)
 
 *   **Purpose**: Extracts individual line items (e.g., product, quantity, price) from invoices or receipts.
-*   **Dependencies**: (Potentially `re` for regex, `pandas` for data structuring).
+*   **Dependencies**: Python standard library.
 
 ### 2.17. `src/document_processors/enhanced_processor.py` (`EnhancedProcessor`)
 
@@ -348,6 +348,10 @@ The interactive placeholder migration wizard was removed. Supported historical i
 *   **Purpose**: Generates financial reports and provides insights based on processed and categorized data.
 *   **Key Methods**:
     *   `generate_report(transactions)`: Creates a summary report of income, expenses, and other financial metrics.
+    *   `generate_expense_report(transactions, group_by)`: Aggregates document totals by category or vendor.
+    *   `cash_flow_forecast(transactions, forecast_months)`: Projects average monthly outflow using calendar-month buckets.
+    *   `analyze_trend(transactions, category)`: Returns category-filtered totals keyed by JSON-friendly `YYYY-MM` values.
+*   **Dependencies**: Standard library and the existing `python-dateutil` dependency; pandas is not required.
 
 ### 2.51. `src/backup/backup_manager.py` (`BackupManager`)
 

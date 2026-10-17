@@ -1,13 +1,18 @@
+import json
 import os
 import tempfile
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 
 from src.operations.local_exports import (
     EXPORT_APPROVAL_PHRASE,
     EXPORT_REJECTION_PHRASE,
     EXPORT_RESULT_CONFIRMATION_PHRASE,
     LocalExportAttemptService,
+    _map_execution_status,
 )
 from src.operations.local_bookkeeping_records import LocalBookkeepingRecordService
 from src.operations.local_ledger import LocalOperationsLedger
@@ -26,6 +31,147 @@ class _FakeWaveExecutor:
 
 
 class TestLocalExportAttemptService(unittest.TestCase):
+    def test_unknown_wave_result_is_terminal_and_never_claimed_as_not_executed(self):
+        external_submission, status, message = _map_execution_status("outcome_unknown")
+
+        self.assertEqual(external_submission, "unknown")
+        self.assertEqual(status, "failed")
+        self.assertIn("Reconcile the target", message)
+
+    def test_unknown_wave_write_is_persisted_as_nonretryable_attention(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            document_id = ledger.register_document({
+                "source": "scanner",
+                "sourceDocumentId": "wave-outcome-unknown",
+                "originalFilename": "receipt.txt",
+                "documentType": "receipt",
+                "processingStatus": "reviewed",
+                "vendorName": "Office Shop",
+                "category": "Office Supplies",
+                "transactionDate": "2026-07-10",
+                "totalAmount": 42.5,
+            })
+            route = LocalRoutingService(ledger).prepare_document_route(document_id)
+            executor = _FakeWaveExecutor({
+                "status": "outcome_unknown",
+                "message": "Check Wave before taking further action.",
+                "review_reason": "wave_api_outcome_unknown",
+                "requires_manual_review": True,
+                "provider_external_id": "fab:wave:unknown-outcome",
+            })
+            service = LocalExportAttemptService(
+                ledger,
+                {"waveapps_default_target": "business"},
+                wave_executor=executor,
+            )
+            prepared = service.prepare_from_routing_attempt(route["routingAttemptId"])
+            attempt_id = prepared["exportAttemptId"]
+            service.approve_attempt(attempt_id, confirmation=EXPORT_APPROVAL_PHRASE)
+
+            result = service.execute_attempt(attempt_id)
+
+            self.assertEqual(result["status"], "failed")
+            attempt = ledger.get_export_attempt(attempt_id)
+            self.assertEqual(attempt["external_submission"], "unknown")
+            self.assertEqual(
+                attempt["metadata"]["lastExecution"]["providerExternalId"],
+                "fab:wave:unknown-outcome",
+            )
+            self.assertEqual(ledger.dashboard_metrics()["attention_export_attempts"], 1)
+            review = ledger.list_review_items(
+                status=("pending", "in_review"),
+                document_id=document_id,
+                limit=10,
+            )[0]
+            self.assertEqual(review["reason"], "wave_api_outcome_unknown")
+            self.assertEqual(json.loads(review["details"])["externalSubmission"], "unknown")
+            record = ledger.get_bookkeeping_record_by_document(document_id)
+            self.assertEqual(record["metadata"]["latestExport"]["details"]["externalSubmission"], "unknown")
+            self.assertEqual(service.execute_attempt(attempt_id)["status"], "not_executable")
+            self.assertEqual(
+                service.approve_attempt(attempt_id, confirmation=EXPORT_APPROVAL_PHRASE)["status"],
+                "not_approvable",
+            )
+
+    def test_unknown_wave_observation_is_audited_without_resolving_or_retrying(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            document_id = ledger.register_document({
+                "source": "scanner",
+                "sourceDocumentId": "wave-observation",
+                "originalFilename": "receipt.txt",
+                "documentType": "receipt",
+                "processingStatus": "reviewed",
+                "vendorName": "Office Shop",
+                "category": "Office Supplies",
+                "transactionDate": "2026-07-10",
+                "totalAmount": 42.5,
+            })
+            route = LocalRoutingService(ledger).prepare_document_route(document_id)
+            executor = _FakeWaveExecutor({
+                "status": "outcome_unknown",
+                "review_reason": "wave_api_outcome_unknown",
+            })
+            service = LocalExportAttemptService(
+                ledger,
+                {"waveapps_default_target": "business"},
+                wave_executor=executor,
+            )
+            prepared = service.prepare_from_routing_attempt(route["routingAttemptId"])
+            attempt_id = prepared["exportAttemptId"]
+            service.approve_attempt(attempt_id, confirmation=EXPORT_APPROVAL_PHRASE)
+            service.execute_attempt(attempt_id)
+            required_fields = ["target", "vendor", "date", "amount", "currency", "attachment"]
+
+            incomplete = service.record_unknown_wave_observation(
+                attempt_id,
+                external_id="wave-tx-42",
+                verified_fields=required_fields[:-1],
+                actor="tester",
+                confirmation=f"RECORD FAB WAVE OBSERVATION #{attempt_id}",
+            )
+            self.assertEqual(incomplete["status"], "incomplete_observation")
+
+            recorded = service.record_unknown_wave_observation(
+                attempt_id,
+                external_id="wave-tx-42",
+                verified_fields=required_fields,
+                actor="tester",
+                confirmation=f"RECORD FAB WAVE OBSERVATION #{attempt_id}",
+            )
+
+            self.assertTrue(recorded["success"])
+            self.assertEqual(recorded["status"], "observation_recorded")
+            self.assertFalse(recorded["providerReadbackVerified"])
+            self.assertFalse(recorded["sourceArchivalAllowed"])
+            duplicate_observation = service.record_unknown_wave_observation(
+                attempt_id,
+                external_id="wave-tx-42",
+                verified_fields=required_fields,
+                actor="tester",
+                confirmation=f"RECORD FAB WAVE OBSERVATION #{attempt_id}",
+            )
+            self.assertEqual(duplicate_observation["status"], "already_recorded")
+            attempt = ledger.get_export_attempt(attempt_id)
+            self.assertEqual(attempt["status"], "failed")
+            self.assertEqual(attempt["external_submission"], "unknown")
+            self.assertIsNone(attempt["external_id"])
+            self.assertFalse(attempt["metadata"]["operatorReconciliation"]["providerReadbackVerified"])
+            self.assertEqual(len(attempt["metadata"]["operatorReconciliationHistory"]), 1)
+            review = ledger.list_review_items(
+                status=("pending", "in_review"),
+                document_id=document_id,
+                limit=10,
+            )[0]
+            self.assertEqual(review["reason"], "wave_api_outcome_unknown")
+            self.assertEqual(review["status"], "pending")
+            event = ledger.list_audit_events(limit=1)[0]
+            self.assertEqual(event["action"], "local_export_attempt.wave_observation_recorded")
+            self.assertEqual(event["details"]["externalSubmission"], "unknown")
+            self.assertEqual(service.execute_attempt(attempt_id)["status"], "not_executable")
+            self.assertEqual(len(executor.calls), 1)
+
     def test_source_processing_blocks_old_draft_approval_and_execution(self):
         scenarios = [
             (stage, status, expected)
@@ -88,6 +234,21 @@ class TestLocalExportAttemptService(unittest.TestCase):
                     ledger.update_document(document_id, {"processingStatus": "reviewed"})
                     self.assertEqual(service.execute_attempt(attempt_id)["status"], "not_approved")
                     self.assertEqual(executor.calls, [])
+                    blocked_reapproval = service.approve_attempt(
+                        attempt_id,
+                        confirmation=EXPORT_APPROVAL_PHRASE,
+                    )
+                    self.assertEqual(blocked_reapproval["status"], "blocked_by_review")
+                    open_reviews = ledger.list_review_items(
+                        status=("pending", "in_review"),
+                        document_id=document_id,
+                        limit=100,
+                    )
+                    for review in open_reviews:
+                        ledger.resolve_review_item(
+                            int(review["id"]),
+                            resolution="Verified the source processing state and corrected the issue.",
+                        )
                     reapproved = service.approve_attempt(attempt_id, confirmation=EXPORT_APPROVAL_PHRASE)
                     self.assertEqual(reapproved["status"], "approved")
                     self.assertEqual(service.execute_attempt(attempt_id)["status"], "executed")
@@ -137,9 +298,173 @@ class TestLocalExportAttemptService(unittest.TestCase):
         route_config = {"mijngeldzaken_category_mapping": {"Personal": "Huishouden"}}
         document_id = self._register_mijngeldzaken_document(ledger)
         route = LocalRoutingService(ledger, route_config).prepare_document_route(document_id)
-        service = LocalExportAttemptService(ledger)
+        service = LocalExportAttemptService(ledger, {
+            **route_config,
+            "mijngeldzaken_export_dir": os.path.join(os.path.dirname(ledger.path), "exports"),
+        })
         prepared = service.prepare_from_routing_attempt(route["routingAttemptId"])
         return document_id, service, prepared
+
+    def test_approval_and_rejection_roll_back_all_writes_when_audit_fails(self):
+        for decision in ("approve", "reject"):
+            with self.subTest(decision=decision), tempfile.TemporaryDirectory() as temp_dir:
+                ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+                document_id = ledger.register_document({
+                    "source": "scanner",
+                    "sourceDocumentId": f"atomic-{decision}",
+                    "originalFilename": "receipt.txt",
+                    "documentType": "receipt",
+                    "processingStatus": "reviewed",
+                    "vendorName": "Office Shop",
+                    "category": "Office Supplies",
+                    "transactionDate": "2026-06-28",
+                    "totalAmount": 42.5,
+                })
+                route = LocalRoutingService(ledger).prepare_document_route(document_id)
+                service = LocalExportAttemptService(ledger)
+                prepared = service.prepare_from_routing_attempt(route["routingAttemptId"])
+                attempt_id = prepared["exportAttemptId"]
+                before_attempt = ledger.get_export_attempt(attempt_id)
+                before_record = ledger.get_bookkeeping_record_by_document(document_id)
+                failure_action = (
+                    "local_export_attempt.approved"
+                    if decision == "approve"
+                    else "local_export_attempt.rejected"
+                )
+                original_record_audit_event = ledger.record_audit_event
+
+                def fail_primary_decision_audit(event):
+                    if event.get("action") == failure_action:
+                        raise RuntimeError("injected audit failure")
+                    return original_record_audit_event(event)
+
+                with patch.object(ledger, "record_audit_event", side_effect=fail_primary_decision_audit):
+                    with self.assertRaisesRegex(RuntimeError, "injected audit failure"):
+                        if decision == "approve":
+                            service.approve_attempt(
+                                attempt_id,
+                                actor="tester",
+                                confirmation=EXPORT_APPROVAL_PHRASE,
+                            )
+                        else:
+                            service.reject_attempt(
+                                attempt_id,
+                                actor="tester",
+                                confirmation=EXPORT_REJECTION_PHRASE,
+                            )
+
+                after_attempt = ledger.get_export_attempt(attempt_id)
+                after_record = ledger.get_bookkeeping_record_by_document(document_id)
+                self.assertEqual(after_attempt["status"], before_attempt["status"])
+                self.assertEqual(after_attempt["external_submission"], before_attempt["external_submission"])
+                self.assertEqual(after_attempt["metadata"], before_attempt["metadata"])
+                self.assertEqual(after_record["status"], before_record["status"])
+                self.assertEqual(after_record["export_status"], before_record["export_status"])
+                self.assertNotIn(
+                    failure_action,
+                    [event["action"] for event in ledger.list_audit_events(limit=100)],
+                )
+
+    def test_supervised_result_rolls_back_attempt_review_and_record_when_audit_fails(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            document_id, service, prepared = self._prepare_mijngeldzaken_export(ledger)
+            service.approve_attempt(
+                prepared["exportAttemptId"],
+                actor="tester",
+                confirmation=EXPORT_APPROVAL_PHRASE,
+            )
+            supervised = service.execute_attempt(prepared["exportAttemptId"], actor="tester")
+            review_id = supervised["reviewItemId"]
+            before_attempt = ledger.get_export_attempt(prepared["exportAttemptId"])
+            before_record = ledger.get_bookkeeping_record_by_document(document_id)
+            original_record_audit_event = ledger.record_audit_event
+
+            def fail_result_audit(event):
+                if event.get("action") == "local_export_attempt.result_recorded":
+                    raise RuntimeError("injected result audit failure")
+                return original_record_audit_event(event)
+
+            with patch.object(ledger, "record_audit_event", side_effect=fail_result_audit):
+                with self.assertRaisesRegex(RuntimeError, "injected result audit failure"):
+                    service.record_result(
+                        prepared["exportAttemptId"],
+                        "executed",
+                        external_id="synthetic-import-reference",
+                        result={"artifactSha256": supervised["artifact"]["sha256"]},
+                        actor="tester",
+                        confirmation=EXPORT_RESULT_CONFIRMATION_PHRASE,
+                    )
+
+            after_attempt = ledger.get_export_attempt(prepared["exportAttemptId"])
+            after_record = ledger.get_bookkeeping_record_by_document(document_id)
+            self.assertEqual(after_attempt["status"], before_attempt["status"])
+            self.assertEqual(after_attempt["external_submission"], before_attempt["external_submission"])
+            self.assertEqual(after_attempt["result"], before_attempt["result"])
+            self.assertEqual(after_record["status"], before_record["status"])
+            self.assertEqual(after_record["export_status"], before_record["export_status"])
+            self.assertEqual(ledger.get_review_item(review_id)["status"], "pending")
+            self.assertNotIn(
+                "local_export_attempt.result_recorded",
+                [event["action"] for event in ledger.list_audit_events(limit=100)],
+            )
+
+    def test_supervised_result_and_rejection_race_has_one_committed_decision(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            document_id, service, prepared = self._prepare_mijngeldzaken_export(ledger)
+            service.approve_attempt(
+                prepared["exportAttemptId"],
+                actor="tester",
+                confirmation=EXPORT_APPROVAL_PHRASE,
+            )
+            supervised = service.execute_attempt(prepared["exportAttemptId"], actor="tester")
+            barrier = threading.Barrier(3)
+
+            def record_result():
+                barrier.wait()
+                return service.record_result(
+                    prepared["exportAttemptId"],
+                    "executed",
+                    external_id="synthetic-import-reference",
+                    result={"artifactSha256": supervised["artifact"]["sha256"]},
+                    actor="result-racer",
+                    confirmation=EXPORT_RESULT_CONFIRMATION_PHRASE,
+                )
+
+            def reject_attempt():
+                barrier.wait()
+                return service.reject_attempt(
+                    prepared["exportAttemptId"],
+                    actor="rejection-racer",
+                    confirmation=EXPORT_REJECTION_PHRASE,
+                )
+
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                result_future = executor.submit(record_result)
+                rejection_future = executor.submit(reject_attempt)
+                barrier.wait()
+                outcomes = [result_future.result(timeout=20), rejection_future.result(timeout=20)]
+
+            self.assertEqual(sum(bool(outcome.get("success")) for outcome in outcomes), 1)
+            attempt = ledger.get_export_attempt(prepared["exportAttemptId"])
+            self.assertIn(attempt["status"], {"executed", "rejected"})
+            self.assertEqual(
+                attempt["external_submission"],
+                "executed" if attempt["status"] == "executed" else "rejected_not_executed",
+            )
+            decision_events = [
+                event["action"]
+                for event in ledger.list_audit_events(limit=100)
+                if event["action"] in {
+                    "local_export_attempt.result_recorded",
+                    "local_export_attempt.rejected",
+                }
+            ]
+            self.assertEqual(len(decision_events), 1)
+            self.assertEqual(ledger.get_review_item(supervised["reviewItemId"])["status"], "resolved")
+            record = ledger.get_bookkeeping_record_by_document(document_id)
+            self.assertEqual(record["export_status"], attempt["external_submission"])
 
     def test_prepare_approve_and_record_export_result_without_silent_submission(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -194,13 +519,13 @@ class TestLocalExportAttemptService(unittest.TestCase):
             self.assertTrue(approved["success"])
             self.assertEqual(approved["exportAttempt"]["external_submission"], "approved_not_executed")
             self.assertEqual(blocked_result["status"], "requires_confirmation")
-            self.assertTrue(recorded["success"])
-            self.assertEqual(recorded["externalSubmission"], "executed")
+            self.assertFalse(recorded["success"])
+            self.assertEqual(recorded["status"], "provider_result_required")
             document = ledger.get_document(document_id)
-            self.assertEqual(document["export_attempts"][0]["external_id"], "wave-tx-1")
-            self.assertEqual(document["bookkeeping_record"]["status"], "routed")
-            self.assertEqual(document["bookkeeping_record"]["export_status"], "executed")
-            self.assertEqual(ledger.dashboard_metrics()["executed_export_attempts"], 1)
+            self.assertIsNone(document["export_attempts"][0]["external_id"])
+            self.assertEqual(document["bookkeeping_record"]["status"], "export_approved")
+            self.assertEqual(document["bookkeeping_record"]["export_status"], "approved_not_submitted")
+            self.assertEqual(ledger.dashboard_metrics()["executed_export_attempts"], 0)
 
     def test_prepare_ready_exports_is_idempotent_and_approval_gated(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -400,6 +725,65 @@ class TestLocalExportAttemptService(unittest.TestCase):
             attempt = ledger.get_export_attempt(prepared["exportAttemptId"])
             self.assertEqual(attempt["external_submission"], "executed")
             self.assertEqual(attempt["external_id"], "wave-api-tx-1")
+
+    def test_wave_execution_blocks_changes_to_approved_snapshot(self):
+        for mutation in ("amount", "review", "account_mapping", "payload"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temp_dir:
+                ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+                config = {
+                    "waveapps_default_target": "waveapps_business",
+                    "waveapps_business_id": "business-1",
+                    "waveapps_business_category_account_ids": {"Office Supplies": "account-1"},
+                }
+                document_id = ledger.register_document({
+                    "source": "scanner",
+                    "sourceDocumentId": f"scan-wave-freshness-{mutation}",
+                    "originalFilename": "receipt.txt",
+                    "documentType": "receipt",
+                    "processingStatus": "reviewed",
+                    "vendorName": "Office Shop",
+                    "category": "Office Supplies",
+                    "transactionDate": "2026-06-28",
+                    "totalAmount": 42.5,
+                })
+                route = LocalRoutingService(ledger, config).prepare_document_route(document_id)
+                wave_executor = _FakeWaveExecutor({
+                    "status": "success",
+                    "external_id": "must-not-send",
+                })
+                service = LocalExportAttemptService(ledger, config, wave_executor=wave_executor)
+                prepared = service.prepare_from_routing_attempt(route["routingAttemptId"])
+                attempt_id = prepared["exportAttemptId"]
+                approved = service.approve_attempt(attempt_id, confirmation=EXPORT_APPROVAL_PHRASE)
+                self.assertEqual(approved["status"], "approved")
+
+                if mutation == "amount":
+                    ledger.update_document(document_id, {"totalAmount": 55.0})
+                elif mutation == "review":
+                    ledger.create_review_item({
+                        "documentId": document_id,
+                        "reason": "source_changed_after_approval",
+                        "details": "Synthetic review-state change.",
+                        "status": "pending",
+                    })
+                elif mutation == "account_mapping":
+                    config["waveapps_business_category_account_ids"] = {"Office Supplies": "account-2"}
+                else:
+                    ledger.update_export_attempt(attempt_id, {
+                        "payload": {"amount": 999.0, "date": "2026-06-28"},
+                    })
+
+                result = service.execute_attempt(attempt_id, actor="tester")
+
+                self.assertFalse(result["success"])
+                self.assertEqual(result["status"], "stale_wave_approval")
+                self.assertEqual(result["externalSubmission"], "not_executed")
+                self.assertEqual(wave_executor.calls, [])
+                attempt = ledger.get_export_attempt(attempt_id)
+                self.assertEqual(attempt["status"], "attention_required")
+                self.assertEqual(attempt["external_submission"], "not_executed")
+                review = ledger.get_review_item(result["reviewItemId"])
+                self.assertEqual(review["reason"], "wave_approval_stale")
 
     def test_wave_execution_without_unambiguous_target_opens_review_and_stays_unsubmitted(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -781,7 +1165,7 @@ class TestLocalExportAttemptService(unittest.TestCase):
             ]
             self.assertEqual(stale_events[0]["details"]["stage"], "execution")
 
-    def test_mijngeldzaken_record_result_blocks_stale_master_ledger_draft_after_approval(self):
+    def test_mijngeldzaken_record_result_blocks_stale_master_ledger_draft(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
             document_id, service, prepared = self._prepare_mijngeldzaken_export(ledger)
@@ -791,11 +1175,14 @@ class TestLocalExportAttemptService(unittest.TestCase):
                 confirmation=EXPORT_APPROVAL_PHRASE,
             )
             original_checksum = approved["exportAttempt"]["metadata"]["masterLedgerChecksum"]
+            supervised = service.execute_attempt(prepared["exportAttemptId"], actor="tester")
+            artifact_sha256 = supervised["artifact"]["sha256"]
 
             self._change_mijngeldzaken_document_amount(ledger, document_id)
             blocked = service.record_result(
                 prepared["exportAttemptId"],
-                "queued",
+                "executed",
+                result={"artifactSha256": artifact_sha256},
                 actor="tester",
                 confirmation=EXPORT_RESULT_CONFIRMATION_PHRASE,
             )
@@ -806,9 +1193,10 @@ class TestLocalExportAttemptService(unittest.TestCase):
             self.assertEqual(blocked["storedChecksum"], original_checksum)
             self.assertNotEqual(blocked["currentChecksum"], original_checksum)
             attempt = ledger.get_export_attempt(prepared["exportAttemptId"])
-            self.assertEqual(attempt["status"], "approved")
-            self.assertEqual(attempt["external_submission"], "approved_not_executed")
-            self.assertIsNone(attempt.get("result"))
+            self.assertEqual(attempt["status"], "supervision_required")
+            self.assertEqual(attempt["external_submission"], "not_executed")
+            self.assertEqual(attempt["result"]["artifact"]["sha256"], artifact_sha256)
+            self.assertNotIn("lastResult", attempt["metadata"])
             stale_events = [
                 event for event in ledger.list_audit_events(limit=30)
                 if event["action"] == "local_export_attempt.master_ledger_stale"
@@ -899,11 +1287,12 @@ class TestLocalExportAttemptService(unittest.TestCase):
             self.assertIsNone(prepared["exportAttempt"]["document_id"])
             self.assertEqual(prepared["exportAttempt"]["status"], "approval_required")
             self.assertEqual(approved["status"], "approved")
-            self.assertEqual(recorded["externalSubmission"], "executed")
+            self.assertFalse(recorded["success"])
+            self.assertEqual(recorded["status"], "provider_result_required")
             record = ledger.get_bookkeeping_record(record_result["recordId"])
-            self.assertEqual(record["status"], "routed")
-            self.assertEqual(record["export_status"], "executed")
-            self.assertEqual(record["metadata"]["latestExport"]["details"]["externalId"], "wave-bank-tx-1")
+            self.assertEqual(record["status"], "export_approved")
+            self.assertEqual(record["export_status"], "approved_not_submitted")
+            self.assertNotEqual(record["metadata"]["latestExport"]["details"].get("externalId"), "wave-bank-tx-1")
 
 
 if __name__ == "__main__":

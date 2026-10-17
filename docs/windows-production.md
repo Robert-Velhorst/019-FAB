@@ -4,6 +4,12 @@ This profile is for one Windows account, one business, one local API, and one
 worker. It is not a public or multi-tenant deployment. The existing local profile
 remains the default; selecting Windows production does not migrate any data.
 
+The Windows launcher also requires Node.js 22.12 or newer and pnpm 11.20.0 or
+newer to build and run the production operator dashboard. FAB provisions its
+project-local Python runtime when a supported Python installer is available,
+but does not install Node.js or pnpm. Missing dashboard runtimes are reported
+before startup continues.
+
 ## Storage and Credentials
 
 Before switching an existing installation, stop it with its previous configuration
@@ -52,7 +58,13 @@ Restrict ledger, evidence, backup, and credential directories to the owning acco
 and approved administrators. Verify host encryption and recovery-key custody before
 setting `FAB_STORAGE_ENCRYPTION_CONFIRMED=true`. That setting is an operator
 attestation, not proof of BitLocker or any other host control. Missing attestation
-is reported as attention/degraded rather than an automatic encryption claim.
+blocks production startup; it is never treated as proof that encryption is enabled.
+
+The Windows profile uses SQLite WAL with `synchronous=FULL`, syncing each committed
+transaction for stronger power-loss durability. This can increase write latency;
+group related ledger writes into explicit transactions rather than weakening
+production durability. The default `local` profile retains `synchronous=NORMAL` for
+development and test performance.
 
 ## Start and Stop
 

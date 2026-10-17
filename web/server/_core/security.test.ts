@@ -53,11 +53,15 @@ describe("FAB web security headers", () => {
     }
   });
 
-  it("keeps the development CSP disabled", async () => {
+  it("keeps a restrictive development CSP while allowing local Vite HMR", async () => {
     const app = await startSecurityApp(false);
     try {
       const response = await fetch(app.url);
-      expect(response.headers.get("content-security-policy")).toBeNull();
+      const policy = response.headers.get("content-security-policy") || "";
+      expect(policy).toContain("default-src 'self'");
+      expect(policy).toContain("connect-src 'self' ws: wss:");
+      expect(policy).toContain("script-src 'self' 'unsafe-eval'");
+      expect(policy).toContain("frame-ancestors 'none'");
       expect(response.headers.get("strict-transport-security")).toBeNull();
     } finally {
       await app.close();

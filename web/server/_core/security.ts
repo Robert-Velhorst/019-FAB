@@ -5,25 +5,23 @@ const ONE_YEAR_SECONDS = 31_536_000;
 
 export function createFabSecurityMiddleware(production: boolean): RequestHandler[] {
   const headers = helmet({
-    contentSecurityPolicy: production
-      ? {
-          useDefaults: false,
-          directives: {
-            defaultSrc: ["'self'"],
-            baseUri: ["'self'"],
-            connectSrc: ["'self'"],
-            fontSrc: ["'self'", "data:"],
-            formAction: ["'self'"],
-            frameAncestors: ["'none'"],
-            frameSrc: ["'self'"],
-            imgSrc: ["'self'", "data:", "blob:", "https:"],
-            objectSrc: ["'none'"],
-            scriptSrc: ["'self'"],
-            scriptSrcAttr: ["'none'"],
-            styleSrc: ["'self'", "'unsafe-inline'"],
-          },
-        }
-      : false,
+    contentSecurityPolicy: {
+      useDefaults: false,
+      directives: {
+        defaultSrc: ["'self'"],
+        baseUri: ["'self'"],
+        connectSrc: production ? ["'self'"] : ["'self'", "ws:", "wss:"],
+        fontSrc: ["'self'", "data:"],
+        formAction: ["'self'"],
+        frameAncestors: ["'none'"],
+        frameSrc: ["'self'"],
+        imgSrc: ["'self'", "data:", "blob:", "https:"],
+        objectSrc: ["'none'"],
+        scriptSrc: production ? ["'self'"] : ["'self'", "'unsafe-eval'"],
+        scriptSrcAttr: ["'none'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+      },
+    },
     crossOriginEmbedderPolicy: false,
     strictTransportSecurity: false,
   });

@@ -5,7 +5,7 @@
   "license": "AGPL-3.0-only",
   "scripts": {
     "dev": "tsx watch server/dev.ts",
-    "build": "vite build && pnpm verify:production-build && esbuild server/_core/index.ts --platform=node --bundle --format=esm --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\" --outdir=dist && esbuild server/fabStandalone.ts --platform=node --bundle --format=esm --splitting --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\" --outdir=dist --entry-names=fab-standalone --chunk-names=fab-chunks/[name]-[hash]",
+    "build": "vite build && node scripts/verify-production-build.mjs && esbuild server/_core/index.ts --platform=node --bundle --format=esm --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\" --outdir=dist && esbuild server/fabStandalone.ts --platform=node --bundle --format=esm --splitting --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\" --outdir=dist --entry-names=fab-standalone --chunk-names=fab-chunks/[name]-[hash]",
     "start": "node --import ./scripts/production-env.mjs dist/index.js",
     "start:fab": "node --import ./scripts/production-env.mjs dist/fab-standalone.js",
     "check": "tsc --noEmit",

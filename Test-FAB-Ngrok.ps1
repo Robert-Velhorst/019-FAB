@@ -15,6 +15,23 @@ $venvPython = Join-Path $root ".venv\Scripts\python.exe"
 
 Set-Location -LiteralPath $root
 
+function Get-FabInstanceId {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $normalized = [System.IO.Path]::GetFullPath($Path).TrimEnd("\", "/").Replace("\", "/")
+    if ($env:OS -eq "Windows_NT") {
+        $normalized = $normalized.ToLowerInvariant()
+    }
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($normalized)
+        return ([System.BitConverter]::ToString($sha256.ComputeHash($bytes))).Replace("-", "").ToLowerInvariant()
+    }
+    finally {
+        $sha256.Dispose()
+    }
+}
+
 if (-not (Test-Path -LiteralPath $runtimePath)) {
     throw "FAB is not running. Start it with Start-FAB.cmd first."
 }
@@ -32,7 +49,15 @@ if ($maintenanceProperty -and [bool]$maintenanceProperty.Value) {
 }
 $apiBaseUrl = [string]$runtime.apiBaseUrl
 $apiUri = [System.Uri]$apiBaseUrl
-if ($apiUri.Host -notin @("127.0.0.1", "localhost", "::1")) {
+if (
+    -not $apiUri.IsAbsoluteUri -or
+    $apiUri.Scheme -ne "http" -or
+    $apiUri.Host -notin @("127.0.0.1", "localhost", "::1") -or
+    $apiUri.AbsolutePath -ne "/" -or
+    $apiUri.UserInfo -or
+    $apiUri.Query -or
+    $apiUri.Fragment
+) {
     throw "FAB ngrok verification only accepts a loopback API endpoint."
 }
 if ($Url) {
@@ -51,7 +76,7 @@ if ($Url) {
     $Url = $requestedUrl.GetLeftPart([System.UriPartial]::Authority)
 }
 
-$credentialsJson = & $venvPython -m src.security.windows_runtime_credentials
+$credentialsJson = & $venvPython -m src.security.windows_runtime_credentials --require-strong
 if ($LASTEXITCODE -ne 0) {
     throw "FAB could not load its existing API/HAI credentials. Start FAB with the same configuration first."
 }
@@ -71,7 +96,12 @@ if ([System.StringComparer]::Ordinal.Equals($apiToken, $haiApiToken)) {
     throw "FAB operator and HAI credentials must be different."
 }
 $localLive = Invoke-RestMethod -Uri "$apiBaseUrl/api/live" -Headers @{ Authorization = "Bearer $apiToken" } -TimeoutSec 5
-if ([string]$localLive.service -ne "fab-ledger-api" -or [bool]$localLive.maintenanceMode) {
+if (
+    [string]$localLive.service -ne "fab-ledger-api" -or
+    [string]$localLive.instanceId -ne (Get-FabInstanceId -Path $root) -or
+    -not [bool]$localLive.authRequired -or
+    [bool]$localLive.maintenanceMode
+) {
     throw "FAB cloud verification requires the standard local runtime."
 }
 
@@ -129,6 +159,34 @@ function Stop-FabStartedNgrokProcess {
     }
 }
 
+function Assert-FabNgrokInspectorOwned {
+    param(
+        [Parameter(Mandatory = $true)][int]$Port,
+        [Parameter(Mandatory = $true)][int]$ProcessId
+    )
+
+    try {
+        $listeners = @(
+            Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction Stop |
+                Where-Object { [string]$_.LocalAddress -eq "127.0.0.1" }
+        )
+    }
+    catch {
+        throw "FAB could not verify ownership of the temporary ngrok inspector."
+    }
+
+    if ($listeners.Count -ne 1 -or [int]$listeners[0].OwningProcess -ne $ProcessId) {
+        throw "The temporary FAB ngrok inspector is not owned by the launched ngrok process."
+    }
+}
+
+function Test-FabCleanHttpsOrigin {
+    param([Parameter(Mandatory = $true)][System.Uri]$Uri)
+    return $Uri.IsAbsoluteUri -and $Uri.Scheme -eq "https" -and $Uri.Host `
+        -and -not $Uri.UserInfo -and $Uri.AbsolutePath -eq "/" `
+        -and -not $Uri.Query -and -not $Uri.Fragment
+}
+
 function Complete-FabNgrokVerificationCleanup {
     param(
         [AllowNull()][System.Diagnostics.Process]$Process,
@@ -177,8 +235,8 @@ try {
 
     $arguments = @(
         "http", $apiUri.Port,
-        "--config", $mainConfig,
-        "--config", $overlayPath,
+        "--config", ('"' + $mainConfig + '"'),
+        "--config", ('"' + $overlayPath + '"'),
         "--log", "stdout",
         "--log-format", "json",
         "--name", "fab-verification"
@@ -240,7 +298,14 @@ try {
         throw "FAB ngrok verification failed: $reason."
     }
 
-    $liveUrl = "$($tunnel.public_url)/api/live"
+    Assert-FabNgrokInspectorOwned -Port $inspectionPort -ProcessId $process.Id
+    $publicUri = [System.Uri]([string]$tunnel.public_url)
+    if (-not (Test-FabCleanHttpsOrigin -Uri $publicUri)) {
+        throw "The temporary ngrok endpoint is not a clean HTTPS origin."
+    }
+    $publicUrl = $publicUri.GetLeftPart([System.UriPartial]::Authority)
+
+    $liveUrl = "$publicUrl/api/live"
     $unauthorizedStatus = 0
     try {
         Invoke-WebRequest -Uri $liveUrl -UseBasicParsing -TimeoutSec 15 | Out-Null
@@ -257,13 +322,13 @@ try {
         -Headers @{ Authorization = "Bearer $apiToken" } `
         -TimeoutSec 20
     $manifest = Invoke-RestMethod `
-        -Uri "$($tunnel.public_url)/api/hai/manifest" `
+        -Uri "$publicUrl/api/hai/manifest" `
         -Headers @{ Authorization = "Bearer $haiApiToken" } `
         -TimeoutSec 20
     $haiOperatorStatus = 0
     try {
         Invoke-WebRequest `
-            -Uri "$($tunnel.public_url)/api/health" `
+            -Uri "$publicUrl/api/health" `
             -Headers @{ Authorization = "Bearer $haiApiToken" } `
             -UseBasicParsing `
             -TimeoutSec 20 | Out-Null
@@ -277,6 +342,7 @@ try {
     if (
         $unauthorizedStatus -ne 401 -or
         [string]$authorized.status -ne "ok" -or
+        [string]$authorized.instanceId -ne (Get-FabInstanceId -Path $root) -or
         -not [bool]$authorized.authRequired -or
         [string]$manifest.version -ne "fab-hai-connector-v1" -or
         $haiOperatorStatus -ne 403

@@ -94,6 +94,9 @@ class PostingExecutor:
         if result.get("status") in self.SUPERVISED_HANDLER_STATUSES:
             return self._pause_for_supervision(attempt_id, categorized_data, result)
 
+        if result.get("status") == "outcome_unknown":
+            return self._record_unknown_outcome(attempt_id, categorized_data, result)
+
         self._handle_failure(attempt_id, payload, result)
         document_id = categorized_data.get("document_id")
         if document_id:
@@ -217,6 +220,55 @@ class PostingExecutor:
             "status": "supervision_required",
             "result": public_result,
         }
+
+    def _record_unknown_outcome(
+        self,
+        attempt_id: int,
+        categorized_data: Dict[str, Any],
+        result: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        document_id = categorized_data.get("document_id")
+        reason = "The provider may have accepted this transaction, but FAB could not confirm the result. Verify it in Wave before taking further action."
+        details = {
+            "attempt_id": attempt_id,
+            "document_id": document_id,
+            "target_system": categorized_data.get("target_system"),
+            "provider_status": "outcome_unknown",
+            "review_reason": result.get("review_reason") or "wave_api_outcome_unknown",
+        }
+        now = self.database.now()
+        with self.database.connect() as connection:
+            connection.execute(
+                "UPDATE posting_attempts SET status = 'outcome_unknown', updated_at = ? WHERE id = ?",
+                (now, attempt_id),
+            )
+            if document_id:
+                connection.execute(
+                    "UPDATE documents SET current_state = 'awaiting_reconciliation', updated_at = ? WHERE id = ?",
+                    (now, document_id),
+                )
+            connection.execute(
+                "UPDATE retry_queue SET status = 'completed', updated_at = ? WHERE entity_type = ? AND entity_id = ? AND operation = ?",
+                (now, "posting_attempt", str(attempt_id), "execute_posting"),
+            )
+
+        self.database.add_audit_log(
+            "posting_attempt",
+            str(attempt_id),
+            "provider_outcome_unknown",
+            None,
+            details,
+            reason,
+            "system",
+        )
+        if document_id:
+            self.database.add_manual_review_item(
+                document_id,
+                "wave_api_outcome_unknown",
+                self.database.json_dumps(details),
+                severity="high",
+            )
+        return {"attempt_id": attempt_id, "status": "outcome_unknown", "result": result}
 
     def _handle_failure(self, attempt_id: int, payload: Dict[str, Any], result: Dict[str, Any]) -> None:
         self.approval_service.mark_failed(attempt_id, result)

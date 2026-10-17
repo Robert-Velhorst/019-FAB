@@ -1,8 +1,14 @@
 import json
 from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import (
+    HTTPRedirectHandler,
+    ProxyHandler,
+    Request,
+    build_opener,
+)
 
 from src.utils.runtime_identity import local_instance_id
 
@@ -15,6 +21,11 @@ DEFAULT_SHARED_INSPECTOR_URL = "http://127.0.0.1:4040/api/tunnels"
 InspectorFetch = Callable[[str, float], Mapping[str, Any]]
 
 
+class _NoRedirectHandler(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 class LocalCloudAccessService:
     """Report only project-owned, authenticated FAB ngrok runtime state."""
 
@@ -25,6 +36,7 @@ class LocalCloudAccessService:
         runtime_path: Optional[Path] = None,
         api_token_configured: bool = False,
         inspector_fetch: Optional[InspectorFetch] = None,
+        unauthenticated_status_fetch: Optional[Callable[[str, float], Optional[int]]] = None,
         inspector_timeout_seconds: float = 0.75,
         shared_inspector_url: Optional[str] = None,
     ) -> None:
@@ -34,6 +46,9 @@ class LocalCloudAccessService:
         )
         self.api_token_configured = bool(api_token_configured)
         self.inspector_fetch = inspector_fetch or _fetch_inspector_json
+        self.unauthenticated_status_fetch = (
+            unauthenticated_status_fetch or _fetch_unauthenticated_status
+        )
         self.shared_inspector_url = _loopback_inspector_url(
             shared_inspector_url or DEFAULT_SHARED_INSPECTOR_URL
         )
@@ -104,15 +119,57 @@ class LocalCloudAccessService:
                 local_api_base_url=validated["localApiBaseUrl"],
             )
 
+        if validated["dashboardUrl"]:
+            matching_dashboard = next(
+                (
+                    tunnel
+                    for tunnel in _tunnels(inspector)
+                    if _matches_dashboard_tunnel(tunnel, validated)
+                ),
+                None,
+            )
+            if matching_dashboard is None:
+                return self._result(
+                    status="stale",
+                    next_action="The recorded FAB dashboard endpoint is not active. Stop the stale tunnel state and start it again.",
+                    started_at=validated["startedAt"],
+                    verified_at=validated["verifiedAt"],
+                    local_api_base_url=validated["localApiBaseUrl"],
+                )
+            try:
+                dashboard_status = self.unauthenticated_status_fetch(
+                    f"{validated['dashboardUrl']}/admin/operations",
+                    self.inspector_timeout_seconds,
+                )
+            except Exception:
+                dashboard_status = None
+            if dashboard_status != 401:
+                return self._result(
+                    status="stale",
+                    blocker_code="dashboard_auth_not_verified",
+                    next_action=(
+                        "The remote dashboard did not confirm its unauthenticated access block. "
+                        "Stop the managed tunnel and recreate it with dashboard Basic Auth enabled."
+                    ),
+                    started_at=validated["startedAt"],
+                    verified_at=validated["verifiedAt"],
+                    local_api_base_url=validated["localApiBaseUrl"],
+                )
+
         return self._result(
             status="active",
             active=True,
             public_url=validated["publicUrl"],
+            dashboard_url=validated["dashboardUrl"],
             local_api_base_url=validated["localApiBaseUrl"],
             hai_manifest_url=validated["haiManifestUrl"],
             started_at=validated["startedAt"],
             verified_at=validated["verifiedAt"],
-            next_action="Authenticated FAB API and HAI access are available through the verified HTTPS endpoint.",
+            next_action=(
+                "Authenticated FAB API and HAI access are available; the operator dashboard is protected by ngrok Basic Auth."
+                if validated["dashboardUrl"]
+                else "Authenticated FAB API and HAI access are available through the verified HTTPS endpoint."
+            ),
         )
 
     def _shared_endpoint_count(self) -> int:
@@ -146,11 +203,14 @@ class LocalCloudAccessService:
         try:
             root = Path(str(runtime.get("instanceRoot") or "")).resolve()
             public_url = _https_origin(str(runtime.get("publicUrl") or ""))
+            dashboard_value = runtime.get("dashboardUrl")
+            dashboard_url = _https_origin(str(dashboard_value)) if dashboard_value else None
             local_api_base_url = _loopback_http_origin(
                 str(runtime.get("localApiBaseUrl") or "")
             )
             inspector_port = int(runtime.get("inspectorPort"))
             process_id = int(runtime.get("processId"))
+            dashboard_port = int(runtime.get("dashboardPort")) if dashboard_url else None
         except (OSError, TypeError, ValueError):
             return None
         if not _same_path(root, self.project_root):
@@ -169,11 +229,22 @@ class LocalCloudAccessService:
             return None
         if not 1024 <= inspector_port <= 65535 or process_id <= 0:
             return None
+        if dashboard_value:
+            if (
+                dashboard_url is None
+                or dashboard_url == public_url
+                or runtime.get("dashboardAuthRequired") is not True
+                or dashboard_port is None
+                or not 1 <= dashboard_port <= 65535
+            ):
+                return None
         expected_manifest_url = f"{public_url}/api/hai/manifest"
         if str(runtime.get("haiManifestUrl") or "").rstrip("/") != expected_manifest_url:
             return None
         return {
             "publicUrl": public_url,
+            "dashboardUrl": dashboard_url,
+            "dashboardPort": dashboard_port,
             "localApiBaseUrl": local_api_base_url,
             "localApiPort": urlsplit(local_api_base_url).port,
             "inspectorPort": inspector_port,
@@ -189,6 +260,7 @@ class LocalCloudAccessService:
         next_action: str,
         active: bool = False,
         public_url: Optional[str] = None,
+        dashboard_url: Optional[str] = None,
         local_api_base_url: Optional[str] = None,
         hai_manifest_url: Optional[str] = None,
         started_at: Optional[str] = None,
@@ -202,8 +274,10 @@ class LocalCloudAccessService:
             "active": bool(active),
             "configured": self.api_token_configured,
             "publicUrl": public_url if active else None,
+            "dashboardUrl": dashboard_url if active else None,
             "localApiBaseUrl": local_api_base_url,
             "authMode": "bearer_token" if self.api_token_configured else "blocked_without_token",
+            "dashboardAuthMode": "ngrok_basic_auth" if active and dashboard_url else None,
             "haiManifestUrl": hai_manifest_url if active else None,
             "startedAt": started_at,
             "verifiedAt": verified_at,
@@ -216,7 +290,8 @@ class LocalCloudAccessService:
 
 def _fetch_inspector_json(url: str, timeout_seconds: float) -> Mapping[str, Any]:
     request = Request(url, headers={"Accept": "application/json"})
-    with urlopen(request, timeout=timeout_seconds) as response:
+    opener = build_opener(ProxyHandler({}), _NoRedirectHandler())
+    with opener.open(request, timeout=timeout_seconds) as response:
         payload = response.read(MAX_INSPECTOR_RESPONSE_BYTES + 1)
     if len(payload) > MAX_INSPECTOR_RESPONSE_BYTES:
         raise ValueError("ngrok inspector response exceeded the size limit")
@@ -224,6 +299,21 @@ def _fetch_inspector_json(url: str, timeout_seconds: float) -> Mapping[str, Any]
     if not isinstance(result, dict):
         raise ValueError("ngrok inspector response must be an object")
     return result
+
+
+def _fetch_unauthenticated_status(url: str, timeout_seconds: float) -> Optional[int]:
+    request = Request(url, headers={"Accept": "text/html"}, method="GET")
+    opener = build_opener(ProxyHandler({}), _NoRedirectHandler())
+    try:
+        with opener.open(request, timeout=timeout_seconds) as response:
+            return int(response.status)
+    except HTTPError as error:
+        try:
+            return int(error.code)
+        finally:
+            error.close()
+    except (OSError, URLError, TimeoutError, ValueError):
+        return None
 
 
 def _tunnels(payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:
@@ -243,6 +333,17 @@ def _matches_runtime_tunnel(tunnel: Mapping[str, Any], runtime: Mapping[str, Any
     if not isinstance(config, Mapping):
         return False
     return _loopback_target_port(str(config.get("addr") or "")) == runtime["localApiPort"]
+
+
+def _matches_dashboard_tunnel(tunnel: Mapping[str, Any], runtime: Mapping[str, Any]) -> bool:
+    if str(tunnel.get("name") or "") != "fab-managed-dashboard":
+        return False
+    if _https_origin(str(tunnel.get("public_url") or "")) != runtime["dashboardUrl"]:
+        return False
+    config = tunnel.get("config")
+    if not isinstance(config, Mapping):
+        return False
+    return _loopback_target_port(str(config.get("addr") or "")) == runtime["dashboardPort"]
 
 
 def _https_origin(value: str) -> Optional[str]:

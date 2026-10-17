@@ -1,6 +1,6 @@
 import re
 import statistics
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -32,8 +32,8 @@ class LocalLedgerAnomalyService:
             for record in self.ledger.list_bookkeeping_records(limit=scan_limit)
             if _eligible_record(record)
         ]
-        vendor_groups = _group_records(records, "vendor_name")
-        category_groups = _group_records(records, "category")
+        vendor_groups = _prepare_amount_groups(_group_records(records, "vendor_name"))
+        category_groups = _prepare_amount_groups(_group_records(records, "category"))
         issues: List[Dict[str, Any]] = []
 
         for record in records:
@@ -59,7 +59,7 @@ class LocalLedgerAnomalyService:
     def _amount_issue(
         self,
         record: Dict[str, Any],
-        groups: Dict[Tuple[str, str], List[Dict[str, Any]]],
+        groups: Dict[Tuple[str, str], "_AmountGroup"],
         dimension: str,
     ) -> Optional[Dict[str, Any]]:
         field = "vendor_name" if dimension == "vendor" else "category"
@@ -68,32 +68,30 @@ class LocalLedgerAnomalyService:
         if not label:
             return None
 
+        group = groups.get((label, currency))
+        if group is None:
+            return None
+        amount = group.amount_for(record)
+        minimum_amount = _float(self.config.get("anomaly_minimum_amount"), 100.0)
+        if amount is None or amount < minimum_amount:
+            return None
+
         minimum_samples = _bounded_int(
             self.config.get(f"anomaly_minimum_{dimension}_samples"),
             default=5 if dimension == "vendor" else 8,
             minimum=3,
             maximum=100,
         )
-        history = [
-            _absolute_amount(item.get("amount"))
-            for item in groups.get((label, currency), [])
-            if item.get("id") != record.get("id")
-        ]
-        history = [amount for amount in history if amount is not None and amount > 0]
-        if len(history) < minimum_samples:
+        history_statistics = group.history_statistics(record)
+        if history_statistics is None:
+            return None
+        history_count, baseline, median_absolute_deviation = history_statistics
+        if history_count < minimum_samples:
             return None
 
-        amount = _absolute_amount(record.get("amount"))
-        minimum_amount = _float(self.config.get("anomaly_minimum_amount"), 100.0)
-        if amount is None or amount < minimum_amount:
-            return None
-
-        baseline = statistics.median(history)
         if baseline <= 0 or amount <= baseline:
             return None
 
-        deviations = [abs(value - baseline) for value in history]
-        median_absolute_deviation = statistics.median(deviations)
         ratio = amount / baseline
         score: Optional[float]
         threshold = _float(self.config.get("anomaly_modified_zscore_threshold"), 3.5)
@@ -132,7 +130,7 @@ class LocalLedgerAnomalyService:
                 "amount": round(amount, 2),
                 "currency": currency,
                 "historicalMedian": round(baseline, 2),
-                "historicalSampleCount": len(history),
+                "historicalSampleCount": history_count,
                 "medianAbsoluteDeviation": round(median_absolute_deviation, 4),
                 "amountToMedianRatio": round(ratio, 4),
                 "modifiedZScore": round(score, 4) if score is not None else None,
@@ -183,6 +181,115 @@ def _group_records(
         if label:
             groups[(label, str(record.get("currency") or "EUR").upper())].append(record)
     return groups
+
+
+def _prepare_amount_groups(
+    groups: Dict[Tuple[str, str], List[Dict[str, Any]]],
+) -> Dict[Tuple[str, str], "_AmountGroup"]:
+    return {key: _AmountGroup(records) for key, records in groups.items()}
+
+
+class _AmountGroup:
+    """Precompute sorted leave-one-out medians for one vendor/category group."""
+
+    def __init__(self, records: List[Dict[str, Any]]):
+        self.records = records
+        self.amounts_by_object: Dict[int, Optional[float]] = {}
+        self.duplicate_ids = {
+            record_id
+            for record_id, count in Counter(record.get("id") for record in records).items()
+            if count > 1
+        }
+        entries = []
+        for group_index, record in enumerate(records):
+            amount = _absolute_amount(record.get("amount"))
+            self.amounts_by_object[id(record)] = amount
+            if amount is not None and amount > 0:
+                entries.append((amount, group_index, record.get("id")))
+        entries.sort(key=lambda entry: (entry[0], entry[1]))
+        self.entries = entries
+        self.values = [entry[0] for entry in entries]
+        self.index_by_id = {
+            entry[2]: sorted_index
+            for sorted_index, entry in enumerate(entries)
+            if entry[2] not in self.duplicate_ids
+        }
+        self.deviation_cache: Dict[float, Tuple[List[float], Dict[int, int]]] = {}
+
+    def amount_for(self, record: Dict[str, Any]) -> Optional[float]:
+        record_key = id(record)
+        if record_key in self.amounts_by_object:
+            return self.amounts_by_object[record_key]
+        return _absolute_amount(record.get("amount"))
+
+    def history_statistics(
+        self,
+        record: Dict[str, Any],
+    ) -> Optional[Tuple[int, float, float]]:
+        record_id = record.get("id")
+        try:
+            if record_id in self.duplicate_ids:
+                return self._brute_history_statistics(record_id)
+            removed_index = self.index_by_id.get(record_id)
+        except TypeError:
+            return self._brute_history_statistics(record_id)
+
+        history_count = len(self.values) - (1 if removed_index is not None else 0)
+        if history_count == 0:
+            return None
+
+        baseline = _median_without(self.values, removed_index)
+        deviations, deviation_indices = self.deviation_cache.get(baseline, ([], {}))
+        if not deviations:
+            sorted_deviations = sorted(
+                (abs(amount - baseline), group_index)
+                for amount, group_index, _record_id in self.entries
+            )
+            deviations = [item[0] for item in sorted_deviations]
+            deviation_indices = {
+                group_index: sorted_index
+                for sorted_index, (_deviation, group_index) in enumerate(sorted_deviations)
+            }
+            self.deviation_cache[baseline] = (deviations, deviation_indices)
+
+        removed_deviation_index = None
+        if removed_index is not None:
+            group_index = self.entries[removed_index][1]
+            removed_deviation_index = deviation_indices[group_index]
+        median_absolute_deviation = _median_without(deviations, removed_deviation_index)
+        return history_count, baseline, median_absolute_deviation
+
+    def _brute_history_statistics(
+        self,
+        record_id: Any,
+    ) -> Optional[Tuple[int, float, float]]:
+        history = [
+            amount
+            for record in self.records
+            if record.get("id") != record_id
+            if (amount := _absolute_amount(record.get("amount"))) is not None and amount > 0
+        ]
+        if not history:
+            return None
+        baseline = statistics.median(history)
+        deviation = statistics.median(abs(value - baseline) for value in history)
+        return len(history), baseline, deviation
+
+
+def _median_without(sorted_values: List[float], removed_index: Optional[int]) -> float:
+    if removed_index is None:
+        return statistics.median(sorted_values)
+    remaining_size = len(sorted_values) - 1
+    if remaining_size <= 0:
+        raise ValueError("Cannot calculate a median from an empty history.")
+    if remaining_size % 2:
+        center = remaining_size // 2
+        return sorted_values[center + (removed_index <= center)]
+    lower = remaining_size // 2 - 1
+    upper = lower + 1
+    left = sorted_values[lower + (removed_index <= lower)]
+    right = sorted_values[upper + (removed_index <= upper)]
+    return (left + right) / 2
 
 
 def _eligible_record(record: Dict[str, Any]) -> bool:

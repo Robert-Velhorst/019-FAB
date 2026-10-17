@@ -26,18 +26,20 @@ def deployment_preflight(config):
         add("deployment_parent_session", "Configure FAB_OPERATOR_SESSION_VALIDATION_URL for managed dashboard session checks.")
 
     token = _value(config, "fab_local_api_token", "fab_operations_api_token", "operations_api_token", default="")
+    host = str(_value(config, "fab_local_api_host", "operations_api_host", default="127.0.0.1"))
+    remotely_bound = host not in LOOPBACK
     if token != "" and not valid_api_token(token):
         add("deployment_api_secret", "Configure an API token using printable ASCII without whitespace, at most 8192 characters.")
-    elif (profile != "local" or requires_parent_session(config)) and not strong_secret(token):
+    elif (profile != "local" or requires_parent_session(config) or remotely_bound) and not strong_secret(token):
         add("deployment_api_secret", "Configure a random API token of at least 32 characters.")
     hai_token = _value(config, "fab_hai_api_token", "operations_hai_api_token", "hai_api_token", default="")
     if hai_token != "" and (not valid_api_token(hai_token)
-                            or (profile != "local" and (not strong_secret(hai_token) or hai_token == token))):
+                            or hai_token == token
+                            or (profile != "local" and not strong_secret(hai_token))):
         add("deployment_hai_secret", "Configure a separate HAI token using printable ASCII without whitespace, at most 8192 characters; production requires a random token of at least 32 characters.")
     if profile not in {"local", "windows", "vm"}:
         add("deployment_profile", "Set FAB_DEPLOYMENT_PROFILE to local, windows, or vm.")
     elif profile != "local":
-        host = str(_value(config, "fab_local_api_host", "operations_api_host", default="127.0.0.1"))
         if profile == "windows" and host not in LOOPBACK:
             add("deployment_bind", "The Windows profile requires a loopback API host.")
         if profile == "vm" and host not in LOOPBACK | {"0.0.0.0", "::"}:
@@ -99,7 +101,10 @@ def deployment_preflight(config):
             add("deployment_backup_evidence", "Require complete source evidence in scheduled recovery backups.")
         encryption = _value(config, "fab_storage_encryption_confirmed", "operations_storage_encryption_confirmed", default=False)
         if str(encryption).lower() not in {"true", "1", "yes", "on"}:
-            add("deployment_storage_encryption", "Confirm host encryption for the ledger and backup volumes after checking the host.", "attention")
+            add(
+                "deployment_storage_encryption",
+                "Encrypt the ledger, backup, credential, and token volumes; after verifying the host, set FAB_STORAGE_ENCRYPTION_CONFIRMED=true.",
+            )
 
     blocked = any(i["severity"] == "blocked" for i in issues)
     return {"profile": profile, "status": "blocked" if blocked else "degraded" if issues else "ready",

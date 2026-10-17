@@ -186,6 +186,15 @@ describe("browser-bound OAuth transactions", () => {
     expect((await request("/api/oauth/start", { headers: { "x-forwarded-for": "192.0.2.4" } })).status).toBe(302);
   });
 
+  it("rate-limits OAuth callbacks before provider work", async () => {
+    const request = await server();
+    for (let count = 0; count < 20; count++) {
+      expect((await request("/api/oauth/callback")).status).toBe(400);
+    }
+    expect((await request("/api/oauth/callback")).status).toBe(429);
+    expectNoOAuthSideEffects();
+  });
+
   it("rejects a different browser without consuming the legitimate challenge", async () => {
     const request = await server();
     const alice = await start(request);

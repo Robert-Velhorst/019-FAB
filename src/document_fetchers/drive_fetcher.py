@@ -89,7 +89,9 @@ class DriveFetcher(BaseFetcher):
             return []
         folder_query = f"'{folder_id}' in parents and trashed = false"
 
-        attachments_dir = self.config.get("google_drive_download_dir") or self.config.get("attachments_save_dir", "/tmp/drive_attachments")
+        attachments_dir = self._download_directory(
+            "google_drive", "google_drive_download_dir", "drive_download_dir"
+        )
         os.makedirs(attachments_dir, exist_ok=True)
         max_pages = _bounded_int(self.config.get("google_drive_max_pages"), 50, 1, 500)
         max_files = _bounded_int(self.config.get("google_drive_max_files"), 5000, 1, 50000)

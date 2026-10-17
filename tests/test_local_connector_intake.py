@@ -1,5 +1,7 @@
 import os
 import tempfile
+import threading
+import time
 import unittest
 
 from src.operations.local_connector_intake import (
@@ -204,6 +206,54 @@ class TestLocalConnectorIntake(unittest.TestCase):
                 ledger.release_runtime_lease(CONNECTOR_INTAKE_LEASE_NAME, "other-owner")
             )
 
+    def test_sync_renews_short_lease_while_connector_fetch_is_running(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger, service = self._service(temp_dir, [])
+            service.config["fab_connector_intake_lease_seconds"] = 1
+            fetch_started = threading.Event()
+            finish_fetch = threading.Event()
+            outcome = {}
+            errors = []
+
+            def slow_sync(**_kwargs):
+                fetch_started.set()
+                if not finish_fetch.wait(timeout=5):
+                    raise TimeoutError("test did not release connector fetch")
+                return {
+                    "success": True,
+                    "status": "completed",
+                    "summary": {},
+                    "results": [],
+                }
+
+            service._sync_once = slow_sync
+
+            def sync():
+                try:
+                    outcome["result"] = service.sync(["gmail"], actor="test")
+                except Exception as exc:
+                    errors.append(exc)
+
+            worker = threading.Thread(target=sync)
+            worker.start()
+            try:
+                self.assertTrue(fetch_started.wait(timeout=5))
+                time.sleep(1.25)
+                competitor = ledger.acquire_runtime_lease(
+                    CONNECTOR_INTAKE_LEASE_NAME,
+                    "competing-sync",
+                    ttl_seconds=60,
+                )
+                self.assertFalse(competitor["acquired"])
+            finally:
+                finish_fetch.set()
+                worker.join(timeout=10)
+
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(errors, [])
+            self.assertTrue(outcome["result"]["success"])
+            self.assertIsNone(ledger.get_runtime_lease(CONNECTOR_INTAKE_LEASE_NAME))
+
     def test_changed_provider_document_creates_reviewable_revision(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             first_path = os.path.join(temp_dir, "receipt-v1.pdf")
@@ -318,6 +368,20 @@ class TestLocalConnectorIntake(unittest.TestCase):
             self.assertIn("path_outside_source_root", result["results"][0]["error"])
             self.assertEqual(ledger.list_documents(), [])
             self.assertEqual(ledger.list_source_accounts(source_type="gmail")[0]["status"], "failed")
+
+    def test_unconfigured_download_root_does_not_trust_connector_document_path(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger, service = self._service(temp_dir, [])
+            service.config.pop("gmail_attachment_download_dir")
+
+            root = service._download_root("gmail", {
+                "local_path": os.path.join(temp_dir, "arbitrary.pdf"),
+            })
+
+            self.assertEqual(
+                root,
+                os.path.abspath(os.path.join("data", "source_downloads", "gmail")),
+            )
 
     def test_configured_connector_stays_disabled_without_explicit_opt_in(self):
         with tempfile.TemporaryDirectory() as temp_dir:

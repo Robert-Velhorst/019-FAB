@@ -115,10 +115,6 @@ export type FabControlCenter = {
   notifications: JsonRecord[];
   reconciliation: JsonRecord[];
   activity: JsonRecord[];
-  hai: {
-    status: JsonRecord;
-    manifest: JsonRecord;
-  };
   resourceStates: Record<FabResourceKey, FabResourceState>;
   partialErrors: Array<{ resource: FabResourceKey; error: string; state: FabDataState; updatedAt: string | null }>;
 };
@@ -167,7 +163,6 @@ const READ_PATHS = {
   sourceReadiness: "/api/sources/readiness",
   driveAuthorization: "/api/connectors/google-drive/authorization",
   haiStatus: "/api/hai/status",
-  haiManifest: "/api/hai/manifest",
   cloudStatus: "/api/cloud/status",
   gmailAuthorization: "/api/connectors/gmail/authorization",
 } as const;
@@ -302,7 +297,9 @@ export async function fabLocalRequest(
     }
     if (!response.ok) {
       const message = sanitizeExternalMessage(
-        stringValue(body.error) || `FAB local API returned ${response.status}`,
+        stringValue(body.error)
+          || stringValue(body.message)
+          || `FAB local API returned ${response.status}`,
       );
       const code = FAB_HTTP_ERROR_CODES[response.status];
       if (code) throw new TRPCError({ code, message });
@@ -666,8 +663,13 @@ async function buildFabControlCenter(generation: number): Promise<FabControlCent
         status: stringValue(resources.haiStatus?.status, "unavailable"),
         configured: Boolean(resources.haiStatus?.enabled),
         ready: resources.haiStatus?.status === "ready",
+        haiAuthentication: stringValue(resources.haiStatus?.haiAuthentication, "unknown"),
+        dedicatedHaiTokenConfigured: resources.haiStatus?.dedicatedHaiTokenConfigured === true,
+        remoteAuthenticationConfigured: resources.haiStatus?.remoteAuthenticationConfigured === true,
         details: resources.haiStatus?.status === "ready"
-          ? `Governed machine control is enabled for ${haiAllowedCommandIds.length} allowlisted commands.`
+          ? resources.haiStatus?.remoteAuthenticationConfigured === true
+            ? `Governed machine control is enabled for ${haiAllowedCommandIds.length} allowlisted commands; a separate HAI credential is configured.`
+            : `Governed machine control is enabled for ${haiAllowedCommandIds.length} allowlisted commands. Configure a dedicated HAI credential before remote use; never share the operator API token.`
           : "Governed machine-control contract for safe local FAB commands.",
         allowedCommandIds: haiAllowedCommandIds,
       },
@@ -678,7 +680,9 @@ async function buildFabControlCenter(generation: number): Promise<FabControlCent
         configured: cloudAccess.configured === true,
         ready: cloudAccess.active === true,
         details: cloudAccess.active === true
-          ? "Authenticated HTTPS access is verified for the FAB API and HAI manifest."
+          ? cloudAccess.dashboardUrl
+            ? "Authenticated FAB API and HAI access are verified; the remote operator dashboard is protected by ngrok Basic Auth."
+            : "Authenticated HTTPS access is verified for the FAB API and HAI manifest."
           : "Project-owned ngrok access for the authenticated FAB API and HAI connector.",
         nextAction: stringValue(
           cloudAccess.nextAction,
@@ -686,6 +690,7 @@ async function buildFabControlCenter(generation: number): Promise<FabControlCent
         ),
         lastSyncAt: cloudAccess.verifiedAt || null,
         publicUrl: cloudAccess.publicUrl || null,
+        dashboardUrl: cloudAccess.dashboardUrl || null,
         authMode: cloudAccess.authMode || null,
       },
     ],
@@ -697,10 +702,6 @@ async function buildFabControlCenter(generation: number): Promise<FabControlCent
     notifications: arrayValue(resources.notifications?.notifications),
     reconciliation: arrayValue(resources.reconciliation?.reconciliationMatches),
     activity: arrayValue(resources.activity?.auditEvents),
-    hai: {
-      status: resources.haiStatus || {},
-      manifest: resources.haiManifest || {},
-    },
     resourceStates,
     partialErrors,
   };
@@ -1015,7 +1016,6 @@ function disconnectedControlCenter(endpoint: string, checkedAt: string, error: s
     notifications: [],
     reconciliation: [],
     activity: [],
-    hai: { status: {}, manifest: {} },
     resourceStates,
     partialErrors: [],
   };

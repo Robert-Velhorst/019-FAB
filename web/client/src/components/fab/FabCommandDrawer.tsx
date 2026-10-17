@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { startVisiblePoll } from "@/hooks/visiblePoll";
 import {
   BellRing,
   Bot,
@@ -68,8 +69,7 @@ export function FabCommandDrawer({ open, connected, pendingCommand, commandStart
   useEffect(() => {
     if (!open || !pendingCommand) return;
     setNow(Date.now());
-    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
-    return () => window.clearInterval(timer);
+    return startVisiblePoll(() => setNow(Date.now()), { intervalMs: 1_000 });
   }, [open, pendingCommand]);
 
   useEffect(() => {

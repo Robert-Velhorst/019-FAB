@@ -26,6 +26,7 @@ RECOVERABLE_STEP_STATUSES = {"failed", "blocked", "skipped", "not_run"}
 SAFE_AUTONOMY_MODES = {"safe_auto", "safe_draft", "read_only"}
 WORKFLOW_RECOVERY_SCHEDULER_LEASE_NAME = "local_workflow_recovery_scheduler"
 DEFAULT_INTERRUPTED_RUN_GRACE_SECONDS = 900.0
+HISTORICAL_HIGH_RISK_AUTONOMY_ACTIONS = {"execute_approved_exports"}
 
 
 class LocalWorkflowRecoveryService:
@@ -222,6 +223,7 @@ class LocalWorkflowRecoveryService:
             step
             for step in workflow_run.get("steps") or []
             if step.get("step_key") in AUTONOMY_EXECUTION_ORDER
+            or step.get("step_key") in HISTORICAL_HIGH_RISK_AUTONOMY_ACTIONS
         ]
         failed_step = next(
             (

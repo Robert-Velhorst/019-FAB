@@ -44,6 +44,13 @@ verification. Provider secrets and OAuth tokens persist in `fab-credentials` and
 encrypted and protected by host permissions. Desktop Google consent/setup routes
 require a loopback-bound API and are not enabled by the VM wildcard bind. Provision
 owner-authorized credentials separately; VM Google onboarding is not yet proven.
+The deployment preflight blocks startup while the encryption attestation is false
+or unset. Keep it false until the host and recovery-key controls have been checked.
+
+The VM profile uses SQLite WAL with `synchronous=FULL`, syncing each committed
+transaction for stronger power-loss durability. This can increase write latency;
+group related ledger writes into explicit transactions rather than weakening
+production durability.
 
 ## Start and Sign In
 

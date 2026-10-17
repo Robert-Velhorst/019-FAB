@@ -11,6 +11,23 @@ const log = createLogger("Stripe");
 
 let _stripe: Stripe | null = null;
 
+type StripeCustomerCandidate = {
+  id: string;
+  deleted?: boolean | void;
+  metadata?: Record<string, string>;
+};
+
+export function findOwnedStripeCustomer<T extends StripeCustomerCandidate>(
+  customers: T[],
+  userId: number
+): T | undefined {
+  return customers.find((customer) => isOwnedStripeCustomer(customer, userId));
+}
+
+function isOwnedStripeCustomer(customer: StripeCustomerCandidate, userId: number): boolean {
+  return !customer.deleted && customer.metadata?.user_id === userId.toString();
+}
+
 /**
  * Get or initialize the Stripe SDK instance.
  * Throws immediately if STRIPE_SECRET_KEY is missing — fail fast.
@@ -36,7 +53,7 @@ export function getStripe(): Stripe {
 /**
  * Get or create a Stripe customer for a user.
  * Verifies existing customer ID is still valid before reusing.
- * Deduplicates by email if no existing ID is provided.
+ * Deduplicates by email only when the Stripe customer is bound to this user.
  */
 export async function getOrCreateStripeCustomer(
   userId: number,
@@ -58,19 +75,24 @@ export async function getOrCreateStripeCustomer(
         userId,
       });
     } catch (err) {
-      log.warn("Failed to retrieve existing Stripe customer", {
-        customerId: existingCustomerId,
-        userId,
-      });
+      if (!isMissingStripeCustomer(err)) {
+        log.warn("Failed to verify existing Stripe customer", { userId });
+        throw err;
+      }
+      log.warn("Saved Stripe customer was not found", { userId });
     }
   }
 
   // 2. Search for existing customer by email to prevent duplicates
   if (email) {
     try {
-      const existing = await stripe.customers.list({ email, limit: 1 });
-      if (existing.data.length > 0 && !existing.data[0].deleted) {
-        const found = existing.data[0];
+      let found: Stripe.Customer | undefined;
+      await stripe.customers.list({ email, limit: 100 }).autoPagingEach((customer) => {
+        if (!isOwnedStripeCustomer(customer, userId)) return;
+        found = customer;
+        return false;
+      });
+      if (found) {
         log.info("Found existing Stripe customer by email", {
           customerId: found.id,
           userId,
@@ -78,7 +100,8 @@ export async function getOrCreateStripeCustomer(
         return found.id;
       }
     } catch (err) {
-      log.warn("Failed to search for existing customer by email", { email });
+      log.warn("Failed to search for existing Stripe customer", { userId });
+      throw err;
     }
   }
 
@@ -90,6 +113,8 @@ export async function getOrCreateStripeCustomer(
       user_id: userId.toString(),
       source: "fab-website",
     },
+  }, {
+    idempotencyKey: `fab-customer-${userId}`,
   });
 
   log.info("Created new Stripe customer", {
@@ -98,6 +123,12 @@ export async function getOrCreateStripeCustomer(
   });
 
   return customer.id;
+}
+
+function isMissingStripeCustomer(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const stripeError = error as { statusCode?: unknown; code?: unknown };
+  return stripeError.statusCode === 404 && stripeError.code === "resource_missing";
 }
 
 /**

@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import hashlib
-import io
-import os
 from typing import Any, Dict, Optional
 
+from src.document_processors.document_resource_limits import MAX_SOURCE_DOCUMENT_BYTES
 from src.security.google_oauth_store import (
     GoogleOAuthTokenStore,
     LegacyGoogleOAuthTokenError,
 )
+
+DRIVE_HASH_CHUNK_BYTES = 8 * 1024 * 1024
 
 try:
     from google.auth.transport.requests import Request
@@ -43,12 +44,12 @@ class DriveArchiveClient:
         if MediaIoBaseDownload is None:
             raise RuntimeError("Google Drive download support is unavailable.")
         request = self.service.files().get_media(fileId=str(file_id), supportsAllDrives=True)
-        stream = io.BytesIO()
-        downloader = MediaIoBaseDownload(stream, request)
+        digest = _LimitedHashSink(MAX_SOURCE_DOCUMENT_BYTES)
+        downloader = MediaIoBaseDownload(digest, request, chunksize=DRIVE_HASH_CHUNK_BYTES)
         done = False
         while not done:
             _, done = downloader.next_chunk()
-        return hashlib.sha256(stream.getvalue()).hexdigest()
+        return digest.hexdigest()
 
     def move_file(self, file_id: str, source_folder_id: str, archive_folder_id: str) -> Dict[str, Any]:
         if str(source_folder_id) == str(archive_folder_id):
@@ -165,3 +166,21 @@ def _as_bool(value: Any, default: bool = False) -> bool:
     if isinstance(value, bool):
         return value
     return str(value).strip().lower() in {"1", "true", "yes", "on", "enabled"}
+
+
+class _LimitedHashSink:
+    def __init__(self, max_bytes: int):
+        self.max_bytes = max(1, int(max_bytes))
+        self.bytes_written = 0
+        self._digest = hashlib.sha256()
+
+    def write(self, content: bytes) -> int:
+        next_size = self.bytes_written + len(content)
+        if next_size > self.max_bytes:
+            raise ValueError("drive_archive_document_exceeds_limit")
+        self._digest.update(content)
+        self.bytes_written = next_size
+        return len(content)
+
+    def hexdigest(self) -> str:
+        return self._digest.hexdigest()

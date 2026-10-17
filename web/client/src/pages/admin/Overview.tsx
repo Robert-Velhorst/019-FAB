@@ -1,5 +1,6 @@
 import { trpc } from "@/lib/trpc";
 import { Users, MessageSquare, CreditCard, FileText, FileSearch } from "lucide-react";
+import { Link } from "wouter";
 import AdminLayout from "@/components/AdminLayout";
 
 export default function AdminOverview() {
@@ -8,13 +9,19 @@ export default function AdminOverview() {
   const contactCount = trpc.contact.count.useQuery();
   const contactMessages = trpc.contact.list.useQuery({});
   const blogCount = trpc.blog.count.useQuery();
-  const bookkeepingOverview = trpc.bookkeeping.overview.useQuery();
   const billingCatalog = trpc.stripe.products.useQuery();
 
   const newMessages = contactMessages.data?.filter((m) => m.status === "new").length ?? 0;
   const billingAvailable = billingCatalog.data?.some((product) => product.billingAvailable) ?? false;
 
-  const stats = [
+  const stats: Array<{
+    label: string;
+    value: string | number;
+    icon: typeof Users;
+    color: string;
+    change?: string;
+    href?: string;
+  }> = [
     {
       label: "Total Waitlist Signups",
       value: waitlistCount.data?.count ?? 0,
@@ -32,11 +39,12 @@ export default function AdminOverview() {
       change: newMessages > 0 ? `${newMessages} unread` : "All read",
     },
     {
-      label: "Review Backlog",
-      value: bookkeepingOverview.data?.pendingReviews ?? 0,
+      label: "FAB Operations",
+      value: "Open",
       icon: FileSearch,
       color: "bg-amber-50 text-amber-700",
-      change: `${bookkeepingOverview.data?.documents ?? 0} documents tracked`,
+      change: "Open the live FAB operations console",
+      href: "/admin/operations",
     },
     {
       label: "Blog Posts",
@@ -67,23 +75,30 @@ export default function AdminOverview() {
 
         {/* Stats Grid */}
         <div className="grid sm:grid-cols-2 xl:grid-cols-5 gap-5">
-          {stats.map((stat, i) => (
-            <div
-              key={i}
-              className="bg-white rounded-2xl p-6 border border-sand-dark/15 shadow-sm"
-            >
-              <div className="flex items-center justify-between mb-4">
-                <div className={`w-10 h-10 rounded-xl ${stat.color} flex items-center justify-center`}>
-                  <stat.icon className="w-5 h-5" />
+          {stats.map((stat, i) => {
+            const card = (
+              <div className="bg-white rounded-2xl p-6 border border-sand-dark/15 shadow-sm">
+                <div className="flex items-center justify-between mb-4">
+                  <div className={`w-10 h-10 rounded-xl ${stat.color} flex items-center justify-center`}>
+                    <stat.icon className="w-5 h-5" />
+                  </div>
                 </div>
+                <div className="text-2xl font-semibold text-charcoal mb-1">{stat.value}</div>
+                <div className="text-sm text-charcoal-light">{stat.label}</div>
+                {stat.change && (
+                  <div className="text-xs text-sage mt-2">{stat.change}</div>
+                )}
               </div>
-              <div className="text-2xl font-semibold text-charcoal mb-1">{stat.value}</div>
-              <div className="text-sm text-charcoal-light">{stat.label}</div>
-              {stat.change && (
-                <div className="text-xs text-sage mt-2">{stat.change}</div>
-              )}
-            </div>
-          ))}
+            );
+
+            return stat.href ? (
+              <Link key={i} href={stat.href} className="block rounded-2xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal">
+                {card}
+              </Link>
+            ) : (
+              <div key={i}>{card}</div>
+            );
+          })}
         </div>
 
         {/* Recent Activity */}

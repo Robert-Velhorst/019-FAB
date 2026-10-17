@@ -11,11 +11,10 @@ The following Python libraries are used in the project. They are listed in `requ
 - `google-cloud-vision`: Google Cloud Vision API client library for OCR.
 - `Pillow`: Python Imaging Library (PIL) fork, used for image processing.
 - `pytesseract`: Python wrapper for Tesseract OCR.
-- `opencv-python`: OpenCV library for advanced image processing (e.g., deskewing, noise reduction).
 - `python-freshdesk`: For interacting with the Freshdesk API.
 - A separately controlled browser session is required only for supervised provider workflows; the always-on FAB runtime does not install or invoke Playwright.
-- `pandas`: For data manipulation, especially for CSV generation and historical data analysis.
-- `numpy`: For numerical operations, often used with pandas and image processing.
+- `openpyxl`: For streaming local `.xlsx` bank-export rows; CSV and financial summaries use the standard library.
+- `numpy`: Installed by the optional ML categorization lock when required by the approved-feedback model.
 - `scikit-learn` and `joblib`: Optional dependencies for the approved-feedback category model. They are excluded from the default local and container runtime; install the hash-locked `requirements-ml.lock` only when enabling ML categorization.
 - `tensorflow` or `pytorch`: (Optional, depending on specific ML model implementation) For deep learning models.
 - `cryptography`: For secure credential encryption.

@@ -140,4 +140,54 @@ describe("FAB bounded shutdown", () => {
     expect(signals.listenerCount("SIGINT")).toBe(0);
     expect(server.listenerCount("connection")).toBe(1); // Node's HTTP listener remains.
   });
+
+  it("closes dependent resources after HTTP drain and before exit", async () => {
+    const signals = new EventEmitter();
+    const events: string[] = [];
+    const server = createServer();
+    const lifecycle = createFabServerLifecycle(server);
+    await listening(server);
+    lifecycle.installSignalHandlers(
+      signals,
+      code => events.push(`exit:${code}`),
+      async () => { events.push("cleanup"); },
+    );
+
+    signals.emit("SIGTERM");
+    await lifecycle.shutdown();
+    await new Promise(resolve => setImmediate(resolve));
+    expect(events).toEqual(["cleanup", "exit:0"]);
+  });
+
+  it("closes dependent resources on programmatic shutdown", async () => {
+    const signals = new EventEmitter();
+    const events: string[] = [];
+    const server = createServer();
+    const lifecycle = createFabServerLifecycle(server);
+    await listening(server);
+    lifecycle.installSignalHandlers(signals, code => events.push(`exit:${code}`), async () => {
+      events.push("cleanup");
+    });
+
+    expect(await lifecycle.shutdown()).toBe(0);
+    expect(events).toEqual(["cleanup"]);
+    expect(signals.listenerCount("SIGTERM")).toBe(0);
+    expect(signals.listenerCount("SIGINT")).toBe(0);
+  });
+
+  it("exits unsuccessfully if dependent resource cleanup fails", async () => {
+    const signals = new EventEmitter();
+    const exitCodes: number[] = [];
+    const server = createServer();
+    const lifecycle = createFabServerLifecycle(server);
+    await listening(server);
+    lifecycle.installSignalHandlers(signals, code => exitCodes.push(code), async () => {
+      throw new Error("pool shutdown failed");
+    });
+
+    signals.emit("SIGTERM");
+    await lifecycle.shutdown();
+    await new Promise(resolve => setImmediate(resolve));
+    expect(exitCodes).toEqual([1]);
+  });
 });

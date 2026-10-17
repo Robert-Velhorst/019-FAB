@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { startVisiblePoll } from "@/hooks/visiblePoll";
 import {
   AlertCircle,
   CheckCircle2,
@@ -78,9 +79,12 @@ export function FabGoogleDriveSetupDrawer({
 
   useEffect(() => {
     if (!open || !authorizationInProgress) return;
-    const interval = window.setInterval(() => { void onRefresh(); }, 2500);
-    return () => window.clearInterval(interval);
-  }, [authorizationInProgress, onRefresh, open]);
+    return startVisiblePoll(onRefresh, {
+      intervalMs: 10_000,
+      initialDelayMs: 3_000,
+      onError: (cause) => setError(cause instanceof Error ? cause.message : copy("Drive status could not be refreshed.", "Drivestatus kon niet worden vernieuwd.")),
+    });
+  }, [authorizationInProgress, copy, onRefresh, open]);
 
   if (!open) return null;
 
@@ -132,6 +136,14 @@ export function FabGoogleDriveSetupDrawer({
         <div className="fab-detail-body">
           <p id="fab-drive-setup-description">{copy("Connect the approved intake folder through a user-owned Google consent flow. FAB stores the resulting token locally and never reads browser cookies.", "Koppel de goedgekeurde innamemap via een door de gebruiker beheerde Google-toestemming. FAB bewaart het resulterende token lokaal en leest nooit browsercookies.")}</p>
 
+          <div className="fab-financial-warning" role="note">
+            <AlertCircle aria-hidden="true" />
+            <div>
+              <strong>{copy("This Google token has broad Drive access", "Dit Google-token heeft brede Drive-toegang")}</strong>
+              <span>{copy("Google grants access to all files in the connected account, not only the configured folder. FAB limits normal intake to that folder and moves a source only after verified Wave attachment readback with a matching SHA-256. For stronger isolation, connect a dedicated Google account that can access only the bookkeeping source and archive folders.", "Google verleent toegang tot alle bestanden in het gekoppelde account, niet alleen de ingestelde map. FAB beperkt de normale inname tot die map en verplaatst een bronbestand pas na geverifieerde teruglezing van de Wave-bijlage met overeenkomende SHA-256. Gebruik voor betere isolatie een apart Google-account dat alleen toegang heeft tot de boekhoudmappen voor bronbestanden en archief.")}</span>
+            </div>
+          </div>
+
           <div className="fab-drive-setup-progress">
             <SetupStep complete={folderConfigured} icon={Cloud} title={copy("Approved folder", "Goedgekeurde map")} detail={folderConfigured ? text(authorization.folderId, copy("Configured", "Ingesteld")) : copy("Folder configuration is missing.", "Mapconfiguratie ontbreekt.")} />
             <SetupStep complete={credentialsPresent} icon={FileKey2} title={copy("Desktop OAuth client", "Desktop-OAuth-client")} detail={credentialsPresent ? copy("Credential file installed", "Referentiebestand geïnstalleerd") : copy("Credential file required", "Referentiebestand vereist")} />
@@ -155,7 +167,7 @@ export function FabGoogleDriveSetupDrawer({
 
           <section className="fab-drive-credential-panel">
             <div className="fab-subsection-heading"><div><span>{copy("Step 2", "Stap 2")}</span><h3>{copy("Authorize the approved folder", "Autoriseer de goedgekeurde map")}</h3></div></div>
-            <p>{copy("Starting authorization opens Google in your default browser. Sign in with the account that owns the configured source and archive folders.", "Autorisatie opent Google in je standaardbrowser. Meld je aan met het account dat eigenaar is van de ingestelde bron- en archiefmappen.")}</p>
+            <p>{copy("Starting authorization opens Google in your default browser. Sign in with the account that can access the configured source and archive folders.", "Autorisatie opent Google in je standaardbrowser. Meld je aan met een account dat toegang heeft tot de ingestelde bron- en archiefmappen.")}</p>
             <div className="fab-detail-actions">
               <button className="fab-primary-button" type="button" onClick={() => { void authorize(); }} disabled={!connected || busy || !credentialsPresent || !folderConfigured || authorizationInProgress}>{authorizationInProgress ? <Loader2 className="is-spinning" aria-hidden="true" /> : <ShieldCheck aria-hidden="true" />} {authorizationInProgress ? copy("Waiting for Google...", "Wachten op Google...") : reauthorizationRequired ? copy("Reauthorize Drive", "Drive opnieuw autoriseren") : tokenPresent ? copy("Verify Drive access", "Drive-toegang verifiëren") : copy("Authorize Drive", "Drive autoriseren")}</button>
               <button className="fab-secondary-button" type="button" onClick={() => { void onRefresh(); }} disabled={busy}><RefreshCw aria-hidden="true" /> {copy("Refresh status", "Status vernieuwen")}</button>

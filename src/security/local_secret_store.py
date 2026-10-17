@@ -27,6 +27,7 @@ SUPPORTED_RUNTIME_SECRETS = {
     "web_jwt_secret",
     "operator_api_token",
     "hai_api_token",
+    "backup_integrity_key",
 }
 
 

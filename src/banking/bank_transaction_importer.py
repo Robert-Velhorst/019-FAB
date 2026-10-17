@@ -1,15 +1,11 @@
 import csv
 import hashlib
 import os
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-try:
-    import pandas as pd
-except ModuleNotFoundError:
-    pd = None
-
+from dateutil.parser import parse as parse_date
 
 class BankTransactionImporter:
     """Imports and normalizes bank transactions from local CSV/Excel exports."""
@@ -37,7 +33,7 @@ class BankTransactionImporter:
         for file_path in sorted(self.bank_import_dir.iterdir()):
             if not file_path.is_file():
                 continue
-            if file_path.suffix.lower() not in {".csv", ".xlsx", ".xls"}:
+            if file_path.suffix.lower() not in {".csv", ".xlsx"}:
                 continue
             transactions.extend(self.import_file(file_path))
         return transactions
@@ -55,34 +51,35 @@ class BankTransactionImporter:
     def _read_rows(self, path: Path) -> List[Dict[str, Any]]:
         suffix = path.suffix.lower()
         if suffix == ".csv":
-            if pd is None:
-                return self._read_csv_without_pandas(path)
-            dataframe = self._read_csv(path)
-        elif suffix in {".xlsx", ".xls"}:
-            if pd is None:
+            return self._read_csv_rows(path)
+        if suffix == ".xlsx":
+            return self._read_xlsx(path)
+        return []
+
+    def _read_xlsx(self, path: Path) -> List[Dict[str, Any]]:
+        from openpyxl import load_workbook
+
+        workbook = load_workbook(path, read_only=True, data_only=True)
+        try:
+            rows = workbook.active.iter_rows(values_only=True)
+            headers = next(rows, None)
+            if not headers:
                 return []
-            dataframe = pd.read_excel(path)
-        else:
-            return []
-        dataframe = dataframe.dropna(how="all")
-        dataframe.columns = [self._normalize_column_name(column) for column in dataframe.columns]
-        return dataframe.to_dict(orient="records")
+            normalized_headers = [self._normalize_column_name(value) for value in headers]
+            result = []
+            for values in rows:
+                if not any(not self._is_empty(value) for value in values):
+                    continue
+                result.append({
+                    header: value
+                    for header, value in zip(normalized_headers, values)
+                    if header
+                })
+            return result
+        finally:
+            workbook.close()
 
-    def _read_csv(self, path: Path):
-        for separator in [",", ";", "\t"]:
-            try:
-                dataframe = pd.read_csv(path, sep=separator)
-                if len(dataframe.columns) > 1:
-                    return dataframe
-            except UnicodeDecodeError:
-                dataframe = pd.read_csv(path, sep=separator, encoding="latin-1")
-                if len(dataframe.columns) > 1:
-                    return dataframe
-            except Exception:
-                continue
-        return pd.read_csv(path)
-
-    def _read_csv_without_pandas(self, path: Path) -> List[Dict[str, Any]]:
+    def _read_csv_rows(self, path: Path) -> List[Dict[str, Any]]:
         for encoding in ["utf-8-sig", "latin-1"]:
             for separator in [",", ";", "\t"]:
                 try:
@@ -154,12 +151,8 @@ class BankTransactionImporter:
     def _is_empty(value: Any) -> bool:
         if value is None:
             return True
-        if pd is not None:
-            try:
-                if pd.isna(value):
-                    return True
-            except Exception:
-                pass
+        if isinstance(value, float) and value != value:
+            return True
         return str(value).strip() == ""
 
     @staticmethod
@@ -187,21 +180,26 @@ class BankTransactionImporter:
     def _parse_date(value: Any) -> Optional[str]:
         if value is None:
             return None
+        if isinstance(value, datetime):
+            return value.date().isoformat()
+        if isinstance(value, date):
+            return value.isoformat()
         if hasattr(value, "date"):
             return value.date().isoformat()
         text = str(value).strip()
+        try:
+            return datetime.fromisoformat(text.replace("Z", "+00:00")).date().isoformat()
+        except ValueError:
+            pass
         for fmt in ["%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%Y/%m/%d", "%d.%m.%Y", "%Y%m%d"]:
             try:
                 return datetime.strptime(text, fmt).date().isoformat()
             except ValueError:
                 continue
-        if pd is not None:
-            try:
-                parsed = pd.to_datetime(text, dayfirst=True, errors="coerce")
-                if not pd.isna(parsed):
-                    return parsed.date().isoformat()
-            except Exception:
-                pass
+        try:
+            return parse_date(text, dayfirst=True, fuzzy=False).date().isoformat()
+        except (OverflowError, TypeError, ValueError):
+            pass
         return None
 
     @staticmethod

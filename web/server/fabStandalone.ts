@@ -16,11 +16,23 @@ import { sanitizeExternalMessage } from "./lib/errorSanitizer";
 import { relaxedLimiter } from "./lib/rateLimiter";
 import { configureFabProxyTrust } from "./_core/deployment";
 import { createFabServerLifecycle, listenFabServer } from "./_core/lifecycle";
+import { closeDb } from "./db";
+import { createLogger } from "./lib/logger";
+
+const log = createLogger("FAB standalone");
 
 export async function startFabStandaloneServer() {
   const app = express();
   const server = createServer(app);
   const lifecycle = createFabServerLifecycle(server);
+  const closeDatabase = async () => {
+    try {
+      await closeDb();
+    } catch (error) {
+      log.error("Database pool shutdown failed", {}, error instanceof Error ? error : new Error(String(error)));
+      throw error;
+    }
+  };
   configureFabProxyTrust(app, ENV.fabOperatorTrustedProxyAddresses);
   app.use(...createFabSecurityMiddleware(ENV.isProduction));
   app.use(compression({ threshold: 1_024 }));
@@ -46,7 +58,7 @@ export async function startFabStandaloneServer() {
     port: ENV.fabWebPort,
     allowPortFallback: ENV.fabAllowPortFallback,
   });
-  lifecycle.installSignalHandlers();
+  lifecycle.installSignalHandlers(process, undefined, closeDatabase);
   return { app, port, server, shutdown: lifecycle.shutdown };
 }
 

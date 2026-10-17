@@ -162,9 +162,17 @@ class LocalReconciliationService:
         reconciliation_match_id: int,
         status: str,
         resolution: Optional[str] = None,
+        actor: str = "local_reconciliation",
+        request_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         with self.ledger.write_transaction():
-            return self._resolve_match(reconciliation_match_id, status, resolution)
+            return self._resolve_match(
+                reconciliation_match_id,
+                status,
+                resolution,
+                actor=actor,
+                request_id=request_id,
+            )
 
     def validate_approval(self, reconciliation_match_id: int) -> Dict[str, Any]:
         with self.ledger.read_snapshot():
@@ -206,6 +214,9 @@ class LocalReconciliationService:
         reconciliation_match_id: int,
         status: str,
         resolution: Optional[str] = None,
+        *,
+        actor: str = "local_reconciliation",
+        request_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         status = str(status or "").strip()
         if status not in RESOLUTION_STATUSES:
@@ -297,6 +308,8 @@ class LocalReconciliationService:
                 "documentId": document_id,
                 "bankTransactionId": match.get("bank_transaction_id"),
                 "resolution": resolution,
+                "actor": str(actor or "local_reconciliation")[:200],
+                "requestId": str(request_id or "")[:128] or None,
             },
         })
         return {

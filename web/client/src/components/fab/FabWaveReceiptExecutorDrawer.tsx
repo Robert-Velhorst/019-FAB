@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { startVisiblePoll } from "@/hooks/visiblePoll";
 import {
   AlertCircle,
   Bot,
@@ -103,9 +104,12 @@ export function FabWaveReceiptExecutorDrawer({
 
   useEffect(() => {
     if (!open || !sessionPaired || ready) return;
-    const interval = window.setInterval(() => { void onRefresh(); }, 5_000);
-    return () => window.clearInterval(interval);
-  }, [onRefresh, open, ready, sessionPaired]);
+    return startVisiblePoll(onRefresh, {
+      intervalMs: 10_000,
+      initialDelayMs: 5_000,
+      onError: (cause) => setError(cause instanceof Error ? cause.message : copy("Executor status could not be refreshed.", "Executorstatus kon niet worden vernieuwd.")),
+    });
+  }, [copy, onRefresh, open, ready, sessionPaired]);
 
   if (!open) return null;
 

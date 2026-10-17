@@ -1,5 +1,7 @@
 import json
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -78,6 +80,33 @@ class TestLocalClosePackService(unittest.TestCase):
             )
             self.assertEqual(payload["evidence"]["waveReportSnapshots"][0]["external_submission"], "not_executed")
             self.assertEqual(ledger.list_audit_events()[0]["action"], "local_close_pack.prepared")
+
+    def test_inspect_pack_rejects_symlink_that_resolves_outside_pack_directory(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            packs_dir = os.path.join(temp_dir, "packs")
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            service = LocalClosePackService(ledger, {"fab_local_close_pack_dir": packs_dir})
+            outside_dir = os.path.join(temp_dir, "outside")
+            link_dir = os.path.join(packs_dir, "linked")
+            os.makedirs(outside_dir)
+            outside_path = os.path.join(outside_dir, "pack.json")
+            with open(outside_path, "w", encoding="utf-8") as handle:
+                json.dump({"format": CLOSE_PACK_FORMAT}, handle)
+            try:
+                if sys.platform == "win32":
+                    subprocess.run(
+                        ["cmd.exe", "/c", "mklink", "/J", link_dir, outside_dir],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                    )
+                else:
+                    os.symlink(outside_dir, link_dir, target_is_directory=True)
+            except (OSError, subprocess.CalledProcessError, NotImplementedError) as exc:
+                self.skipTest(f"directory link creation is unavailable: {exc}")
+
+            with self.assertRaisesRegex(ValueError, "inside the configured"):
+                service.inspect_pack(os.path.join("linked", "pack.json"))
 
 
 def _capture_zero_activity_wave_result(ledger: LocalOperationsLedger):

@@ -26,7 +26,12 @@ Direct SVB submissions, official tax filing, complete multi-tenant permissions, 
 
 ## Operator Quick Start (Windows 11)
 
-Requirements: Git, Python 3.13 (the launcher may provision it using the Windows Python launcher or uv), Tesseract with Dutch and English language data, and Poppler for PDF OCR. The launcher installs dependencies in a project-local environment.
+Requirements: Git; Node.js 22.12 or newer; pnpm 11.20.0 or newer; Python
+3.13 (the launcher may provision it using the Windows Python launcher or uv);
+Tesseract with Dutch and English language data; and Poppler for PDF OCR.
+Node.js and pnpm build and run the operator dashboard; the launcher installs
+dashboard packages from the frozen lockfile and Python dependencies in
+project-local environments.
 
     git clone https://github.com/Robert-Velhorst/019-FAB.git
     Set-Location 019-FAB

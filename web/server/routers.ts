@@ -1,5 +1,6 @@
 import { COOKIE_NAME } from "@shared/const";
 import crypto from "node:crypto";
+import { TRPCError } from "@trpc/server";
 import {
   waitlistJoinSchema,
   contactSubmitSchema,
@@ -31,6 +32,7 @@ import {
   automationWorkflowMasterLedgerSchema,
 } from "@shared/validation";
 import { getSessionCookieOptions } from "./_core/cookies";
+import { isFabManagedAuthEnabled, logoutFabManagedOperator } from "./fabManagedAuth";
 import { systemRouter } from "./_core/systemRouter";
 import { stripeRouter } from "./routers/stripe";
 import { publicProcedure, router, adminProcedure } from "./_core/trpc";
@@ -52,11 +54,11 @@ import {
   getAllBlogPosts,
   getBlogPostCount,
   getBookkeepingOverview,
-  createBookkeepingDocument,
-  addReviewItem,
-  createWorkflowRun,
-  updateWorkflowRun,
-  createRoutingAttempt,
+  createBookkeepingDocumentWithAudit,
+  addReviewItemWithAudit,
+  createWorkflowRunWithAudit,
+  updateWorkflowRunWithAudit,
+  createRoutingAttemptWithAudit,
   recordAuditEvent,
   getReviewQueue,
   getRecentWorkflowRuns,
@@ -381,7 +383,7 @@ async function createAutonomousWorkflowReviewItem(params: {
   missingSignals?: string[];
   missingFields?: Array<{ stepId: string; actionId: string; fields: string[] }>;
 }) {
-  const result = await addReviewItem({
+  const result = await addReviewItemWithAudit({
     documentId: null,
     reason: "autonomous_wave_workflow_blocked",
     details: sanitizeText(params.message),
@@ -398,13 +400,10 @@ async function createAutonomousWorkflowReviewItem(params: {
       missingSignals: params.missingSignals || [],
       missingFields: params.missingFields || [],
     },
-  });
-
-  await recordAuditEvent({
+  }, {
     actorUserId: params.actorUserId,
     action: "review_item.create_autonomous_exception",
     entityType: "review_item",
-    entityId: String(result.id),
     details: {
       workflowRunId: params.workflowRunId,
       workflowId: params.workflowId,
@@ -424,7 +423,13 @@ export const appRouter = router({
 
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
-    logout: publicProcedure.mutation(({ ctx }) => {
+    logout: publicProcedure.mutation(async ({ ctx }) => {
+      if (isFabManagedAuthEnabled()) {
+        if (!await logoutFabManagedOperator(ctx.req, ctx.res)) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "A same-origin HTTPS request is required" });
+        }
+        return { success: true } as const;
+      }
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
       return { success: true } as const;
@@ -811,7 +816,7 @@ export const appRouter = router({
             missingFields.length +
             params.blockingActions.length +
             planReviewCount;
-          const workflowRun = await createWorkflowRun({
+          const workflowRun = await createWorkflowRunWithAudit({
             status: params.status,
             triggerSource: `automation:${input.workflowId}`,
             documentsImported: 0,
@@ -856,15 +861,11 @@ export const appRouter = router({
                 payload: operation.payload,
               })),
             },
-          });
-
-          await recordAuditEvent({
+          }, {
             actorUserId: ctx.user.id,
             action: params.auditAction,
             entityType: "automation_workflow",
-            entityId: String(workflowRun.id),
             details: {
-              workflowRunId: workflowRun.id,
               workflowId: input.workflowId,
               mode: input.mode,
               status: plan.status,
@@ -1096,14 +1097,12 @@ export const appRouter = router({
           },
         };
 
-        await updateWorkflowRun(run.id, {
+        const updated = await updateWorkflowRunWithAudit(run.id, {
           status: "running",
           finishedAt: null,
           errorMessage: null,
           metadata: updatedMetadata,
-        });
-
-        await recordAuditEvent({
+        }, {
           actorUserId: ctx.user.id,
           action: "automation_workflow.operation_claim",
           entityType: "automation_workflow_operation",
@@ -1115,7 +1114,8 @@ export const appRouter = router({
             actor: input.actor,
             leaseExpiresAt: leaseExpiresAt.toISOString(),
           },
-        });
+        }, { expectedMetadata: metadata });
+        if (!updated) throw new TRPCError({ code: "CONFLICT", message: "Workflow changed while this operation was being claimed. Refresh and retry." });
 
         return {
           status: "claimed" as const,
@@ -1199,7 +1199,7 @@ export const appRouter = router({
           },
         };
 
-        await updateWorkflowRun(run.id, {
+        const updated = await updateWorkflowRunWithAudit(run.id, {
           status: nextWorkflowStatus,
           documentsNeedingReview: reviewCount,
           finishedAt: allTerminal || failedOrBlocked ? completedAt : null,
@@ -1208,9 +1208,7 @@ export const appRouter = router({
               ? resultMessage
               : null,
           metadata: updatedMetadata,
-        });
-
-        await recordAuditEvent({
+        }, {
           actorUserId: ctx.user.id,
           action: "automation_workflow.executor_cycle",
           entityType: "automation_workflow_operation",
@@ -1225,7 +1223,8 @@ export const appRouter = router({
             safety: action?.safety ?? "unsupported",
             message: resultMessage,
           },
-        });
+        }, { expectedMetadata: metadata });
+        if (!updated) throw new TRPCError({ code: "CONFLICT", message: "Workflow changed while this operation was executing. Refresh before retrying." });
 
         if (failedOrBlocked) {
           await createAutonomousWorkflowReviewItem({
@@ -1356,7 +1355,7 @@ export const appRouter = router({
           },
         };
 
-        await updateWorkflowRun(run.id, {
+        const updated = await updateWorkflowRunWithAudit(run.id, {
           status: nextWorkflowStatus,
           documentsNeedingReview: reviewCount,
           finishedAt: allTerminal || failedOrBlocked ? completedAt : null,
@@ -1365,13 +1364,10 @@ export const appRouter = router({
               ? loopMessage
               : null,
           metadata: updatedMetadata,
-        });
-
-        await recordAuditEvent({
+        }, {
           actorUserId: ctx.user.id,
           action: "automation_workflow.executor_loop",
           entityType: "automation_workflow",
-          entityId: String(run.id),
           details: {
             workflowRunId: run.id,
             workflowId: stringValue(metadata.workflowId),
@@ -1385,7 +1381,8 @@ export const appRouter = router({
               status: stringValue(operation.status),
             })),
           },
-        });
+        }, { expectedMetadata: metadata });
+        if (!updated) throw new TRPCError({ code: "CONFLICT", message: "Workflow changed while the executor loop was running. Refresh before retrying." });
 
         if (failedOrBlocked) {
           const blockedOperation =
@@ -1466,7 +1463,7 @@ export const appRouter = router({
           },
         };
 
-        await updateWorkflowRun(run.id, {
+        const updated = await updateWorkflowRunWithAudit(run.id, {
           status: nextWorkflowStatus,
           documentsNeedingReview: reviewCount,
           finishedAt: allTerminal || failedOrBlocked ? now : null,
@@ -1475,9 +1472,7 @@ export const appRouter = router({
               ? input.message || "Autonomous Wave operation requires review."
               : null,
           metadata: updatedMetadata,
-        });
-
-        await recordAuditEvent({
+        }, {
           actorUserId: ctx.user.id,
           action: "automation_workflow.operation_update",
           entityType: "automation_workflow_operation",
@@ -1490,7 +1485,8 @@ export const appRouter = router({
             message: input.message || null,
             externalId: input.externalId || null,
           },
-        });
+        }, { expectedMetadata: metadata });
+        if (!updated) throw new TRPCError({ code: "CONFLICT", message: "Workflow changed while this operation was being updated. Refresh and retry." });
 
         if (failedOrBlocked) {
           await createAutonomousWorkflowReviewItem({
@@ -1812,17 +1808,18 @@ export const appRouter = router({
     createWorkflowRun: adminProcedure
       .input(workflowRunCreateSchema)
       .mutation(async ({ input, ctx }) => {
-        const result = await createWorkflowRun({
+        const result = await createWorkflowRunWithAudit({
           status: input.status,
           triggerSource: sanitizeText(input.triggerSource),
           metadata: input.metadata || null,
-        });
-        await recordAuditEvent({
+        }, {
           actorUserId: ctx.user.id,
           action: "workflow_run.create",
           entityType: "workflow_run",
-          entityId: String(result.id),
-          details: input,
+          details: {
+            status: input.status,
+            triggerSource: sanitizeText(input.triggerSource),
+          },
         });
         return result;
       }),
@@ -1831,21 +1828,24 @@ export const appRouter = router({
       .input(workflowRunUpdateSchema)
       .mutation(async ({ input, ctx }) => {
         const { id, ...data } = input;
-        await updateWorkflowRun(id, data);
-        await recordAuditEvent({
+        if (Object.keys(data).length === 0) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "At least one workflow run field must be provided." });
+        }
+        if (!await updateWorkflowRunWithAudit(id, data, {
           actorUserId: ctx.user.id,
           action: "workflow_run.update",
           entityType: "workflow_run",
-          entityId: String(id),
-          details: data,
-        });
+          details: { changedFields: Object.keys(data).sort() },
+        })) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Workflow run was not found." });
+        }
         return { success: true } as const;
       }),
 
     registerDocument: adminProcedure
       .input(bookkeepingDocumentRegisterSchema)
       .mutation(async ({ input, ctx }) => {
-        const result = await createBookkeepingDocument({
+        const result = await createBookkeepingDocumentWithAudit({
           source: sanitizeText(input.source),
           sourceDocumentId: input.sourceDocumentId ? sanitizeText(input.sourceDocumentId) : null,
           originalFilename: sanitizeText(input.originalFilename),
@@ -1864,13 +1864,11 @@ export const appRouter = router({
           ocrText: input.ocrText || null,
           extractedData: input.extractedData || null,
           metadata: input.metadata || null,
-        });
-        await recordAuditEvent({
+        }, {
           actorUserId: ctx.user.id,
           action: "document.register",
           entityType: "bookkeeping_document",
-          entityId: String(result.id),
-          details: { source: input.source, sourceDocumentId: input.sourceDocumentId },
+          details: { source: input.source },
         });
         return result;
       }),
@@ -1878,19 +1876,17 @@ export const appRouter = router({
     createReviewItem: adminProcedure
       .input(reviewItemCreateSchema)
       .mutation(async ({ input, ctx }) => {
-        const result = await addReviewItem({
+        const result = await addReviewItemWithAudit({
           documentId: input.documentId || null,
           reason: sanitizeText(input.reason),
           details: input.details ? sanitizeText(input.details) : null,
           status: input.status,
           correctedData: input.correctedData || null,
-        });
-        await recordAuditEvent({
+        }, {
           actorUserId: ctx.user.id,
           action: "review_item.create",
           entityType: "review_item",
-          entityId: String(result.id),
-          details: { documentId: input.documentId || null, reason: input.reason },
+          details: { documentId: input.documentId || null, status: input.status },
         });
         return result;
       }),
@@ -1898,7 +1894,7 @@ export const appRouter = router({
     createRoutingAttempt: adminProcedure
       .input(routingAttemptCreateSchema)
       .mutation(async ({ input, ctx }) => {
-        const result = await createRoutingAttempt({
+        const result = await createRoutingAttemptWithAudit({
           documentId: input.documentId || null,
           bookkeepingRecordId: input.bookkeepingRecordId || null,
           workflowRunId: input.workflowRunId || null,
@@ -1907,12 +1903,10 @@ export const appRouter = router({
           externalId: input.externalId ? sanitizeText(input.externalId) : null,
           message: input.message ? sanitizeText(input.message) : null,
           metadata: input.metadata || null,
-        });
-        await recordAuditEvent({
+        }, {
           actorUserId: ctx.user.id,
           action: "routing_attempt.create",
           entityType: "routing_attempt",
-          entityId: String(result.id),
           details: {
             documentId: input.documentId || null,
             bookkeepingRecordId: input.bookkeepingRecordId || null,
@@ -1926,7 +1920,10 @@ export const appRouter = router({
     updateReviewStatus: adminProcedure
       .input(reviewItemUpdateSchema)
       .mutation(async ({ input, ctx }) => {
-        await updateReviewItemStatus(input.id, input.status, input.resolution, ctx.user.id);
+        const updated = await updateReviewItemStatus(input.id, input.status, input.resolution, ctx.user.id);
+        if (!updated) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Review item was not found." });
+        }
         log.info("Review item status updated", {
           id: input.id,
           status: input.status,

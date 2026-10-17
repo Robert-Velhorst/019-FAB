@@ -15,18 +15,19 @@ import { ENV } from "./_core/env";
 import { createLogger } from "./lib/logger";
 import { sanitizeText } from "./lib/sanitize";
 import {
-  addReviewItem,
-  createBookkeepingDocument,
-  createReconciliationMatch,
-  createRoutingAttempt,
-  createWorkflowRun,
+  addReviewItemWithAudit,
+  createBookkeepingDocumentWithAudit,
+  createReconciliationMatchWithAudit,
+  createRoutingAttemptWithAudit,
+  createWorkflowRunWithAudit,
   recordAuditEvent,
-  updateBookkeepingDocument,
-  updateWorkflowRun,
+  updateBookkeepingDocumentWithAudit,
+  updateWorkflowRunWithAudit,
 } from "./db";
 
 const log = createLogger("FabOperations");
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+const MAX_OPERATIONS_AUTH_HEADER_CHARS = 8_192;
 
 function getRequestId(res: Response): string {
   return typeof res.locals.fabRequestId === "string"
@@ -62,8 +63,15 @@ function assignFabRequestId(req: Request, res: Response, next: NextFunction) {
 }
 
 function readToken(req: Request): string {
-  const bearer = req.header("authorization")?.match(/^Bearer\s+(.+)$/i)?.[1];
-  return bearer || req.header("x-fab-operations-token") || "";
+  const authorization = req.header("authorization") || "";
+  if (authorization.length > MAX_OPERATIONS_AUTH_HEADER_CHARS) return "";
+  const separator = authorization.indexOf(" ");
+  const scheme = separator > 0 ? authorization.slice(0, separator) : "";
+  const bearer = scheme.toLowerCase() === "bearer"
+    ? authorization.slice(separator + 1).trim()
+    : "";
+  const tokenHeader = req.header("x-fab-operations-token") || "";
+  return bearer || (tokenHeader.length <= MAX_OPERATIONS_AUTH_HEADER_CHARS ? tokenHeader : "");
 }
 
 export function isValidOperationsToken(candidate: string, expected: string): boolean {
@@ -128,11 +136,6 @@ function handleServiceError(res: Response, err: unknown) {
   );
 }
 
-const serviceWorkflowRunUpdateSchema = workflowRunUpdateSchema.extend({
-  startedAt: z.coerce.date().optional(),
-  finishedAt: z.coerce.date().optional(),
-});
-
 export function registerFabOperationsRoutes(app: Application, limiter?: RequestHandler) {
   const middleware = limiter
     ? [assignFabRequestId, limiter, requireFabOperationsToken]
@@ -142,17 +145,15 @@ export function registerFabOperationsRoutes(app: Application, limiter?: RequestH
   app.post("/api/fab/operations/workflow-runs", async (req, res) => {
     try {
       const input = workflowRunCreateSchema.parse(req.body);
-      const result = await createWorkflowRun({
+      const result = await createWorkflowRunWithAudit({
         status: input.status,
         triggerSource: sanitizeText(input.triggerSource),
         metadata: input.metadata || null,
-      });
-      await recordAuditEvent({
+      }, {
         actorUserId: null,
         action: "service.workflow_run.create",
         entityType: "workflow_run",
-        entityId: String(result.id),
-        details: input,
+        details: { status: input.status, triggerSource: sanitizeText(input.triggerSource) },
       });
       res.json(result);
     } catch (err) {
@@ -162,16 +163,21 @@ export function registerFabOperationsRoutes(app: Application, limiter?: RequestH
 
   app.patch("/api/fab/operations/workflow-runs/:id", async (req, res) => {
     try {
-      const input = serviceWorkflowRunUpdateSchema.parse({ ...req.body, id: Number(req.params.id) });
+      const input = workflowRunUpdateSchema.parse({ ...req.body, id: Number(req.params.id) });
       const { id, ...data } = input;
-      await updateWorkflowRun(id, data);
-      await recordAuditEvent({
+      if (Object.keys(data).length === 0) {
+        respondServiceError(res, 400, "empty_update", "At least one workflow run field must be provided.");
+        return;
+      }
+      if (!await updateWorkflowRunWithAudit(id, data, {
         actorUserId: null,
         action: "service.workflow_run.update",
         entityType: "workflow_run",
-        entityId: String(id),
-        details: data,
-      });
+        details: { changedFields: Object.keys(data).sort() },
+      })) {
+        respondServiceError(res, 404, "workflow_run_not_found", "Workflow run was not found.");
+        return;
+      }
       res.json({ success: true });
     } catch (err) {
       handleServiceError(res, err);
@@ -181,7 +187,7 @@ export function registerFabOperationsRoutes(app: Application, limiter?: RequestH
   app.post("/api/fab/operations/documents", async (req, res) => {
     try {
       const input = bookkeepingDocumentRegisterSchema.parse(req.body);
-      const result = await createBookkeepingDocument({
+      const result = await createBookkeepingDocumentWithAudit({
         source: sanitizeText(input.source),
         sourceDocumentId: input.sourceDocumentId ? sanitizeText(input.sourceDocumentId) : null,
         originalFilename: sanitizeText(input.originalFilename),
@@ -200,13 +206,11 @@ export function registerFabOperationsRoutes(app: Application, limiter?: RequestH
         ocrText: input.ocrText || null,
         extractedData: input.extractedData || null,
         metadata: input.metadata || null,
-      });
-      await recordAuditEvent({
+      }, {
         actorUserId: null,
         action: "service.document.register",
         entityType: "bookkeeping_document",
-        entityId: String(result.id),
-        details: { source: input.source, sourceDocumentId: input.sourceDocumentId },
+        details: { source: input.source },
       });
       res.json(result);
     } catch (err) {
@@ -218,33 +222,57 @@ export function registerFabOperationsRoutes(app: Application, limiter?: RequestH
     try {
       const input = bookkeepingDocumentUpdateSchema.parse({ ...req.body, id: Number(req.params.id) });
       const { id, ...data } = input;
-      await updateBookkeepingDocument(id, {
+      if (Object.keys(data).length === 0) {
+        respondServiceError(res, 400, "empty_update", "At least one document field must be provided.");
+        return;
+      }
+      const updated = await updateBookkeepingDocumentWithAudit(id, {
         source: data.source ? sanitizeText(data.source) : undefined,
-        sourceDocumentId: data.sourceDocumentId ? sanitizeText(data.sourceDocumentId) : undefined,
+        sourceDocumentId: data.sourceDocumentId === undefined || data.sourceDocumentId === null
+          ? data.sourceDocumentId
+          : sanitizeText(data.sourceDocumentId),
         originalFilename: data.originalFilename ? sanitizeText(data.originalFilename) : undefined,
-        mimeType: data.mimeType ? sanitizeText(data.mimeType) : undefined,
-        storagePath: data.storagePath ? sanitizeText(data.storagePath) : undefined,
+        mimeType: data.mimeType === undefined || data.mimeType === null
+          ? data.mimeType
+          : sanitizeText(data.mimeType),
+        storagePath: data.storagePath === undefined || data.storagePath === null
+          ? data.storagePath
+          : sanitizeText(data.storagePath),
         documentType: data.documentType,
         processingStatus: data.processingStatus,
-        duplicateFingerprint: data.duplicateFingerprint ? sanitizeText(data.duplicateFingerprint) : undefined,
+        duplicateFingerprint: data.duplicateFingerprint === undefined || data.duplicateFingerprint === null
+          ? data.duplicateFingerprint
+          : sanitizeText(data.duplicateFingerprint),
         duplicateOfDocumentId: data.duplicateOfDocumentId,
-        vendorName: data.vendorName ? sanitizeText(data.vendorName) : undefined,
-        category: data.category ? sanitizeText(data.category) : undefined,
+        vendorName: data.vendorName === undefined || data.vendorName === null
+          ? data.vendorName
+          : sanitizeText(data.vendorName),
+        category: data.category === undefined || data.category === null
+          ? data.category
+          : sanitizeText(data.category),
         transactionDate: data.transactionDate,
-        totalAmount: data.totalAmount?.toFixed(2),
-        vatAmount: data.vatAmount?.toFixed(2),
-        confidenceScore: data.confidenceScore?.toFixed(4),
+        totalAmount: data.totalAmount === undefined || data.totalAmount === null
+          ? data.totalAmount
+          : data.totalAmount.toFixed(2),
+        vatAmount: data.vatAmount === undefined || data.vatAmount === null
+          ? data.vatAmount
+          : data.vatAmount.toFixed(2),
+        confidenceScore: data.confidenceScore === undefined || data.confidenceScore === null
+          ? data.confidenceScore
+          : data.confidenceScore.toFixed(4),
         ocrText: data.ocrText,
         extractedData: data.extractedData,
         metadata: data.metadata,
-      });
-      await recordAuditEvent({
+      }, {
         actorUserId: null,
         action: "service.document.update",
         entityType: "bookkeeping_document",
-        entityId: String(id),
-        details: data,
+        details: { changedFields: Object.keys(data).sort() },
       });
+      if (!updated) {
+        respondServiceError(res, 404, "bookkeeping_document_not_found", "Bookkeeping document was not found.");
+        return;
+      }
       res.json({ success: true });
     } catch (err) {
       handleServiceError(res, err);
@@ -254,19 +282,17 @@ export function registerFabOperationsRoutes(app: Application, limiter?: RequestH
   app.post("/api/fab/operations/review-items", async (req, res) => {
     try {
       const input = reviewItemCreateSchema.parse(req.body);
-      const result = await addReviewItem({
+      const result = await addReviewItemWithAudit({
         documentId: input.documentId || null,
         reason: sanitizeText(input.reason),
         details: input.details ? sanitizeText(input.details) : null,
         status: input.status,
         correctedData: input.correctedData || null,
-      });
-      await recordAuditEvent({
+      }, {
         actorUserId: null,
         action: "service.review_item.create",
         entityType: "review_item",
-        entityId: String(result.id),
-        details: { documentId: input.documentId || null, reason: input.reason },
+        details: { documentId: input.documentId || null, status: input.status },
       });
       res.json(result);
     } catch (err) {
@@ -277,7 +303,7 @@ export function registerFabOperationsRoutes(app: Application, limiter?: RequestH
   app.post("/api/fab/operations/routing-attempts", async (req, res) => {
     try {
       const input = routingAttemptCreateSchema.parse(req.body);
-      const result = await createRoutingAttempt({
+      const result = await createRoutingAttemptWithAudit({
         documentId: input.documentId || null,
         bookkeepingRecordId: input.bookkeepingRecordId || null,
         workflowRunId: input.workflowRunId || null,
@@ -286,12 +312,10 @@ export function registerFabOperationsRoutes(app: Application, limiter?: RequestH
         externalId: input.externalId ? sanitizeText(input.externalId) : null,
         message: input.message ? sanitizeText(input.message) : null,
         metadata: input.metadata || null,
-      });
-      await recordAuditEvent({
+      }, {
         actorUserId: null,
         action: "service.routing_attempt.create",
         entityType: "routing_attempt",
-        entityId: String(result.id),
         details: {
           documentId: input.documentId || null,
           bookkeepingRecordId: input.bookkeepingRecordId || null,
@@ -308,7 +332,7 @@ export function registerFabOperationsRoutes(app: Application, limiter?: RequestH
   app.post("/api/fab/operations/reconciliation-matches", async (req, res) => {
     try {
       const input = reconciliationMatchCreateSchema.parse(req.body);
-      const result = await createReconciliationMatch({
+      const result = await createReconciliationMatchWithAudit({
         documentId: input.documentId || null,
         bankTransactionId: sanitizeText(input.bankTransactionId),
         status: input.status,
@@ -316,17 +340,11 @@ export function registerFabOperationsRoutes(app: Application, limiter?: RequestH
         amountDifference: input.amountDifference?.toFixed(2),
         matchedAt: input.matchedAt || (input.status === "matched" ? new Date() : null),
         metadata: input.metadata || null,
-      });
-      await recordAuditEvent({
+      }, {
         actorUserId: null,
         action: "service.reconciliation_match.create",
         entityType: "reconciliation_match",
-        entityId: String(result.id),
-        details: {
-          documentId: input.documentId || null,
-          bankTransactionId: input.bankTransactionId,
-          status: input.status,
-        },
+        details: { documentId: input.documentId || null, status: input.status },
       });
       res.json(result);
     } catch (err) {

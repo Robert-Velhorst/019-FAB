@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { startVisiblePoll } from "@/hooks/visiblePoll";
 import {
   AlertCircle,
   CheckCircle2,
@@ -82,9 +83,12 @@ export function FabGmailSetupDrawer({
 
   useEffect(() => {
     if (!open || !authorizationInProgress) return;
-    const interval = window.setInterval(() => { void onRefresh(); }, 2500);
-    return () => window.clearInterval(interval);
-  }, [authorizationInProgress, onRefresh, open]);
+    return startVisiblePoll(onRefresh, {
+      intervalMs: 10_000,
+      initialDelayMs: 3_000,
+      onError: (cause) => setError(cause instanceof Error ? cause.message : copy("Gmail status could not be refreshed.", "Gmailstatus kon niet worden vernieuwd.")),
+    });
+  }, [authorizationInProgress, copy, onRefresh, open]);
 
   if (!open) return null;
 

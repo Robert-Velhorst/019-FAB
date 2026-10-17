@@ -14,6 +14,18 @@ MAX_HAI_DOCUMENT_ID = 2**63 - 1
 MAX_HAI_PAYLOAD_BYTES = 1024 * 1024
 MAX_HAI_PAYLOAD_DEPTH = 32
 MAX_HAI_PAYLOAD_VALUES = 10_000
+EXTERNAL_SUBMISSION_STATES = {
+    "already_executed",
+    "approved_not_executed",
+    "executed",
+    "not_executed",
+    "policy_gated",
+    "policy_gated_browser_execution",
+    "rejected_not_executed",
+    "unknown",
+    "user_owned_oauth_consent",
+    "verified_readback",
+}
 DEFAULT_HAI_COMMAND_IDS = (
     "rescan_intake",
     "process_imported",
@@ -242,6 +254,11 @@ class LocalHaiConnector:
             or self.config.get("fab_operations_api_token")
             or self.config.get("operations_api_token")
         )
+        self.hai_token_configured = bool(
+            self.config.get("fab_hai_api_token")
+            or self.config.get("operations_hai_api_token")
+            or self.config.get("hai_api_token")
+        )
         self.allowed_command_ids = _allowed_commands(self.config.get("fab_hai_allowed_commands"))
         self._commands = {command.command_id: command for command in HAI_COMMANDS}
 
@@ -259,6 +276,15 @@ class LocalHaiConnector:
             ),
             "transport": "authenticated_local_http" if self.api_token_configured else "loopback_local_http",
             "authentication": "bearer_token" if self.api_token_configured else "loopback_origin_controls",
+            "haiAuthentication": (
+                "dedicated_bearer_token"
+                if self.hai_token_configured
+                else "operator_bearer_token"
+                if self.api_token_configured
+                else "loopback_origin_controls"
+            ),
+            "dedicatedHaiTokenConfigured": self.hai_token_configured,
+            "remoteAuthenticationConfigured": self.api_token_configured and self.hai_token_configured,
             "sourceOfTruth": "fab_local_ledger",
             "idempotencyField": "requestId",
             "idempotencyPolicy": "single_execution_fail_closed",
@@ -297,16 +323,6 @@ class LocalHaiConnector:
                     "path": "/api/drive-wave/work-orders",
                     "mode": "read_only_executor_handoff",
                     "externalSubmission": "not_executed",
-                },
-                {
-                    "resourceId": "wave_attachment_binary_readback",
-                    "label": "Wave attachment binary readback",
-                    "description": "Submit the receipt downloaded from one uniquely matched, reviewed Wave transaction so FAB verifies its entry binding, hash, size, filename, and bookkeeping evidence.",
-                    "method": "POST",
-                    "pathTemplate": "/api/drive-wave/documents/{documentId}/attachment-readback",
-                    "contentType": "multipart/form-data",
-                    "mode": "governed_binary_evidence",
-                    "externalSubmission": "verified_readback",
                 },
                 {
                     "resourceId": "wave_receipt_executor_status",
@@ -368,6 +384,9 @@ class LocalHaiConnector:
             "status": manifest["status"],
             "allowedCommandIds": sorted(self.allowed_command_ids) if self.enabled else [],
             "availableExecutors": sorted(self.executors),
+            "haiAuthentication": manifest["haiAuthentication"],
+            "dedicatedHaiTokenConfigured": self.hai_token_configured,
+            "remoteAuthenticationConfigured": self.api_token_configured and self.hai_token_configured,
             "commandCount": len(manifest["commands"]),
             "resourceCount": len(manifest["resources"]),
             "externalSubmission": "not_executed",
@@ -501,7 +520,7 @@ class LocalHaiConnector:
                 "commandId": command_id,
                 "error": "This HAI request is already executing.",
                 "retryAfter": lease.get("expiresAt"),
-                "externalSubmission": "not_executed",
+                "externalSubmission": _indeterminate_external_submission(command),
             }
 
         try:
@@ -526,7 +545,7 @@ class LocalHaiConnector:
                         "Inspect the correlated audit event before retrying with a new requestId."
                     ),
                     "auditEventId": requested.get("id"),
-                    "externalSubmission": "not_executed",
+                    "externalSubmission": _indeterminate_external_submission(command),
                 }
 
             self.ledger.record_audit_event({
@@ -544,6 +563,7 @@ class LocalHaiConnector:
             try:
                 result = self.executors[command_id](_capture_hai_payload(normalized_payload), actor)
             except Exception as exc:
+                external_submission = _indeterminate_external_submission(command)
                 audit_event_id = self.ledger.record_audit_event({
                     "action": "hai.command.failed",
                     "entityType": "hai_command_request",
@@ -554,7 +574,7 @@ class LocalHaiConnector:
                         "actor": actor,
                         "payload": normalized_payload,
                         "errorType": type(exc).__name__,
-                        "externalSubmission": "not_executed",
+                        "externalSubmission": external_submission,
                     },
                 })
                 return {
@@ -566,7 +586,66 @@ class LocalHaiConnector:
                     "errorCode": "executor_failed",
                     "errorType": type(exc).__name__,
                     "auditEventId": audit_event_id,
-                    "externalSubmission": "not_executed",
+                    "externalSubmission": external_submission,
+                }
+
+            if not isinstance(result, dict):
+                external_submission = _indeterminate_external_submission(command)
+                audit_event_id = self.ledger.record_audit_event({
+                    "action": "hai.command.failed",
+                    "entityType": "hai_command_request",
+                    "entityId": request_id,
+                    "details": {
+                        "requestId": request_id,
+                        "commandId": command_id,
+                        "actor": actor,
+                        "payload": normalized_payload,
+                        "errorType": "invalid_executor_result",
+                        "externalSubmission": external_submission,
+                    },
+                })
+                return {
+                    "success": False,
+                    "status": "failed",
+                    "requestId": request_id,
+                    "commandId": command_id,
+                    "error": "Command returned an invalid result; inspect the correlated local audit event.",
+                    "errorCode": "invalid_executor_result",
+                    "auditEventId": audit_event_id,
+                    "externalSubmission": external_submission,
+                }
+
+            external_submission = _command_external_submission(command, result)
+            if isinstance(result, dict) and result.get("success") is False:
+                audit_event_id = self.ledger.record_audit_event({
+                    "action": "hai.command.failed",
+                    "entityType": "hai_command_request",
+                    "entityId": request_id,
+                    "details": {
+                        "requestId": request_id,
+                        "commandId": command_id,
+                        "actor": actor,
+                        "payload": normalized_payload,
+                        "result": result,
+                        "errorCode": result.get("errorCode") or "executor_reported_failure",
+                        "externalSubmission": external_submission,
+                    },
+                })
+                outcome_status = (
+                    result.get("status")
+                    if result.get("status") in {"blocked", "needs_review"}
+                    else "failed"
+                )
+                return {
+                    "success": False,
+                    "status": outcome_status,
+                    "requestId": request_id,
+                    "commandId": command_id,
+                    "error": "Command returned a non-success outcome; inspect the correlated local audit event.",
+                    "errorCode": result.get("errorCode") or "executor_reported_failure",
+                    "result": result,
+                    "auditEventId": audit_event_id,
+                    "externalSubmission": external_submission,
                 }
 
             audit_event_id = self.ledger.record_audit_event({
@@ -579,7 +658,7 @@ class LocalHaiConnector:
                     "actor": actor,
                     "payload": normalized_payload,
                     "result": result,
-                    "externalSubmission": "not_executed",
+                    "externalSubmission": external_submission,
                 },
             })
             return {
@@ -589,7 +668,7 @@ class LocalHaiConnector:
                 "commandId": command_id,
                 "result": result,
                 "auditEventId": audit_event_id,
-                "externalSubmission": "not_executed",
+                "externalSubmission": external_submission,
             }
         finally:
             self.ledger.release_runtime_lease(lease_name, owner_token)
@@ -616,7 +695,10 @@ class LocalHaiConnector:
                 "commandId": details.get("commandId") or command_id,
                 "result": details.get("result") or {},
                 "auditEventId": completed.get("id"),
-                "externalSubmission": "not_executed",
+                "externalSubmission": _valid_external_submission(
+                    details.get("externalSubmission"),
+                    self._commands[command_id],
+                ),
             }
 
         failed = self.ledger.find_audit_event(
@@ -638,7 +720,11 @@ class LocalHaiConnector:
             "errorCode": "executor_failed",
             "errorType": details.get("errorType"),
             "auditEventId": failed.get("id"),
-            "externalSubmission": "not_executed",
+            "externalSubmission": _valid_external_submission(
+                details.get("externalSubmission"),
+                self._commands[command_id],
+            ),
+            **({"result": details["result"]} if isinstance(details.get("result"), dict) else {}),
         }
 
     @staticmethod
@@ -702,6 +788,23 @@ def _allowed_commands(value: Any) -> set:
         for item in raw_values
         if str(item).strip() in known
     }
+
+
+def _indeterminate_external_submission(command: HaiCommand) -> str:
+    return "unknown" if command.external_submission != "not_executed" else "not_executed"
+
+
+def _command_external_submission(command: HaiCommand, result: Any) -> str:
+    if command.external_submission == "not_executed":
+        return "not_executed"
+    value = result.get("externalSubmission") if isinstance(result, dict) else None
+    return _valid_external_submission(value, command)
+
+
+def _valid_external_submission(value: Any, command: HaiCommand) -> str:
+    if isinstance(value, str) and value in EXTERNAL_SUBMISSION_STATES:
+        return value
+    return _indeterminate_external_submission(command)
 
 
 def _bool_config(value: Any, default: bool = False) -> bool:
@@ -813,12 +916,18 @@ def _normalize_payload(command_id: str, payload: Dict[str, Any]) -> Dict[str, An
         normalized["sources"] = normalized_sources
     for field in ("fromDate", "toDate", "targetSystem"):
         if field in payload:
-            value = str(payload[field] or "").strip()
+            if not isinstance(payload[field], str):
+                raise ValueError(f"{field} must be a string.")
+            value = payload[field].strip()
             if not value:
+                if field in {"fromDate", "toDate"}:
+                    raise ValueError(f"{field} must be an ISO date in YYYY-MM-DD format.")
                 continue
             if len(value) > 100:
                 raise ValueError(f"{field} must be at most 100 characters.")
             if field in {"fromDate", "toDate"}:
+                if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+                    raise ValueError(f"{field} must be an ISO date in YYYY-MM-DD format.")
                 try:
                     date.fromisoformat(value)
                 except ValueError:

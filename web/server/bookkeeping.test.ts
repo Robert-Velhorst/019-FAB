@@ -28,11 +28,16 @@ vi.mock("./db", () => ({
     activeWorkflowRuns: 1,
   }),
   createBookkeepingDocument: vi.fn().mockResolvedValue({ id: 12 }),
+  createBookkeepingDocumentWithAudit: vi.fn().mockResolvedValue({ id: 12 }),
   addReviewItem: vi.fn().mockResolvedValue({ id: 23 }),
+  addReviewItemWithAudit: vi.fn().mockResolvedValue({ id: 23 }),
   createWorkflowRun: vi.fn().mockResolvedValue({ id: 34 }),
-  updateWorkflowRun: vi.fn().mockResolvedValue(undefined),
+  createWorkflowRunWithAudit: vi.fn().mockResolvedValue({ id: 34 }),
+  updateWorkflowRun: vi.fn().mockResolvedValue(true),
+  updateWorkflowRunWithAudit: vi.fn().mockResolvedValue(true),
   getWorkflowRunById: vi.fn().mockResolvedValue(null),
   createRoutingAttempt: vi.fn().mockResolvedValue({ id: 45 }),
+  createRoutingAttemptWithAudit: vi.fn().mockResolvedValue({ id: 45 }),
   recordAuditEvent: vi.fn().mockResolvedValue(undefined),
   getReviewQueue: vi.fn().mockResolvedValue([]),
   getRecentWorkflowRuns: vi.fn().mockResolvedValue([]),
@@ -61,7 +66,7 @@ vi.mock("./db", () => ({
       createdAt: new Date("2026-06-04T11:00:00Z"),
     },
   ]),
-  updateReviewItemStatus: vi.fn().mockResolvedValue(undefined),
+  updateReviewItemStatus: vi.fn().mockResolvedValue(true),
 }));
 
 vi.mock("./_core/notification", () => ({
@@ -79,9 +84,13 @@ vi.mock("./stripe/stripe", () => ({
 
 import {
   addReviewItem,
+  addReviewItemWithAudit,
   createBookkeepingDocument,
+  createBookkeepingDocumentWithAudit,
   createRoutingAttempt,
+  createRoutingAttemptWithAudit,
   createWorkflowRun,
+  createWorkflowRunWithAudit,
   getBookkeepingOverview,
   getRecentAuditEvents,
   getRecentReconciliationMatches,
@@ -90,6 +99,7 @@ import {
   recordAuditEvent,
   updateReviewItemStatus,
   updateWorkflowRun,
+  updateWorkflowRunWithAudit,
 } from "./db";
 
 function createAdminContext(): TrpcContext {
@@ -686,21 +696,19 @@ describe("bookkeeping operations router", () => {
     expect(result.plan.status).toBe("ready");
     expect(result.operations.length).toBe(result.plan.steps.length);
     expect(result.operations.map((operation) => operation.actionId)).toContain("report_table_read");
-    expect(createWorkflowRun).toHaveBeenCalledWith(
+    expect(createWorkflowRunWithAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         status: "completed",
         triggerSource: "automation:daily_reconciliation_run",
         documentsProcessed: result.operations.length,
         documentsNeedingReview: 0,
-      })
-    );
-    expect(recordAuditEvent).toHaveBeenCalledWith(
+      }),
       expect.objectContaining({
         action: "automation_workflow.dry_run",
         entityType: "automation_workflow",
-        entityId: "34",
-      })
+      }),
     );
+    expect(recordAuditEvent).not.toHaveBeenCalledWith(expect.objectContaining({ action: "automation_workflow.dry_run" }));
   });
 
   it("dry-runs queued MijnGeldzaken master-ledger workflows as downstream operation batches", async () => {
@@ -733,21 +741,19 @@ describe("bookkeeping operations router", () => {
     expect(new Set(result.operations.map((operation) => operation.targetSystem))).toEqual(new Set(["mijngeldzaken"]));
     expect(result.operations.every((operation) => operation.operationId.startsWith("mijngeldzaken:"))).toBe(true);
     expect(result.operations.map((operation) => operation.actionId)).toContain("transaction_import_prepare");
-    expect(createWorkflowRun).toHaveBeenCalledWith(
+    expect(createWorkflowRunWithAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         status: "completed",
         triggerSource: "automation:mijngeldzaken_master_ledger_sync",
         documentsProcessed: result.operations.length,
         documentsNeedingReview: 0,
-      })
-    );
-    expect(recordAuditEvent).toHaveBeenCalledWith(
+      }),
       expect.objectContaining({
         action: "automation_workflow.dry_run",
         entityType: "automation_workflow",
-        entityId: "34",
-      })
+      }),
     );
+    expect(recordAuditEvent).not.toHaveBeenCalledWith(expect.objectContaining({ action: "automation_workflow.dry_run" }));
   });
 
   it("blocks autonomous workflow queueing when required signals are missing", async () => {
@@ -768,21 +774,19 @@ describe("bookkeeping operations router", () => {
     expect(result.workflowRunId).toBe(34);
     expect(result.plan.missingSignals).toContain("account_scope");
     expect(result.operations.length).toBe(result.plan.steps.length);
-    expect(createWorkflowRun).toHaveBeenCalledWith(
+    expect(createWorkflowRunWithAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         status: "completed_with_review",
         triggerSource: "automation:daily_reconciliation_run",
         documentsProcessed: result.operations.length,
-      })
-    );
-    expect(recordAuditEvent).toHaveBeenCalledWith(
+      }),
       expect.objectContaining({
         action: "automation_workflow.blocked",
         entityType: "automation_workflow",
-        entityId: "34",
-      })
+      }),
     );
-    expect(addReviewItem).toHaveBeenCalledWith(
+    expect(recordAuditEvent).not.toHaveBeenCalledWith(expect.objectContaining({ action: "automation_workflow.blocked" }));
+    expect(addReviewItemWithAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         documentId: null,
         reason: "autonomous_wave_workflow_blocked",
@@ -793,7 +797,8 @@ describe("bookkeeping operations router", () => {
           source: "automation_workflow.blocked",
           missingSignals: expect.arrayContaining(["account_scope"]),
         }),
-      })
+      }),
+      expect.objectContaining({ action: "review_item.create_autonomous_exception" }),
     );
     expect(recordAuditEvent).not.toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1326,7 +1331,7 @@ describe("bookkeeping operations router", () => {
 
     expect(result.status).toBe("updated");
     expect(result.workflowRun?.status).toBe("completed");
-    expect(updateWorkflowRun).toHaveBeenCalledWith(
+    expect(updateWorkflowRunWithAudit).toHaveBeenCalledWith(
       101,
       expect.objectContaining({
         status: "completed",
@@ -1338,14 +1343,19 @@ describe("bookkeeping operations router", () => {
             status: "succeeded",
           }),
         }),
-      })
+      }),
+      expect.objectContaining({ action: "automation_workflow.operation_update" }),
+      expect.objectContaining({ expectedMetadata: expect.any(Object) }),
     );
-    expect(recordAuditEvent).toHaveBeenCalledWith(
+    expect(updateWorkflowRunWithAudit).toHaveBeenCalledWith(
+      101,
+      expect.any(Object),
       expect.objectContaining({
         action: "automation_workflow.operation_update",
         entityType: "automation_workflow_operation",
         entityId: "wave:read",
-      })
+      }),
+      expect.objectContaining({ expectedMetadata: expect.any(Object) }),
     );
   });
 
@@ -1397,7 +1407,7 @@ describe("bookkeeping operations router", () => {
     expect(result.status).toBe("claimed");
     expect(result.operation?.operationId).toBe("wave:read");
     expect(result.operation?.status).toBe("running");
-    expect(updateWorkflowRun).toHaveBeenCalledWith(
+    expect(updateWorkflowRunWithAudit).toHaveBeenCalledWith(
       101,
       expect.objectContaining({
         status: "running",
@@ -1409,14 +1419,61 @@ describe("bookkeeping operations router", () => {
             actor: "browser_executor",
           }),
         }),
-      })
+      }),
+      expect.objectContaining({ action: "automation_workflow.operation_claim" }),
+      expect.objectContaining({ expectedMetadata: expect.any(Object) }),
     );
-    expect(recordAuditEvent).toHaveBeenCalledWith(
+    expect(updateWorkflowRunWithAudit).toHaveBeenCalledWith(
+      101,
+      expect.any(Object),
       expect.objectContaining({
         action: "automation_workflow.operation_claim",
         entityType: "automation_workflow_operation",
         entityId: "wave:read",
-      })
+      }),
+      expect.objectContaining({ expectedMetadata: expect.any(Object) }),
+    );
+  });
+
+  it("returns a conflict instead of claiming a workflow changed by another executor", async () => {
+    const metadata = {
+      workflowId: "daily_reconciliation_run",
+      operations: [{
+        operationId: "wave:read",
+        stepId: "read_ledger_rows",
+        surfaceId: "reports",
+        actionId: "report_table_read",
+        mode: "read",
+        safety: "read_only",
+        status: "pending",
+      }],
+    };
+    vi.mocked(getWorkflowRunById).mockResolvedValueOnce({
+      id: 101,
+      status: "queued",
+      triggerSource: "automation:daily_reconciliation_run",
+      documentsImported: 0,
+      documentsProcessed: 1,
+      documentsNeedingReview: 0,
+      errorMessage: null,
+      startedAt: new Date("2026-06-28T10:00:00Z"),
+      finishedAt: null,
+      createdAt: new Date("2026-06-28T10:00:00Z"),
+      metadata,
+    });
+    vi.mocked(updateWorkflowRunWithAudit).mockResolvedValueOnce(false);
+    const caller = appRouter.createCaller(createAdminContext());
+
+    await expect(caller.bookkeeping.claimAutomationWorkflowOperation({
+      workflowRunId: 101,
+      actor: "browser_executor",
+      leaseSeconds: 120,
+    })).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(updateWorkflowRunWithAudit).toHaveBeenCalledWith(
+      101,
+      expect.any(Object),
+      expect.any(Object),
+      { expectedMetadata: metadata },
     );
   });
 
@@ -1458,7 +1515,7 @@ describe("bookkeeping operations router", () => {
     expect(result.status).toBe("executed");
     expect(result.operation?.status).toBe("succeeded");
     expect(result.workflowRun?.status).toBe("completed");
-    expect(updateWorkflowRun).toHaveBeenCalledWith(
+    expect(updateWorkflowRunWithAudit).toHaveBeenCalledWith(
       101,
       expect.objectContaining({
         status: "completed",
@@ -1470,14 +1527,19 @@ describe("bookkeeping operations router", () => {
             status: "succeeded",
           }),
         }),
-      })
+      }),
+      expect.objectContaining({ action: "automation_workflow.executor_cycle" }),
+      expect.objectContaining({ expectedMetadata: expect.any(Object) }),
     );
-    expect(recordAuditEvent).toHaveBeenCalledWith(
+    expect(updateWorkflowRunWithAudit).toHaveBeenCalledWith(
+      101,
+      expect.any(Object),
       expect.objectContaining({
         action: "automation_workflow.executor_cycle",
         entityType: "automation_workflow_operation",
         entityId: "wave:read",
-      })
+      }),
+      expect.objectContaining({ expectedMetadata: expect.any(Object) }),
     );
   });
 
@@ -1521,7 +1583,7 @@ describe("bookkeeping operations router", () => {
     expect(result.operation?.status).toBe("succeeded");
     expect(result.operation?.evidence).toEqual(expect.objectContaining({ targetSystem: "mijngeldzaken" }));
     expect(result.workflowRun?.status).toBe("completed");
-    expect(updateWorkflowRun).toHaveBeenCalledWith(
+    expect(updateWorkflowRunWithAudit).toHaveBeenCalledWith(
       101,
       expect.objectContaining({
         status: "completed",
@@ -1533,14 +1595,19 @@ describe("bookkeeping operations router", () => {
             status: "succeeded",
           }),
         }),
-      })
+      }),
+      expect.objectContaining({ action: "automation_workflow.executor_cycle" }),
+      expect.objectContaining({ expectedMetadata: expect.any(Object) }),
     );
-    expect(recordAuditEvent).toHaveBeenCalledWith(
+    expect(updateWorkflowRunWithAudit).toHaveBeenCalledWith(
+      101,
+      expect.any(Object),
       expect.objectContaining({
         action: "automation_workflow.executor_cycle",
         entityType: "automation_workflow_operation",
         entityId: "mijngeldzaken:read",
-      })
+      }),
+      expect.objectContaining({ expectedMetadata: expect.any(Object) }),
     );
   });
 
@@ -1589,13 +1656,15 @@ describe("bookkeeping operations router", () => {
       draftPrepared: true,
     }));
     expect(result.workflowRun?.status).toBe("completed");
-    expect(updateWorkflowRun).toHaveBeenCalledWith(
+    expect(updateWorkflowRunWithAudit).toHaveBeenCalledWith(
       101,
       expect.objectContaining({
         status: "completed",
         documentsNeedingReview: 0,
         errorMessage: null,
-      })
+      }),
+      expect.objectContaining({ action: "automation_workflow.executor_cycle" }),
+      expect.objectContaining({ expectedMetadata: expect.any(Object) }),
     );
   });
 
@@ -1667,13 +1736,15 @@ describe("bookkeeping operations router", () => {
       checksum: result.operation?.masterLedgerChecksum,
     }));
     expect(result.workflowRun?.status).toBe("completed");
-    expect(updateWorkflowRun).toHaveBeenCalledWith(
+    expect(updateWorkflowRunWithAudit).toHaveBeenCalledWith(
       101,
       expect.objectContaining({
         status: "completed",
         documentsNeedingReview: 0,
         errorMessage: null,
-      })
+      }),
+      expect.objectContaining({ action: "automation_workflow.executor_cycle" }),
+      expect.objectContaining({ expectedMetadata: expect.any(Object) }),
     );
   });
 
@@ -1715,22 +1786,27 @@ describe("bookkeeping operations router", () => {
     expect(result.status).toBe("blocked");
     expect(result.operation?.status).toBe("blocked");
     expect(result.workflowRun?.status).toBe("completed_with_review");
-    expect(updateWorkflowRun).toHaveBeenCalledWith(
+    expect(updateWorkflowRunWithAudit).toHaveBeenCalledWith(
       101,
       expect.objectContaining({
         status: "completed_with_review",
         documentsNeedingReview: 1,
         errorMessage: expect.stringContaining("requires a dedicated"),
-      })
+      }),
+      expect.objectContaining({ action: "automation_workflow.executor_cycle" }),
+      expect.objectContaining({ expectedMetadata: expect.any(Object) }),
     );
-    expect(recordAuditEvent).toHaveBeenCalledWith(
+    expect(updateWorkflowRunWithAudit).toHaveBeenCalledWith(
+      101,
+      expect.any(Object),
       expect.objectContaining({
         action: "automation_workflow.executor_cycle",
         entityType: "automation_workflow_operation",
         entityId: "wave:send",
-      })
+      }),
+      expect.objectContaining({ expectedMetadata: expect.any(Object) }),
     );
-    expect(addReviewItem).toHaveBeenCalledWith(
+    expect(addReviewItemWithAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         documentId: null,
         reason: "autonomous_wave_workflow_blocked",
@@ -1742,7 +1818,8 @@ describe("bookkeeping operations router", () => {
           operationId: "wave:send",
           actionId: "invoice_send",
         }),
-      })
+      }),
+      expect.objectContaining({ action: "review_item.create_autonomous_exception" }),
     );
   });
 
@@ -1795,7 +1872,7 @@ describe("bookkeeping operations router", () => {
     expect(result.operations).toHaveLength(2);
     expect(result.operations.map((operation) => operation.status)).toEqual(["succeeded", "succeeded"]);
     expect(result.workflowRun?.status).toBe("completed");
-    expect(updateWorkflowRun).toHaveBeenCalledWith(
+    expect(updateWorkflowRunWithAudit).toHaveBeenCalledWith(
       101,
       expect.objectContaining({
         status: "completed",
@@ -1807,14 +1884,18 @@ describe("bookkeeping operations router", () => {
             operationCount: 2,
           }),
         }),
-      })
+      }),
+      expect.objectContaining({ action: "automation_workflow.executor_loop" }),
+      expect.objectContaining({ expectedMetadata: expect.any(Object) }),
     );
-    expect(recordAuditEvent).toHaveBeenCalledWith(
+    expect(updateWorkflowRunWithAudit).toHaveBeenCalledWith(
+      101,
+      expect.any(Object),
       expect.objectContaining({
         action: "automation_workflow.executor_loop",
         entityType: "automation_workflow",
-        entityId: "101",
-      })
+      }),
+      expect.objectContaining({ expectedMetadata: expect.any(Object) }),
     );
   });
 
@@ -1867,15 +1948,17 @@ describe("bookkeeping operations router", () => {
     expect(result.operations).toHaveLength(2);
     expect(result.operations.map((operation) => operation.status)).toEqual(["succeeded", "blocked"]);
     expect(result.workflowRun?.status).toBe("completed_with_review");
-    expect(updateWorkflowRun).toHaveBeenCalledWith(
+    expect(updateWorkflowRunWithAudit).toHaveBeenCalledWith(
       101,
       expect.objectContaining({
         status: "completed_with_review",
         documentsNeedingReview: 1,
         errorMessage: expect.stringContaining("requires a dedicated"),
-      })
+      }),
+      expect.objectContaining({ action: "automation_workflow.executor_loop" }),
+      expect.objectContaining({ expectedMetadata: expect.any(Object) }),
     );
-    expect(addReviewItem).toHaveBeenCalledWith(
+    expect(addReviewItemWithAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         documentId: null,
         reason: "autonomous_wave_workflow_blocked",
@@ -1887,7 +1970,8 @@ describe("bookkeeping operations router", () => {
           operationId: "wave:send",
           actionId: "invoice_send",
         }),
-      })
+      }),
+      expect.objectContaining({ action: "review_item.create_autonomous_exception" }),
     );
   });
 
@@ -1901,17 +1985,23 @@ describe("bookkeeping operations router", () => {
     });
 
     expect(result).toEqual({ id: 34 });
-    expect(createWorkflowRun).toHaveBeenCalledWith({
+    expect(createWorkflowRunWithAudit).toHaveBeenCalledWith({
       status: "running",
       triggerSource: "google_drive",
       metadata: { folder: "sort out" },
-    });
-    expect(recordAuditEvent).toHaveBeenCalledWith(
+    }, expect.objectContaining({
+      actorUserId: 1,
+      action: "workflow_run.create",
+      entityType: "workflow_run",
+      details: { status: "running", triggerSource: "google_drive" },
+    }));
+    expect(recordAuditEvent).not.toHaveBeenCalled();
+    expect(vi.mocked(createWorkflowRunWithAudit).mock.calls[0]?.[1]).toEqual(
       expect.objectContaining({
-        action: "workflow_run.create",
-        entityId: "34",
+        details: { status: "running", triggerSource: "google_drive" },
       })
     );
+    expect(JSON.stringify(vi.mocked(createWorkflowRunWithAudit).mock.calls[0]?.[1])).not.toContain("sort out");
   });
 
   it("updates workflow run counters", async () => {
@@ -1923,14 +2013,43 @@ describe("bookkeeping operations router", () => {
       documentsImported: 4,
       documentsProcessed: 3,
       documentsNeedingReview: 1,
+      errorMessage: "DATABASE_URL=private-db-secret",
     });
 
-    expect(updateWorkflowRun).toHaveBeenCalledWith(34, {
+    expect(updateWorkflowRunWithAudit).toHaveBeenCalledWith(34, {
       status: "completed_with_review",
       documentsImported: 4,
       documentsProcessed: 3,
       documentsNeedingReview: 1,
-    });
+      errorMessage: "DATABASE_URL=private-db-secret",
+    }, expect.objectContaining({
+      actorUserId: 1,
+      action: "workflow_run.update",
+      entityType: "workflow_run",
+      details: {
+        changedFields: ["documentsImported", "documentsNeedingReview", "documentsProcessed", "errorMessage", "status"],
+      },
+    }));
+    expect(recordAuditEvent).not.toHaveBeenCalled();
+    expect(JSON.stringify(vi.mocked(updateWorkflowRunWithAudit).mock.calls[0]?.[2])).not.toContain("private-db-secret");
+  });
+
+  it("returns not found for a workflow run that does not exist", async () => {
+    vi.mocked(updateWorkflowRunWithAudit).mockResolvedValueOnce(false);
+    const caller = appRouter.createCaller(createAdminContext());
+
+    await expect(caller.bookkeeping.updateWorkflowRun({ id: 404, status: "failed" }))
+      .rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(recordAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("rejects an empty workflow update", async () => {
+    const caller = appRouter.createCaller(createAdminContext());
+
+    await expect(caller.bookkeeping.updateWorkflowRun({ id: 34 }))
+      .rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(updateWorkflowRunWithAudit).not.toHaveBeenCalled();
+    expect(recordAuditEvent).not.toHaveBeenCalled();
   });
 
   it("registers a document with sanitized text fields", async () => {
@@ -1950,14 +2069,21 @@ describe("bookkeeping operations router", () => {
     });
 
     expect(result).toEqual({ id: 12 });
-    expect(createBookkeepingDocument).toHaveBeenCalledWith(
+    expect(createBookkeepingDocumentWithAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         originalFilename: "receipt.pdf",
         vendorName: "Vendor",
         totalAmount: "42.50",
         confidenceScore: "0.8700",
+      }),
+      expect.objectContaining({
+        action: "document.register",
+        entityType: "bookkeeping_document",
+        details: { source: "google_drive" },
       })
     );
+    expect(recordAuditEvent).not.toHaveBeenCalled();
+    expect(JSON.stringify(vi.mocked(createBookkeepingDocumentWithAudit).mock.calls[0]?.[1])).not.toContain("file-123");
   });
 
   it("creates and updates review items", async () => {
@@ -1974,14 +2100,30 @@ describe("bookkeeping operations router", () => {
       resolution: "Corrected fields",
     });
 
-    expect(addReviewItem).toHaveBeenCalledWith(
+    expect(addReviewItemWithAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         documentId: 12,
         reason: "validation_failed",
         status: "pending",
-      })
+      }),
+      expect.objectContaining({
+        action: "review_item.create",
+        details: { documentId: 12, status: "pending" },
+      }),
     );
     expect(updateReviewItemStatus).toHaveBeenCalledWith(23, "approved", "Corrected fields", 1);
+    expect(recordAuditEvent).not.toHaveBeenCalled();
+    expect(JSON.stringify(vi.mocked(addReviewItemWithAudit).mock.calls[0]?.[1])).not.toContain("Missing VAT number");
+  });
+
+  it("returns not found when the review item was deleted before the update", async () => {
+    vi.mocked(updateReviewItemStatus).mockResolvedValueOnce(false);
+    const caller = appRouter.createCaller(createAdminContext());
+
+    await expect(caller.bookkeeping.updateReviewStatus({
+      id: 404,
+      status: "approved",
+    })).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
   it("records routing attempts", async () => {
@@ -1996,15 +2138,17 @@ describe("bookkeeping operations router", () => {
     });
 
     expect(result).toEqual({ id: 45 });
-    expect(createRoutingAttempt).toHaveBeenCalledWith(
+    expect(createRoutingAttemptWithAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         documentId: 12,
         workflowRunId: 34,
         target: "waveapps_business",
         status: "submitted",
         externalId: "wave-expense-1",
-      })
+      }),
+      expect.objectContaining({ action: "routing_attempt.create" }),
     );
+    expect(recordAuditEvent).not.toHaveBeenCalled();
   });
 
   it("records bookkeeping-record routing attempts without a document", async () => {
@@ -2019,7 +2163,7 @@ describe("bookkeeping operations router", () => {
     });
 
     expect(result).toEqual({ id: 45 });
-    expect(createRoutingAttempt).toHaveBeenCalledWith(
+    expect(createRoutingAttemptWithAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         documentId: null,
         bookkeepingRecordId: 98,
@@ -2027,16 +2171,15 @@ describe("bookkeeping operations router", () => {
         target: "waveapps_business",
         status: "submitted",
         externalId: "wave-bank-expense-1",
-      })
-    );
-    expect(recordAuditEvent).toHaveBeenCalledWith(
+      }),
       expect.objectContaining({
         action: "routing_attempt.create",
         details: expect.objectContaining({
           documentId: null,
           bookkeepingRecordId: 98,
         }),
-      })
+      }),
     );
+    expect(recordAuditEvent).not.toHaveBeenCalled();
   });
 });

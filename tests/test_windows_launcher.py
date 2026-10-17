@@ -84,6 +84,44 @@ class TestWindowsLauncher(unittest.TestCase):
         script = (ROOT / "Start-FAB.ps1").read_text(encoding="utf-8")
         self.assertIn('The saved FAB dashboard uses a different production port', script)
 
+    def test_production_build_check_handles_hidden_and_missing_artifacts(self):
+        script = (ROOT / "Start-FAB.ps1").read_text(encoding="utf-8")
+        start = script.index("function Test-FabWebBuildCurrent {")
+        end = script.index("\nfunction ", start + 1)
+        helper = script[start:end]
+        shell = shutil.which("pwsh") or shutil.which("powershell")
+        if not shell:
+            self.skipTest("PowerShell is unavailable")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = str(Path(directory) / "web").replace("'", "''")
+            missing_root = str(Path(directory) / "missing").replace("'", "''")
+            command = f"""
+            $ErrorActionPreference = 'Stop'
+            {helper}
+            $webRoot = '{root}'
+            foreach ($path in @('dist\\public', 'client', 'server', 'shared')) {{
+                New-Item -ItemType Directory -Path (Join-Path $webRoot $path) -Force | Out-Null
+            }}
+            foreach ($path in @('dist\\fab-standalone.js', 'dist\\public\\index.html', 'package.json', 'pnpm-lock.yaml', 'vite.config.ts', 'tsconfig.json', 'server\\entry.ts')) {{
+                Set-Content -LiteralPath (Join-Path $webRoot $path) -Value 'test'
+            }}
+            foreach ($path in @('dist\\fab-standalone.js', 'dist\\public\\index.html')) {{
+                $artifact = Join-Path $webRoot $path
+                [IO.File]::SetAttributes($artifact, [IO.File]::GetAttributes($artifact) -bor [IO.FileAttributes]::Hidden)
+                [IO.File]::SetLastWriteTimeUtc($artifact, [DateTime]::UtcNow.AddMinutes(1))
+            }}
+            if (-not (Test-FabWebBuildCurrent -ExpectedWebRoot $webRoot)) {{ throw 'Hidden production artifacts were treated as stale.' }}
+            function Test-Path {{ return $true }}
+            $result = Test-FabWebBuildCurrent -ExpectedWebRoot '{missing_root}'
+            if ($result) {{ throw 'A missing production artifact was treated as current.' }}
+            'verified'
+            """
+            result = subprocess.run([shell, "-NoProfile", "-NonInteractive", "-Command", command],
+                                    capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), "verified")
+
     def test_all_windows_scripts_parse_without_running_them(self):
         shells = {path for name in ("pwsh", "powershell") if (path := shutil.which(name))}
         if not shells:
@@ -111,6 +149,7 @@ class TestWindowsLauncher(unittest.TestCase):
         . '__HELPER__'
         $env:FAB_LOCAL_API_TOKEN = 'original-api'
         $env:FAB_LOCAL_API_TOKEN_FILE = 'original-file'
+        $env:FAB_OPERATIONS_SERVICE_TOKEN_FILE = 'original-operations-file'
         $env:FAB_HAI_API_TOKEN = 'original-hai'
         $env:FAB_HAI_API_TOKEN_FILE = 'original-hai-file'
         $env:JWT_SECRET = 'original-jwt'
@@ -120,19 +159,28 @@ class TestWindowsLauncher(unittest.TestCase):
                 if ($env:FAB_LOCAL_API_TOKEN -ne 'synthetic-api') { throw 'wrong-api' }
                 if ($env:FAB_HAI_API_TOKEN -ne 'synthetic-hai') { throw 'wrong-hai' }
                 if ($env:FAB_LOCAL_API_TOKEN_FILE -or $env:FAB_HAI_API_TOKEN_FILE) { throw 'file-conflict' }
+                $environment = [Environment]::GetEnvironmentVariables('Process')
+                foreach ($name in @('FAB_LOCAL_API_TOKEN_FILE', 'FAB_OPERATIONS_SERVICE_TOKEN_FILE', 'FAB_HAI_API_TOKEN_FILE', 'JWT_SECRET_FILE')) {
+                    if ($environment.Contains($name)) { throw "file-variable-present:$name" }
+                }
                 if ($env:JWT_SECRET -ne 'synthetic-jwt' -or $env:JWT_SECRET_FILE) { throw 'jwt-file-conflict' }
                 throw 'expected-failure'
             }
         } catch { if ($_.Exception.Message -ne 'expected-failure') { throw } }
         if ($env:FAB_LOCAL_API_TOKEN -ne 'original-api') { throw 'leaked-api' }
         if ($env:FAB_LOCAL_API_TOKEN_FILE -ne 'original-file') { throw 'lost-file' }
+        if ($env:FAB_OPERATIONS_SERVICE_TOKEN_FILE -ne 'original-operations-file') { throw 'lost-operations-file' }
         if ($env:FAB_HAI_API_TOKEN -ne 'original-hai') { throw 'leaked-hai' }
         if ($env:FAB_HAI_API_TOKEN_FILE -ne 'original-hai-file') { throw 'lost-hai-file' }
         if ($env:JWT_SECRET -ne 'original-jwt' -or $env:JWT_SECRET_FILE -ne 'original-jwt-file') { throw 'lost-jwt' }
         Remove-Item Env:JWT_SECRET, Env:JWT_SECRET_FILE
-        Remove-Item Env:FAB_LOCAL_API_TOKEN, Env:FAB_LOCAL_API_TOKEN_FILE, Env:FAB_HAI_API_TOKEN, Env:FAB_HAI_API_TOKEN_FILE
+        Remove-Item Env:FAB_LOCAL_API_TOKEN, Env:FAB_LOCAL_API_TOKEN_FILE, Env:FAB_OPERATIONS_SERVICE_TOKEN_FILE, Env:FAB_HAI_API_TOKEN, Env:FAB_HAI_API_TOKEN_FILE
         $result = Invoke-FabWithServiceCredentials -ApiToken 'synthetic-api' -HaiApiToken 'synthetic-hai' -JwtSecret 'synthetic-jwt' -Action { 'ok' }
         if ($result -ne 'ok' -or $env:FAB_LOCAL_API_TOKEN -or $env:FAB_HAI_API_TOKEN -or $env:JWT_SECRET) { throw 'scope-not-clean' }
+        $environment = [Environment]::GetEnvironmentVariables('Process')
+        foreach ($name in @('FAB_LOCAL_API_TOKEN_FILE', 'FAB_OPERATIONS_SERVICE_TOKEN_FILE', 'FAB_HAI_API_TOKEN_FILE', 'JWT_SECRET_FILE')) {
+            if ($environment.Contains($name)) { throw "file-variable-left-empty:$name" }
+        }
         'verified'
         """.replace("__HELPER__", str(helper).replace("'", "''"))
         result = subprocess.run([shell, "-NoProfile", "-NonInteractive", "-Command", command], capture_output=True, text=True, timeout=30)
@@ -160,6 +208,7 @@ class TestWindowsLauncher(unittest.TestCase):
         self.assertIn("$env:FAB_INSTANCE_ROOT = $root", script)
         self.assertIn("$previousApiInstanceRoot = $env:FAB_INSTANCE_ROOT", script)
         self.assertIn("$previousWorkerInstanceRoot = $env:FAB_INSTANCE_ROOT", script)
+        self.assertIn("workerProcessRootPid = $workerProcessRootPid", script)
         self.assertIn("$previousWebInstanceRoot = $env:FAB_INSTANCE_ROOT", script)
         self.assertIn("Remove-Item Env:FAB_INSTANCE_ROOT", script)
         self.assertIn('dist\\fab-standalone.js', script)
@@ -250,6 +299,14 @@ class TestWindowsLauncher(unittest.TestCase):
         self.assertIn("-m pip check", script)
         self.assertIn("Set-Content -LiteralPath $venvRequirementsMarker", script)
 
+    def test_launcher_reports_missing_dashboard_runtime_prerequisites(self):
+        script = (ROOT / "Start-FAB.ps1").read_text(encoding="utf-8")
+
+        self.assertIn('Get-Command node -ErrorAction SilentlyContinue', script)
+        self.assertIn('Get-Command pnpm.cmd -ErrorAction SilentlyContinue', script)
+        self.assertIn("dashboard requires Node.js 22.12 or newer", script)
+        self.assertIn("dashboard requires pnpm 11.20.0 or newer", script)
+
     def test_maintenance_launcher_is_quiescent_local_and_argument_aware(self):
         script = (ROOT / "Start-FAB.ps1").read_text(encoding="utf-8")
         start_cmd = (ROOT / "Start-FAB.cmd").read_text(encoding="utf-8")
@@ -300,6 +357,7 @@ def test_real_startup_preflight_rejects_bad_windows_settings_without_services(tm
     environment.update(PYTHONPATH=str(ROOT), PORT="3000", FAB_DEPLOYMENT_PROFILE="windows",
                        FAB_LOCAL_LEDGER_PATH=str(tmp_path / "external" / "ledger.sqlite3"),
                        FAB_LOCAL_BACKUP_DIR=str(tmp_path / "external-backups"),
+                       FAB_STORAGE_ENCRYPTION_CONFIRMED="true",
                        FAB_LOCAL_API_TOKEN="synthetic-A7b9C2d4E6f8G0h1J3k5L7m9",
                        FAB_HAI_API_TOKEN="synthetic-N8p0Q2r4S6t8U0v2W4x6Y8z0")
     environment["JWT_SECRET"] = "synthetic-R7e5W3q1T9y7U5i3O1p9A7s5"
@@ -317,6 +375,7 @@ def test_real_startup_preflight_rejects_bad_windows_settings_without_services(tm
         ({"FAB_LOCAL_BACKUP_DIR": str(ROOT / "backups")}, False),
         ({"FAB_LOCAL_API_HOST": "0.0.0.0"}, False),
         ({"FAB_LOCAL_API_PORT": "65536"}, False),
+        ({"FAB_STORAGE_ENCRYPTION_CONFIRMED": "false"}, False),
         ({"PORT": "5001"}, False),
         ({"FAB_LOCAL_API_TOKEN_FILE": str(secret_file)}, False),
         ({"FAB_LOCAL_API_TOKEN": "", "FAB_LOCAL_API_TOKEN_FILE": str(secret_file)}, True),

@@ -1,7 +1,9 @@
 import json
 import hashlib
 import os
+import threading
 import tempfile
+import time
 import unittest
 import zipfile
 from unittest.mock import patch
@@ -9,7 +11,9 @@ from unittest.mock import patch
 from src.operations.local_backup import (
     BACKUP_FORMAT_V1,
     BACKUP_FORMAT_V2,
+    BACKUP_FORMAT_V3,
     FULL_RESTORE_CONFIRMATION_PHRASE,
+    LEGACY_RESTORE_CONFIRMATION_PHRASE,
     LocalBackupService,
     RESTORE_CONFIRMATION_PHRASE,
     RESTORE_MODE_FULL,
@@ -36,8 +40,13 @@ class TestLocalBackupService(unittest.TestCase):
             )
 
             self.assertTrue(result["success"])
+            self.assertEqual(result["manifest"]["format"], BACKUP_FORMAT_V3)
+            self.assertEqual(
+                LocalBackupService(ledger, {"fab_local_backup_dir": backup_dir})
+                .inspect_backup(result["backupPath"])["integrityStatus"],
+                "authenticated",
+            )
             self.assertTrue(os.path.exists(result["backupPath"]))
-            self.assertEqual(result["manifest"]["format"], BACKUP_FORMAT_V2)
             self.assertEqual(
                 result["manifest"]["sourceEvidence"]["coverageStatus"],
                 "incomplete",
@@ -220,6 +229,8 @@ class TestLocalBackupService(unittest.TestCase):
             manifest["ledgerSha256"] = hashlib.sha256(
                 members["fab_operations.sqlite3"]
             ).hexdigest()
+            manifest.pop("integrity", None)
+            manifest["integrity"] = service._sign_manifest(manifest)
             members["manifest.json"] = json.dumps(manifest).encode("utf-8")
             with zipfile.ZipFile(backup["backupPath"], "w", zipfile.ZIP_DEFLATED) as archive:
                 for name, content in members.items():
@@ -354,6 +365,26 @@ class TestLocalBackupService(unittest.TestCase):
             with self.assertRaises(ValueError):
                 LocalBackupService(ledger, {"fab_local_backup_dir": backup_dir}).inspect_backup(unsafe_path)
 
+    def test_backup_path_symlink_cannot_escape_configured_directory(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            outside_dir = os.path.join(temp_dir, "outside")
+            backup_dir = os.path.join(temp_dir, "backups")
+            outside = LocalBackupService(
+                ledger,
+                {"fab_local_backup_dir": outside_dir},
+            ).create_backup()
+            service = LocalBackupService(ledger, {"fab_local_backup_dir": backup_dir})
+            linked_path = os.path.join(backup_dir, "linked.zip")
+            try:
+                os.symlink(outside["backupPath"], linked_path)
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest(f"File symlinks are unavailable: {exc}")
+
+            with self.assertRaisesRegex(ValueError, "links or reparse points"):
+                service.inspect_backup(linked_path)
+            self.assertEqual(service._backup_paths(10), [])
+
     def test_list_backups_returns_valid_backup_summary(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
@@ -375,7 +406,7 @@ class TestLocalBackupService(unittest.TestCase):
                 "manifest_only",
             )
 
-    def test_manifest_inspection_cache_reuses_only_an_unchanged_archive(self):
+    def test_manifest_cache_rechecks_authenticated_manifest(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
             service = LocalBackupService(
@@ -385,13 +416,80 @@ class TestLocalBackupService(unittest.TestCase):
             backup = service.create_backup()
             first = service.inspect_backup_manifest(backup["backupPath"])
 
-            with patch(
-                "src.operations.local_backup.zipfile.ZipFile",
-                side_effect=AssertionError("unchanged manifest cache miss"),
-            ):
+            with patch.object(
+                service,
+                "_verify_manifest_integrity",
+                wraps=service._verify_manifest_integrity,
+            ) as verify_manifest:
                 cached = service.inspect_backup_manifest(backup["backupPath"])
 
             self.assertEqual(first, cached)
+            verify_manifest.assert_called_once()
+
+    def test_rewritten_manifest_is_rejected_even_when_archive_structure_is_valid(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            backup_dir = os.path.join(temp_dir, "backups")
+            service = LocalBackupService(ledger, {"fab_local_backup_dir": backup_dir})
+            backup = service.create_backup()
+            with zipfile.ZipFile(backup["backupPath"], "r") as archive:
+                members = {name: archive.read(name) for name in archive.namelist()}
+            manifest = json.loads(members["manifest.json"])
+            manifest["note"] = "rewritten without the integrity key"
+            members["manifest.json"] = json.dumps(manifest).encode("utf-8")
+            with zipfile.ZipFile(backup["backupPath"], "w", zipfile.ZIP_DEFLATED) as archive:
+                for name, content in members.items():
+                    archive.writestr(name, content)
+
+            with self.assertRaisesRegex(ValueError, "authenticity"):
+                service.inspect_backup(backup["backupPath"])
+
+    def test_external_integrity_key_enables_portable_restore_and_rejects_wrong_key(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            key = "FAB_external_backup_integrity_key_2026_test_A9x"
+            with patch.dict(os.environ, {"FAB_BACKUP_INTEGRITY_KEY": key}):
+                ledger = LocalOperationsLedger(os.path.join(temp_dir, "source.sqlite3"))
+                backup_dir = os.path.join(temp_dir, "backups")
+                backup = LocalBackupService(
+                    ledger,
+                    {"fab_local_backup_dir": backup_dir},
+                ).create_backup()
+                portable_ledger = LocalOperationsLedger(
+                    os.path.join(temp_dir, "portable.sqlite3")
+                )
+                portable = LocalBackupService(
+                    portable_ledger,
+                    {"fab_local_backup_dir": backup_dir},
+                )
+                self.assertEqual(
+                    portable.inspect_backup(backup["backupPath"])["integrityStatus"],
+                    "authenticated",
+                )
+            with patch.dict(
+                os.environ,
+                {"FAB_BACKUP_INTEGRITY_KEY": "FAB_wrong_integrity_key_2026_test_B8y"},
+            ):
+                with self.assertRaisesRegex(ValueError, "does not match"):
+                    portable.inspect_backup(backup["backupPath"])
+
+    def test_version_three_backup_cannot_be_downgraded_by_removing_signature(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            backup_dir = os.path.join(temp_dir, "backups")
+            service = LocalBackupService(ledger, {"fab_local_backup_dir": backup_dir})
+            backup = service.create_backup()
+            with zipfile.ZipFile(backup["backupPath"], "r") as archive:
+                members = {name: archive.read(name) for name in archive.namelist()}
+            manifest = json.loads(members["manifest.json"])
+            self.assertEqual(manifest["format"], BACKUP_FORMAT_V3)
+            manifest.pop("integrity")
+            members["manifest.json"] = json.dumps(manifest).encode("utf-8")
+            with zipfile.ZipFile(backup["backupPath"], "w", zipfile.ZIP_DEFLATED) as archive:
+                for name, content in members.items():
+                    archive.writestr(name, content)
+
+            with self.assertRaisesRegex(ValueError, "require an authenticated"):
+                service.inspect_backup(backup["backupPath"])
 
     def test_inspect_rejects_checksum_mismatched_ledger_bytes(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -573,6 +671,12 @@ class TestLocalBackupService(unittest.TestCase):
             ).inspect_backup(legacy_path)
 
             self.assertEqual(inspected["manifest"]["format"], BACKUP_FORMAT_V1)
+            self.assertEqual(inspected["integrityStatus"], "legacy_checksum_only")
+            plan = LocalBackupService(
+                ledger,
+                {"fab_local_backup_dir": backup_dir, "fab_maintenance_mode": True},
+            ).plan_restore(legacy_path)
+            self.assertEqual(plan["confirmationPhrase"], LEGACY_RESTORE_CONFIRMATION_PHRASE)
 
     def test_run_due_creates_one_source_complete_package_then_reports_current(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -605,6 +709,52 @@ class TestLocalBackupService(unittest.TestCase):
             )
             self.assertEqual(second["status"], "not_due")
             self.assertFalse(second["schedule"]["due"])
+
+    def test_run_due_renews_short_lease_while_backup_is_running(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            service = LocalBackupService(ledger, {
+                "fab_local_backup_dir": os.path.join(temp_dir, "backups"),
+            })
+            backup_started = threading.Event()
+            finish_backup = threading.Event()
+            outcome = {}
+            errors = []
+
+            def slow_backup(**_kwargs):
+                backup_started.set()
+                if not finish_backup.wait(timeout=5):
+                    raise TimeoutError("test did not release scheduled backup")
+                return {"backupFilename": "test.zip"}
+
+            service.create_backup = slow_backup
+
+            def run_backup():
+                try:
+                    outcome["result"] = service.run_due(actor="test-worker")
+                except Exception as exc:
+                    errors.append(exc)
+
+            with patch("src.operations.local_backup.SCHEDULED_BACKUP_LEASE_TTL_SECONDS", 1):
+                worker = threading.Thread(target=run_backup)
+                worker.start()
+                try:
+                    self.assertTrue(backup_started.wait(timeout=5))
+                    time.sleep(1.25)
+                    competitor = ledger.acquire_runtime_lease(
+                        "local_scheduled_backup",
+                        "competing-backup",
+                        ttl_seconds=60,
+                    )
+                    self.assertFalse(competitor["acquired"])
+                finally:
+                    finish_backup.set()
+                    worker.join(timeout=10)
+
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(errors, [])
+            self.assertEqual(outcome["result"]["status"], "created")
+            self.assertIsNone(ledger.get_runtime_lease("local_scheduled_backup"))
 
 
 if __name__ == "__main__":

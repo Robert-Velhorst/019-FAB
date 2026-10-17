@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [int]$TimeoutSeconds = 60,
-    [string]$Url = ""
+    [string]$Url = "",
+    [string]$DashboardUrl = ""
 )
 
 Set-StrictMode -Version Latest
@@ -94,6 +95,26 @@ function Test-CleanHttpsOrigin {
     )
 }
 
+function Test-FabExistingCloudRequestMatches {
+    param(
+        [Parameter(Mandatory = $true)][object]$CloudStatus,
+        [string]$RequestedApiUrl = "",
+        [string]$RequestedDashboardUrl = ""
+    )
+
+    if ([string]$CloudStatus.status -ne "active" -or -not [bool]$CloudStatus.active) {
+        return $false
+    }
+    $apiMatches = -not $RequestedApiUrl -or [string]$CloudStatus.publicUrl -eq $RequestedApiUrl
+    $dashboardMatches = if ($RequestedDashboardUrl) {
+        [string]$CloudStatus.dashboardUrl -eq $RequestedDashboardUrl
+    }
+    else {
+        -not [string]$CloudStatus.dashboardUrl
+    }
+    return $apiMatches -and $dashboardMatches
+}
+
 function Get-HttpStatusCode {
     param(
         [Parameter(Mandatory = $true)][string]$RequestUrl,
@@ -152,6 +173,25 @@ function Stop-FabStartedNgrokProcess {
     }
 }
 
+function ConvertTo-YamlScalar {
+    param([Parameter(Mandatory = $true)][string]$Value)
+    return ConvertTo-Json -InputObject $Value -Compress
+}
+
+function Protect-ManagedNgrokDirectory {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+    $userPermission = "{0}:(OI)(CI)F" -f $currentUser
+    $systemPermission = "*S-1-5-18:(OI)(CI)F"
+    $administratorsPermission = "*S-1-5-32-544:(OI)(CI)F"
+    & (Join-Path $env:SystemRoot "System32\icacls.exe") `
+        $Path /inheritance:r /grant:r $userPermission $systemPermission $administratorsPermission /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not restrict access to FAB's managed ngrok files."
+    }
+}
+
 if (-not (Test-Path -LiteralPath $fabRuntimePath)) {
     throw "FAB is not running. Start it with Start-FAB.cmd first."
 }
@@ -196,7 +236,24 @@ if ($Url) {
     $Url = $requestedUrl.GetLeftPart([System.UriPartial]::Authority)
 }
 
-$credentialsJson = & $venvPython -m src.security.windows_runtime_credentials
+$requestedDashboardUrl = $null
+if ($DashboardUrl) {
+    try {
+        $requestedDashboardUrl = [System.Uri]$DashboardUrl
+    }
+    catch {
+        throw "-DashboardUrl must be a reserved HTTPS origin without credentials, path, query, or fragment."
+    }
+    if (-not (Test-CleanHttpsOrigin -Uri $requestedDashboardUrl)) {
+        throw "-DashboardUrl must be a reserved HTTPS origin without credentials, path, query, or fragment."
+    }
+    $DashboardUrl = $requestedDashboardUrl.GetLeftPart([System.UriPartial]::Authority)
+    if ($Url -and [string]::Equals($Url, $DashboardUrl, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "The dashboard and API require separate ngrok HTTPS origins."
+    }
+}
+
+$credentialsJson = & $venvPython -m src.security.windows_runtime_credentials --require-strong
 if ($LASTEXITCODE -ne 0) {
     throw "FAB could not load its existing API/HAI credentials. Start FAB with the same configuration first."
 }
@@ -231,9 +288,16 @@ if (
 if (Test-Path -LiteralPath $cloudRuntimePath) {
     try {
         $cloudStatus = Invoke-RestMethod -Uri "$apiBaseUrl/api/cloud/status" -Headers $headers -TimeoutSec 5
-        if ([string]$cloudStatus.status -eq "active" -and [bool]$cloudStatus.active) {
+        if (Test-FabExistingCloudRequestMatches `
+            -CloudStatus $cloudStatus `
+            -RequestedApiUrl $Url `
+            -RequestedDashboardUrl $DashboardUrl
+        ) {
             Write-Host "FAB cloud access is already active." -ForegroundColor Green
             Write-Host "Endpoint: $($cloudStatus.publicUrl)"
+            if ($cloudStatus.dashboardUrl) {
+                Write-Host "Operator dashboard: $($cloudStatus.dashboardUrl)"
+            }
             Write-Host "HAI manifest: $($cloudStatus.haiManifestUrl)"
             $apiToken = ""
             $haiApiToken = ""
@@ -263,10 +327,110 @@ if (-not $Url) {
 $inspectionPort = Find-AvailableLoopbackPort -StartPort 4041
 $id = [Guid]::NewGuid().ToString("N")
 New-Item -ItemType Directory -Path $managedRoot -Force | Out-Null
+Protect-ManagedNgrokDirectory -Path $managedRoot
 $overlayPath = Join-Path $managedRoot "fab-ngrok-$id.yml"
 $stdoutPath = Join-Path $managedRoot "fab-ngrok-$id.out.log"
 $stderrPath = Join-Path $managedRoot "fab-ngrok-$id.err.log"
-$overlay = "version: 3`nagent:`n  web_addr: 127.0.0.1:$inspectionPort`n"
+$apiPort = [int]$apiUri.Port
+$apiUpstream = ConvertTo-YamlScalar -Value "http://127.0.0.1:$apiPort"
+$apiEndpointUrlYaml = ""
+if ($Url) {
+    $apiEndpointUrlYaml = "    url: $(ConvertTo-YamlScalar -Value $Url)"
+}
+$dashboardPort = 0
+$dashboardEndpointYaml = ""
+$dashboardHeaders = @{}
+$dashboardPassword = $null
+$dashboardSecurePassword = $null
+$credential = $null
+$basicValue = $null
+$overlay = $null
+$dashboardAuthRequired = $false
+if ($DashboardUrl) {
+    $dashboardRuntimeUrl = $null
+    try {
+        $dashboardRuntimeUrl = [System.Uri]$runtime.dashboardUrl
+    }
+    catch {
+        throw "FAB's recorded dashboard URL is invalid. Restart FAB before enabling remote dashboard access."
+    }
+    if (
+        $dashboardRuntimeUrl.Scheme -ne "http" -or
+        $dashboardRuntimeUrl.Host -notin @("127.0.0.1", "localhost", "::1") -or
+        $dashboardRuntimeUrl.AbsolutePath -ne "/admin/operations" -or
+        $dashboardRuntimeUrl.Query -or
+        $dashboardRuntimeUrl.Fragment
+    ) {
+        throw "The recorded FAB dashboard is not the expected loopback operator dashboard."
+    }
+    $dashboardPort = [int]$dashboardRuntimeUrl.Port
+    $dashboardUsername = Read-Host "Create a username for the remote FAB dashboard (letters, numbers, dot, underscore, or hyphen)"
+    if ($dashboardUsername -notmatch '^[A-Za-z0-9._-]{3,64}$') {
+        throw "The dashboard username must be 3-64 characters and contain only letters, numbers, dot, underscore, or hyphen."
+    }
+    $dashboardSecurePassword = Read-Host "Create a remote FAB dashboard password (12-128 characters)" -AsSecureString
+    $passwordPointer = [IntPtr]::Zero
+    try {
+        $passwordPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($dashboardSecurePassword)
+        $dashboardPassword = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($passwordPointer)
+    }
+    finally {
+        if ($passwordPointer -ne [IntPtr]::Zero) {
+            [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($passwordPointer)
+        }
+        if ($dashboardSecurePassword) {
+            $dashboardSecurePassword.Dispose()
+        }
+    }
+    if (
+        $dashboardPassword.Length -lt 12 -or
+        $dashboardPassword.Length -gt 128 -or
+        $dashboardPassword -match '[\r\n\x00-\x1f\x7f]'
+    ) {
+        $dashboardPassword = $null
+        throw "The dashboard password must be 12-128 characters and contain no control characters."
+    }
+    $credential = ConvertTo-YamlScalar -Value "${dashboardUsername}:$dashboardPassword"
+    $dashboardUrlYaml = ConvertTo-YamlScalar -Value $DashboardUrl
+    $dashboardUpstream = ConvertTo-YamlScalar -Value "http://127.0.0.1:$dashboardPort"
+    $dashboardEndpointYaml = @"
+  - name: fab-managed-dashboard
+    url: $dashboardUrlYaml
+    upstream:
+      url: $dashboardUpstream
+    traffic_policy:
+      on_http_request:
+        - actions:
+            - type: basic-auth
+              config:
+                realm: FAB Operator Dashboard
+                enforce: true
+                credentials:
+                  - $credential
+            - type: remove-headers
+              config:
+                headers:
+                  - authorization
+"@
+    $basicValue = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("${dashboardUsername}:$dashboardPassword"))
+    $dashboardHeaders = @{ Authorization = "Basic $basicValue" }
+    $dashboardPassword = $null
+    $basicValue = $null
+    $dashboardAuthRequired = $true
+}
+$overlay = @"
+version: 3
+agent:
+  web_addr: 127.0.0.1:$inspectionPort
+  log: stdout
+  log_format: json
+endpoints:
+  - name: fab-managed
+$apiEndpointUrlYaml
+    upstream:
+      url: $apiUpstream
+$dashboardEndpointYaml
+"@
 [System.IO.File]::WriteAllText(
     $overlayPath,
     $overlay,
@@ -283,17 +447,14 @@ try {
         throw "The isolated FAB ngrok configuration is invalid."
     }
 
-    $arguments = @(
-        "http", $apiUri.Port,
-        "--config", ('"' + $mainConfig + '"'),
-        "--config", ('"' + $overlayPath + '"'),
-        "--log", "stdout",
-        "--log-format", "json",
-        "--name", "fab-managed"
-    )
-    if ($Url) {
-        $arguments += @("--url", $Url)
+    $arguments = @("start", "fab-managed")
+    if ($DashboardUrl) {
+        $arguments += "fab-managed-dashboard"
     }
+    $arguments += @(
+        "--config", ('"' + $mainConfig + '"'),
+        "--config", ('"' + $overlayPath + '"')
+    )
 
     $process = Start-Process `
         -FilePath $ngrok.Source `
@@ -304,26 +465,39 @@ try {
         -PassThru
 
     $deadline = (Get-Date).AddSeconds([Math]::Max(10, $TimeoutSeconds))
+    $apiTunnel = $null
+    $dashboardTunnel = $null
     do {
         Start-Sleep -Milliseconds 500
         $process.Refresh()
         try {
             $tunnels = Invoke-RestMethod -Uri "http://127.0.0.1:$inspectionPort/api/tunnels" -TimeoutSec 2
-            $tunnel = @(
+            $apiTunnel = @(
                 $tunnels.tunnels |
                     Where-Object {
                         [string]$_.name -eq "fab-managed" -and
                         [string]$_.public_url -like "https://*" -and
-                        ([string]$_.config.addr) -match ":$($apiUri.Port)$"
+                        ([string]$_.config.addr) -match ":$apiPort$"
                     }
             ) | Select-Object -First 1
+            if ($DashboardUrl) {
+                $dashboardTunnel = @(
+                    $tunnels.tunnels |
+                        Where-Object {
+                            [string]$_.name -eq "fab-managed-dashboard" -and
+                            [string]$_.public_url -eq $DashboardUrl -and
+                            ([string]$_.config.addr) -match ":$dashboardPort$"
+                        }
+                ) | Select-Object -First 1
+            }
         }
         catch {
-            $tunnel = $null
+            $apiTunnel = $null
+            $dashboardTunnel = $null
         }
-    } while (-not $tunnel -and -not $process.HasExited -and (Get-Date) -lt $deadline)
+    } while ((-not $apiTunnel -or ($DashboardUrl -and -not $dashboardTunnel)) -and -not $process.HasExited -and (Get-Date) -lt $deadline)
 
-    if (-not $tunnel) {
+    if (-not $apiTunnel -or ($DashboardUrl -and -not $dashboardTunnel)) {
         $exitCode = "unknown"
         if ($process.HasExited) {
             $process.WaitForExit()
@@ -348,7 +522,7 @@ try {
 
     Assert-FabNgrokInspectorOwned -Port $inspectionPort -ProcessId $process.Id
 
-    $publicUrl = ([string]$tunnel.public_url).TrimEnd("/")
+    $publicUrl = ([string]$apiTunnel.public_url).TrimEnd("/")
     $publicUri = [System.Uri]$publicUrl
     if (-not (Test-CleanHttpsOrigin -Uri $publicUri)) {
         throw "The managed ngrok endpoint is not a clean HTTPS origin."
@@ -374,6 +548,25 @@ try {
         throw "HAI credential escaped its route scope."
     }
 
+    $dashboardPublicUrl = $null
+    if ($DashboardUrl) {
+        $dashboardPublicUrl = ([string]$dashboardTunnel.public_url).TrimEnd("/")
+        $dashboardPublicUri = [System.Uri]$dashboardPublicUrl
+        if (-not (Test-CleanHttpsOrigin -Uri $dashboardPublicUri) -or $dashboardPublicUrl -ne $DashboardUrl) {
+            throw "The remote dashboard endpoint did not match its reserved HTTPS origin."
+        }
+        if ((Get-HttpStatusCode -RequestUrl "$dashboardPublicUrl/admin/operations") -ne 401) {
+            throw "The remote dashboard did not reject an unauthenticated request."
+        }
+        if ((Get-HttpStatusCode -RequestUrl "$dashboardPublicUrl/admin/operations" -RequestHeaders $dashboardHeaders) -ne 200) {
+            throw "The authenticated remote dashboard could not be reached."
+        }
+    }
+
+    $dashboardRuntimePort = $null
+    if ($dashboardPublicUrl) {
+        $dashboardRuntimePort = $dashboardPort
+    }
     $now = (Get-Date).ToUniversalTime().ToString("o")
     $cloudRuntime = [ordered]@{
         version = 1
@@ -383,6 +576,9 @@ try {
         processId = $process.Id
         inspectorPort = $inspectionPort
         publicUrl = $publicUrl
+        dashboardUrl = $dashboardPublicUrl
+        dashboardPort = $dashboardRuntimePort
+        dashboardAuthRequired = $dashboardAuthRequired
         localApiBaseUrl = $apiBaseUrl
         status = "active"
         startedAt = $now
@@ -398,6 +594,9 @@ try {
 
     Write-Host "FAB cloud access is active." -ForegroundColor Green
     Write-Host "Endpoint: $publicUrl"
+    if ($dashboardPublicUrl) {
+        Write-Host "Operator dashboard: $dashboardPublicUrl (ngrok Basic Auth required)"
+    }
     Write-Host "HAI manifest: $publicUrl/api/hai/manifest"
     Write-Host "Authentication: required"
     Write-Host "Use Stop-FAB-Ngrok.cmd to stop only this managed tunnel."
@@ -405,6 +604,12 @@ try {
 finally {
     $apiToken = ""
     $haiApiToken = ""
+    $dashboardHeaders.Clear()
+    $dashboardPassword = $null
+    $dashboardSecurePassword = $null
+    $credential = $null
+    $basicValue = $null
+    $overlay = $null
     if (-not $started) {
         $processStopped = $true
         if ($process) {
@@ -425,6 +630,9 @@ finally {
                 processId = $process.Id
                 inspectorPort = $inspectionPort
                 publicUrl = $publicUrl
+                dashboardUrl = $dashboardPublicUrl
+                dashboardPort = $dashboardRuntimePort
+                dashboardAuthRequired = $dashboardAuthRequired
                 localApiBaseUrl = $apiBaseUrl
                 status = "cleanup_required"
                 authRequired = $true

@@ -520,7 +520,7 @@ class LocalScheduledReportService:
         )
         if not value:
             value = os.path.join(os.path.dirname(os.path.abspath(self.ledger.path)), "reports")
-        return os.path.abspath(os.path.expanduser(str(value)))
+        return os.path.realpath(os.path.abspath(os.path.expanduser(str(value))))
 
     def _resolve_artifact_path(self, path: str) -> str:
         candidate = os.path.expanduser(str(path or ""))
@@ -528,8 +528,13 @@ class LocalScheduledReportService:
             raise ValueError("Scheduled report artifact path is required")
         if not os.path.isabs(candidate):
             candidate = os.path.join(self.report_dir, candidate)
-        candidate = os.path.abspath(candidate)
-        if os.path.commonpath([candidate, self.report_dir]) != self.report_dir:
+        candidate = os.path.realpath(os.path.abspath(candidate))
+        report_dir = os.path.normcase(os.path.realpath(os.path.abspath(self.report_dir)))
+        try:
+            common_path = os.path.commonpath([os.path.normcase(candidate), report_dir])
+        except ValueError as exc:
+            raise ValueError("Scheduled report artifact must stay inside the configured report directory") from exc
+        if common_path != report_dir:
             raise ValueError("Scheduled report artifact must stay inside the configured report directory")
         if os.path.isdir(candidate):
             raise ValueError("Scheduled report artifact path cannot be a directory")

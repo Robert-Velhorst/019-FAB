@@ -13,7 +13,9 @@ from typing import Any, Dict, Optional, Sequence
 
 VENDOR_CATEGORY_RULE_STATUSES = {"suggested", "approved", "rejected", "disabled", "learned"}
 GOVERNED_VENDOR_CATEGORY_RULE_STATUSES = {"approved", "rejected", "disabled"}
-LEDGER_SCHEMA_VERSION = 1
+LEDGER_SCHEMA_VERSION = 2
+MAX_ERROR_DIAGNOSTIC_INPUT_CHARS = 16_384
+MAX_ERROR_DIAGNOSTIC_OUTPUT_CHARS = 2_000
 MISSING_REVIEW_MATCH_REFERENCE_SQL = (
     "CASE WHEN json_valid(corrected_data_json) THEN CAST(COALESCE("
     "json_extract(corrected_data_json, '$.reconciliationMatchId'), "
@@ -38,7 +40,53 @@ LEDGER_SCHEMA_MIGRATIONS = {
             b"FAB operations ledger schema v1: baseline through runtime controls and support diagnostics"
         ).hexdigest(),
     },
+    2: {
+        "name": "bounded_source_scan_manifest_2026_10_16",
+        "checksum": hashlib.sha256(
+            b"FAB operations ledger schema v2: resumable indexed local-folder scan manifests"
+        ).hexdigest(),
+    },
 }
+
+
+def _redact_url_userinfo(value: str) -> str:
+    """Redact URL userinfo in one linear pass, without backtracking regexes."""
+    output = []
+    cursor = 0
+    index = 0
+    while index < len(value):
+        if index and (
+            value[index - 1].isascii()
+            and (value[index - 1].isalnum() or value[index - 1] in "+.-")
+        ):
+            index += 1
+            continue
+        if not value[index].isascii() or not value[index].isalpha():
+            index += 1
+            continue
+
+        scheme_end = index + 1
+        while scheme_end < len(value):
+            character = value[scheme_end]
+            if not character.isascii() or not (character.isalnum() or character in "+.-"):
+                break
+            scheme_end += 1
+        if value[scheme_end:scheme_end + 3] != "://":
+            index = scheme_end
+            continue
+
+        authority_start = scheme_end + 3
+        authority_end = authority_start
+        while authority_end < len(value) and value[authority_end] not in "/?# \t\r\n":
+            authority_end += 1
+        userinfo_end = value.rfind("@", authority_start, authority_end)
+        if userinfo_end > authority_start:
+            output.append(value[cursor:authority_start])
+            output.append("[REDACTED]@")
+            cursor = userinfo_end + 1
+        index = authority_end
+    output.append(value[cursor:])
+    return "".join(output)
 
 
 def default_ledger_path() -> str:
@@ -49,6 +97,24 @@ def default_ledger_path() -> str:
         or os.path.join(os.path.expanduser("~"), ".fab")
     )
     return os.path.join(base_dir, "FAB", "fab_operations.sqlite3")
+
+
+def _quote_sql_identifier(identifier: str) -> str:
+    """Quote a simple or qualified SQLite identifier, rejecting SQL fragments."""
+    if not isinstance(identifier, str):
+        raise ValueError("SQLite identifier must be text.")
+    parts = identifier.split(".")
+    if not parts or any(not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", part) for part in parts):
+        raise ValueError("Invalid SQLite identifier.")
+    return ".".join(f'"{part}"' for part in parts)
+
+
+class SourceScanManifestLimitError(RuntimeError):
+    def __init__(self, reason: str, *, max_entries: int, max_path_bytes: int):
+        super().__init__(reason)
+        self.reason = reason
+        self.max_entries = max_entries
+        self.max_path_bytes = max_path_bytes
 
 
 class LocalOperationsLedger:
@@ -94,7 +160,9 @@ class LocalOperationsLedger:
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA busy_timeout = 30000")
         connection.execute("PRAGMA foreign_keys = ON")
-        connection.execute("PRAGMA synchronous = NORMAL")
+        profile = os.environ.get("FAB_DEPLOYMENT_PROFILE", "local").strip().lower()
+        synchronous = "FULL" if profile in {"windows", "vm"} else "NORMAL"
+        connection.execute(f"PRAGMA synchronous = {synchronous}")
         return connection
 
     @contextmanager
@@ -218,6 +286,22 @@ class LocalOperationsLedger:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     UNIQUE(source_type, source_identifier)
+                );
+
+                CREATE TABLE IF NOT EXISTS source_scan_state (
+                    source_account_id INTEGER PRIMARY KEY,
+                    last_path TEXT,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(source_account_id) REFERENCES source_accounts(id) ON DELETE CASCADE
+                );
+
+                CREATE TABLE IF NOT EXISTS source_scan_manifest (
+                    source_account_id INTEGER NOT NULL,
+                    sequence INTEGER NOT NULL,
+                    path TEXT NOT NULL,
+                    PRIMARY KEY(source_account_id, sequence),
+                    UNIQUE(source_account_id, path),
+                    FOREIGN KEY(source_account_id) REFERENCES source_accounts(id) ON DELETE CASCADE
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_local_sources_type
@@ -1529,6 +1613,129 @@ class LocalOperationsLedger:
                 },
             )
 
+    def get_source_scan_cursor(self, source_account_id: int) -> Optional[str]:
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT last_path FROM source_scan_state WHERE source_account_id = ?",
+                (int(source_account_id),),
+            ).fetchone()
+        return str(row["last_path"]) if row and row["last_path"] else None
+
+    def set_source_scan_cursor(self, source_account_id: int, last_path: Optional[str]) -> None:
+        with self._connection() as connection:
+            if not last_path:
+                connection.execute(
+                    "DELETE FROM source_scan_state WHERE source_account_id = ?",
+                    (int(source_account_id),),
+                )
+                return
+            connection.execute(
+                """
+                INSERT INTO source_scan_state (source_account_id, last_path, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(source_account_id) DO UPDATE SET
+                    last_path = excluded.last_path,
+                    updated_at = excluded.updated_at
+                """,
+                (int(source_account_id), str(last_path), self._now()),
+            )
+
+    def rebuild_source_scan_manifest(
+        self,
+        source_account_id: int,
+        entries,
+        *,
+        max_entries: int = 100_000,
+        max_path_bytes: int = 16 * 1024 * 1024,
+    ) -> None:
+        """Replace one folder's path manifest, committing in bounded chunks."""
+        account_id = int(source_account_id)
+        sequence = 0
+        path_bytes = 0
+        batch = []
+        with self._connection() as connection:
+            connection.execute(
+                "DELETE FROM source_scan_manifest WHERE source_account_id = ?",
+                (account_id,),
+            )
+            # Do not hold SQLite's writer lock while the filesystem is enumerated.
+            # An interrupted build is rebuilt on retry because the cursor advances
+            # only after a complete document batch has been registered.
+            connection.commit()
+            try:
+                for path in entries:
+                    value = str(path)
+                    encoded_size = len(value.encode("utf-8", errors="surrogateescape"))
+                    if sequence >= max_entries or path_bytes + encoded_size > max_path_bytes:
+                        raise SourceScanManifestLimitError(
+                            "manifest_limit_exceeded",
+                            max_entries=max_entries,
+                            max_path_bytes=max_path_bytes,
+                        )
+                    batch.append((account_id, sequence, value))
+                    sequence += 1
+                    path_bytes += encoded_size
+                    if len(batch) >= 500:
+                        connection.executemany(
+                            """
+                            INSERT INTO source_scan_manifest
+                                (source_account_id, sequence, path)
+                            VALUES (?, ?, ?)
+                            """,
+                            batch,
+                        )
+                        connection.commit()
+                        batch.clear()
+                if batch:
+                    connection.executemany(
+                        """
+                        INSERT INTO source_scan_manifest
+                            (source_account_id, sequence, path)
+                        VALUES (?, ?, ?)
+                        """,
+                        batch,
+                    )
+            except Exception:
+                connection.rollback()
+                connection.execute(
+                    "DELETE FROM source_scan_manifest WHERE source_account_id = ?",
+                    (account_id,),
+                )
+                connection.commit()
+                raise
+
+
+    def get_source_scan_batch(
+        self,
+        source_account_id: int,
+        after_path: Optional[str],
+        limit: int,
+    ) -> list:
+        account_id = int(source_account_id)
+        bounded_limit = max(1, min(1000, int(limit)))
+        with self._connection() as connection:
+            after_sequence = -1
+            if after_path:
+                cursor_row = connection.execute(
+                    """
+                    SELECT sequence FROM source_scan_manifest
+                    WHERE source_account_id = ? AND path = ?
+                    LIMIT 1
+                    """,
+                    (account_id, str(after_path)),
+                ).fetchone()
+                if cursor_row:
+                    after_sequence = int(cursor_row["sequence"])
+            rows = connection.execute(
+                """
+                SELECT path FROM source_scan_manifest
+                WHERE source_account_id = ? AND sequence > ?
+                ORDER BY sequence ASC LIMIT ?
+                """,
+                (account_id, after_sequence, bounded_limit),
+            ).fetchall()
+        return [self._row_to_dict(row) for row in rows]
+
     def create_workflow_run(self, payload: Dict[str, Any], preferred_id: Optional[int] = None) -> int:
         now = self._now()
         metadata = payload.get("metadata")
@@ -2395,6 +2602,62 @@ class LocalOperationsLedger:
         with self._connection() as connection:
             rows = connection.execute(query, params).fetchall()
         return [self._row_to_dict(row) for row in rows]
+
+    def latest_export_attempts_for_records(
+        self,
+        records: Sequence[Dict[str, Any]],
+        target_system: Optional[str] = None,
+    ) -> Dict[int, Dict[str, Any]]:
+        """Return one latest matching attempt per record using bounded queries."""
+        selected = [
+            (record_id, document_id)
+            for record in records
+            if (record_id := self._optional_int(record.get("id"))) is not None
+            for document_id in (self._optional_int(record.get("document_id")),)
+        ]
+        if not selected:
+            return {}
+
+        latest: Dict[int, Dict[str, Any]] = {}
+        query_batch_size = 400
+        target_filter = "WHERE attempts.target_system = ?" if target_system else ""
+        with self._connection() as connection:
+            for start in range(0, len(selected), query_batch_size):
+                selected_batch = selected[start : start + query_batch_size]
+                values_sql = ", ".join("(?, ?)" for _ in selected_batch)
+                params: list = [value for pair in selected_batch for value in pair]
+                if target_system:
+                    params.append(target_system)
+                rows = connection.execute(
+                    f"""
+                    WITH selected_records(record_id, document_id) AS (
+                        VALUES {values_sql}
+                    )
+                    SELECT selected_records.record_id AS selected_record_id,
+                           attempts.*
+                    FROM selected_records
+                    JOIN export_attempts AS attempts
+                      ON attempts.bookkeeping_record_id = selected_records.record_id
+                      OR (
+                          selected_records.document_id IS NOT NULL
+                          AND attempts.document_id = selected_records.document_id
+                      )
+                    {target_filter}
+                    ORDER BY selected_records.record_id,
+                             CASE WHEN attempts.bookkeeping_record_id = selected_records.record_id
+                                  THEN 0 ELSE 1 END,
+                             attempts.updated_at DESC,
+                             attempts.id DESC
+                    """,
+                    params,
+                ).fetchall()
+                for row in rows:
+                    record_id = int(row["selected_record_id"])
+                    if record_id not in latest:
+                        attempt = self._row_to_dict(row)
+                        attempt.pop("selected_record_id", None)
+                        latest[record_id] = attempt
+        return latest
 
     def create_reconciliation_match(self, payload: Dict[str, Any], preferred_id: Optional[int] = None) -> int:
         return self._insert(
@@ -3688,7 +3951,8 @@ class LocalOperationsLedger:
         if desired_status not in {"unread", "suppressed"}:
             raise ValueError(f"Unsupported notification upsert status: {desired_status}")
         with self._connection() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            if self._write_transaction_connection.get() is None:
+                connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
                 "SELECT * FROM notifications WHERE fingerprint = ? LIMIT 1",
                 (fingerprint,),
@@ -3850,6 +4114,25 @@ class LocalOperationsLedger:
         with self._connection() as connection:
             rows = connection.execute(query, params).fetchall()
         return [self._row_to_dict(row) for row in rows]
+
+    def notification_summary(self) -> Dict[str, int]:
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT
+                    COUNT(*) AS active,
+                    SUM(CASE WHEN status = 'unread' THEN 1 ELSE 0 END) AS unread,
+                    SUM(CASE WHEN severity = 'high' THEN 1 ELSE 0 END) AS high,
+                    SUM(CASE WHEN severity = 'medium' THEN 1 ELSE 0 END) AS medium,
+                    SUM(CASE WHEN severity = 'low' THEN 1 ELSE 0 END) AS low,
+                    SUM(CASE WHEN status = 'acknowledged' THEN 1 ELSE 0 END) AS acknowledged
+                FROM notifications
+                WHERE status IN ('unread', 'read', 'acknowledged')
+                """
+            ).fetchone()
+        return {key: int(row[key] or 0) for key in (
+            "active", "unread", "high", "medium", "low", "acknowledged"
+        )}
 
     def create_compliance_assessment(
         self,
@@ -4211,7 +4494,8 @@ class LocalOperationsLedger:
                 "attention_export_attempts": self._count(
                     connection,
                     "export_attempts",
-                    "status = 'attention_required' AND external_submission = 'not_executed'",
+                    "(status = 'attention_required' AND external_submission = 'not_executed') "
+                    "OR (status = 'failed' AND external_submission = 'unknown')",
                 ),
                 "supervised_export_attempts": self._count(
                     connection,
@@ -4833,6 +5117,29 @@ class LocalOperationsLedger:
                 "SELECT * FROM bookkeeping_documents WHERE id = ? LIMIT 1", (document_id,),
             ).fetchone()
         return self._row_to_dict(row) if row else None
+
+    def get_document_for_processing(self, document_id: int) -> Optional[Dict[str, Any]]:
+        """Load the document and open reviews needed by processing, not its histories."""
+        with self._connection() as connection:
+            document = connection.execute(
+                "SELECT * FROM bookkeeping_documents WHERE id = ? LIMIT 1",
+                (document_id,),
+            ).fetchone()
+            if not document:
+                return None
+            result = self._row_to_dict(document)
+            result["review_items"] = [
+                self._row_to_dict(row)
+                for row in connection.execute(
+                    """
+                    SELECT * FROM review_items
+                    WHERE document_id = ? AND status IN ('pending', 'in_review')
+                    ORDER BY created_at DESC, id DESC
+                    """,
+                    (document_id,),
+                ).fetchall()
+            ]
+            return result
 
     def get_document(self, document_id: int) -> Optional[Dict[str, Any]]:
         with self._connection() as connection:
@@ -5550,7 +5857,8 @@ class LocalOperationsLedger:
         if status not in VENDOR_CATEGORY_RULE_STATUSES:
             raise ValueError(f"Unsupported vendor category rule status: {status}")
 
-        with self._connection() as connection:
+        with self.write_transaction():
+            connection = self._write_transaction_connection.get()
             existing = connection.execute(
                 """
                 SELECT * FROM vendor_category_rules
@@ -5565,6 +5873,20 @@ class LocalOperationsLedger:
                 effective_status = status
                 if existing_status in GOVERNED_VENDOR_CATEGORY_RULE_STATUSES and status == "suggested":
                     effective_status = existing_status
+                if effective_status == "approved":
+                    conflict = connection.execute(
+                        """
+                        SELECT 1 FROM vendor_category_rules
+                        WHERE normalized_vendor_name = ? AND target_system = ?
+                          AND status = 'approved' AND category != ? AND id != ?
+                        LIMIT 1
+                        """,
+                        (normalized_vendor_name, target_system, category, rule_id),
+                    ).fetchone()
+                    if conflict:
+                        raise ValueError(
+                            "Conflicting approved vendor category rule already exists for this target"
+                        )
                 self._update_with_connection(
                     connection,
                     "vendor_category_rules",
@@ -5580,6 +5902,20 @@ class LocalOperationsLedger:
                     },
                 )
                 return rule_id
+            if status == "approved":
+                conflict = connection.execute(
+                    """
+                    SELECT 1 FROM vendor_category_rules
+                    WHERE normalized_vendor_name = ? AND target_system = ?
+                      AND status = 'approved' AND category != ?
+                    LIMIT 1
+                    """,
+                    (normalized_vendor_name, target_system, category),
+                ).fetchone()
+                if conflict:
+                    raise ValueError(
+                        "Conflicting approved vendor category rule already exists for this target"
+                    )
             return self._insert_with_connection(
                 connection,
                 "vendor_category_rules",
@@ -5617,7 +5953,8 @@ class LocalOperationsLedger:
         if status not in VENDOR_CATEGORY_RULE_STATUSES:
             raise ValueError(f"Unsupported vendor category rule status: {status}")
         now = self._now()
-        with self._connection() as connection:
+        with self.write_transaction():
+            connection = self._write_transaction_connection.get()
             row = connection.execute(
                 "SELECT * FROM vendor_category_rules WHERE id = ? LIMIT 1",
                 (rule_id,),
@@ -5625,6 +5962,25 @@ class LocalOperationsLedger:
             if not row:
                 return None
             rule = self._row_to_dict(row)
+            if status == "approved":
+                conflict = connection.execute(
+                    """
+                    SELECT 1 FROM vendor_category_rules
+                    WHERE normalized_vendor_name = ? AND target_system = ?
+                      AND status = 'approved' AND category != ? AND id != ?
+                    LIMIT 1
+                    """,
+                    (
+                        rule["normalized_vendor_name"],
+                        rule["target_system"],
+                        rule["category"],
+                        rule_id,
+                    ),
+                ).fetchone()
+                if conflict:
+                    raise ValueError(
+                        "Conflicting approved vendor category rule already exists for this target"
+                    )
             metadata = rule.get("metadata") or {}
             history = list(metadata.get("statusHistory") or [])
             history.append({
@@ -5840,10 +6196,13 @@ class LocalOperationsLedger:
     @staticmethod
     def _insert_with_connection(connection: sqlite3.Connection, table: str, values: Dict[str, Any]) -> int:
         values = {key: value for key, value in values.items() if value is not None}
-        columns = ", ".join(values.keys())
+        if not values:
+            raise ValueError("At least one value is required for a ledger insert.")
+        quoted_table = _quote_sql_identifier(table)
+        columns = ", ".join(_quote_sql_identifier(key) for key in values)
         placeholders = ", ".join("?" for _ in values)
         cursor = connection.execute(
-            f"INSERT INTO {table} ({columns}) VALUES ({placeholders})",
+            f"INSERT INTO {quoted_table} ({columns}) VALUES ({placeholders})",
             tuple(values.values()),
         )
         return int(values.get("id") or cursor.lastrowid)
@@ -5862,9 +6221,10 @@ class LocalOperationsLedger:
         values = {key: value for key, value in values.items() if value is not None}
         if not values:
             return
-        assignments = ", ".join(f"{key} = ?" for key in values)
+        quoted_table = _quote_sql_identifier(table)
+        assignments = ", ".join(f"{_quote_sql_identifier(key)} = ?" for key in values)
         connection.execute(
-            f"UPDATE {table} SET {assignments} WHERE id = ?",
+            f"UPDATE {quoted_table} SET {assignments} WHERE id = ?",
             (*values.values(), record_id),
         )
 
@@ -5932,7 +6292,7 @@ class LocalOperationsLedger:
 
     @staticmethod
     def _count(connection: sqlite3.Connection, table: str, where: Optional[str] = None) -> int:
-        query = f"SELECT COUNT(*) AS count FROM {table}"
+        query = f"SELECT COUNT(*) AS count FROM {_quote_sql_identifier(table)}"
         if where:
             query = f"{query} WHERE {where}"
         row = connection.execute(query).fetchone()
@@ -5945,12 +6305,14 @@ class LocalOperationsLedger:
         column: str,
         definition: str,
     ) -> None:
+        quoted_table = _quote_sql_identifier(table)
+        quoted_column = _quote_sql_identifier(column)
         columns = {
             row["name"]
-            for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
+            for row in connection.execute(f"PRAGMA table_info({quoted_table})").fetchall()
         }
         if column not in columns:
-            connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+            connection.execute(f"ALTER TABLE {quoted_table} ADD COLUMN {quoted_column} {definition}")
 
     @classmethod
     def _backfill_document_content_hashes(cls, connection: sqlite3.Connection) -> None:
@@ -6192,6 +6554,10 @@ class LocalOperationsLedger:
                 ON export_attempts(target_system);
             CREATE INDEX IF NOT EXISTS idx_local_exports_document
                 ON export_attempts(document_id);
+            CREATE INDEX IF NOT EXISTS idx_local_exports_record_recent
+                ON export_attempts(bookkeeping_record_id, updated_at DESC, id DESC);
+            CREATE INDEX IF NOT EXISTS idx_local_exports_document_recent
+                ON export_attempts(document_id, updated_at DESC, id DESC);
             """
         )
 
@@ -6486,14 +6852,15 @@ class LocalOperationsLedger:
     def _append_status_filter(where: list, params: list, column: str, value: Optional[Any]) -> None:
         if not value:
             return
+        quoted_column = _quote_sql_identifier(column)
         if isinstance(value, Sequence) and not isinstance(value, str):
             statuses = [str(item) for item in value if item]
             if statuses:
                 placeholders = ", ".join("?" for _ in statuses)
-                where.append(f"{column} IN ({placeholders})")
+                where.append(f"{quoted_column} IN ({placeholders})")
                 params.extend(statuses)
             return
-        where.append(f"{column} = ?")
+        where.append(f"{quoted_column} = ?")
         params.append(str(value))
 
     @classmethod
@@ -6652,11 +7019,7 @@ class LocalOperationsLedger:
         if isinstance(value, tuple):
             return [cls._redact_sensitive(item) for item in value]
         if isinstance(value, str):
-            value = re.sub(
-                r"(?i)([a-z][a-z0-9+.-]*://)[^/@\s]+@",
-                r"\1[REDACTED]@",
-                value,
-            )
+            value = _redact_url_userinfo(value)
             value = re.sub(
                 r'''(?i)(["'](?:access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|api[_-]?key|apikey|secret|password|passwd|token|database[_-]?url|connection[_-]?string|dsn)["']\s*:\s*)(?:"[^"]*"|'[^']*'|[^,}\s]+)''',
                 r'\1"[REDACTED]"',
@@ -6683,7 +7046,8 @@ class LocalOperationsLedger:
     def _redact_error_message(cls, value: Any) -> Optional[str]:
         if value in (None, ""):
             return None
-        return str(cls._redact_sensitive(str(value)))[:2000]
+        bounded_value = str(value)[:MAX_ERROR_DIAGNOSTIC_INPUT_CHARS]
+        return str(cls._redact_sensitive(bounded_value))[:MAX_ERROR_DIAGNOSTIC_OUTPUT_CHARS]
 
     @staticmethod
     def _float(value: Any) -> Optional[float]:

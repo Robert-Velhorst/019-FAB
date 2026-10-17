@@ -1,5 +1,7 @@
 import json
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -394,6 +396,31 @@ class TestLocalFinancialReportingService(unittest.TestCase):
             self.assertEqual(schedule["slot"]["period"]["fromDate"], "2026-07-01")
             self.assertFalse(inspected["success"])
             self.assertIn("json_artifact_invalid", inspected["errors"])
+
+    def test_schedule_rejects_artifact_symlink_that_resolves_outside_report_directory(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            report_dir = os.path.join(temp_dir, "reports")
+            outside_dir = os.path.join(temp_dir, "outside")
+            service = LocalScheduledReportService(self._ledger(temp_dir), {
+                "fab_local_report_dir": report_dir,
+            })
+            os.makedirs(outside_dir)
+            link_dir = os.path.join(report_dir, "linked")
+            try:
+                if sys.platform == "win32":
+                    subprocess.run(
+                        ["cmd.exe", "/c", "mklink", "/J", link_dir, outside_dir],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                    )
+                else:
+                    os.symlink(outside_dir, link_dir, target_is_directory=True)
+            except (OSError, subprocess.CalledProcessError, NotImplementedError) as exc:
+                self.skipTest(f"directory link creation is unavailable: {exc}")
+
+            with self.assertRaisesRegex(ValueError, "inside the configured report directory"):
+                service._resolve_artifact_path(os.path.join("linked", "report.json"))
 
 
 if __name__ == "__main__":

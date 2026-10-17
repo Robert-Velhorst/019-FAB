@@ -1,3 +1,4 @@
+import ipaddress
 import os
 import re
 from collections.abc import Mapping
@@ -44,10 +45,7 @@ class FreshdeskFetcher(BaseFetcher):
         self._start_run()
         configured_params = self.config.get("freshdesk_query_params", {})
         query_params = dict(configured_params) if isinstance(configured_params, dict) else {}
-        attachments_dir = (
-            self.config.get("freshdesk_download_dir")
-            or self.config.get("attachments_save_dir", "/tmp/freshdesk_attachments")
-        )
+        attachments_dir = self._download_directory("freshdesk", "freshdesk_download_dir")
         os.makedirs(attachments_dir, exist_ok=True)
         max_pages = _bounded_int(self.config.get("freshdesk_max_pages"), 50, 1, 500)
         per_page = _bounded_int(self.config.get("freshdesk_page_size"), 100, 1, 100)
@@ -367,13 +365,27 @@ class FreshdeskFetcher(BaseFetcher):
         if pdf_only and not _pdf_candidate(file_name, mime_type):
             return {"reason": "not_pdf"}
         parsed_attachment_url = urlparse(attachment_url)
-        require_https = _as_bool(
-            self.config.get("freshdesk_require_https_attachments", pdf_only)
-        )
+        attachment_host = (parsed_attachment_url.hostname or "").lower().rstrip(".")
+        api_host = (urlparse(self.base_url).hostname or "").lower().rstrip(".")
+        allowed_hosts = {api_host} if api_host else set()
+        allowed_hosts.update(_string_list(self.config.get("freshdesk_attachment_allowed_hosts")))
+        try:
+            ipaddress.ip_address(attachment_host)
+            is_ip_literal = True
+        except ValueError:
+            is_ip_literal = False
+        try:
+            attachment_port = parsed_attachment_url.port
+        except ValueError:
+            attachment_port = -1
         if (
-            not parsed_attachment_url.hostname
-            or require_https
-            and parsed_attachment_url.scheme.lower() != "https"
+            parsed_attachment_url.scheme.lower() != "https"
+            or not attachment_host
+            or parsed_attachment_url.username is not None
+            or parsed_attachment_url.password is not None
+            or is_ip_literal
+            or attachment_port not in (None, 443)
+            or attachment_host not in allowed_hosts
         ):
             return {"reason": "unsafe_url"}
 
@@ -382,8 +394,12 @@ class FreshdeskFetcher(BaseFetcher):
             auth=self._attachment_auth(parsed_attachment_url),
             timeout=timeout,
             stream=True,
+            allow_redirects=False,
         )
         try:
+            status_code = getattr(response, "status_code", None)
+            if isinstance(status_code, int) and 300 <= status_code < 400:
+                return {"reason": "unsafe_url"}
             response.raise_for_status()
             content, bounded_reason = _bounded_response_content(
                 response,
