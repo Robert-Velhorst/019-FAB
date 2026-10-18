@@ -53,7 +53,6 @@ _VENDOR_RULES = (
             "AWS",
             "Google Cloud",
             "DigitalOcean",
-            "Vercel",
             "Heroku",
         ),
     },
