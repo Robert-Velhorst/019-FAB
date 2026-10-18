@@ -27,12 +27,12 @@ reasonable opportunity to investigate and remediate before public disclosure.
 
 ## Supported Versions
 
-`v0.1.0-preview.1` is a preview, not a stable release, and is not covered by a
-guaranteed support window. Security fixes are developed against the latest
-`main` branch. No stable release range or response-time commitment is currently
-offered. Users should use the newest available source or preview release only
-after reviewing its limitations, and rotate any credential that may have been
-exposed.
+| Version | Security fixes |
+| --- | --- |
+| `v0.1.0-preview.1` | Best-effort review; update to the newest preview. |
+| Latest `main` | Best-effort review; not a stable release. |
+
+FAB is an early development preview and no service-level response or remediation time is offered. Users should update to the newest release and rotate any credential that may have been exposed.
 
 ## Scope and Limitations
 
