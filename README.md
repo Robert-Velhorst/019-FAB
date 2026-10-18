@@ -116,6 +116,8 @@ Google sources require owner-authorized OAuth and explicit folder configuration.
 
 ## Packaging
 
+The current development preview and its verified source bundles are available in the [FAB v0.1.0 Preview 1 release](https://github.com/Robert-Velhorst/019-FAB/releases/tag/v0.1.0-preview.1). The attached Windows and Compose ZIP files are source distributions, not signed installers or prebuilt container images.
+
 From a clean, committed checkout, build both source distributions:
 
     python package.py --target all
