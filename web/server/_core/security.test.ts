@@ -33,6 +33,7 @@ describe("FAB web security headers", () => {
       expect(policy).toContain("object-src 'none'");
       expect(policy).toContain("frame-ancestors 'none'");
       expect(policy).not.toContain("upgrade-insecure-requests");
+      expect(response.headers.get("content-security-policy-report-only")).toBeNull();
       expect(response.headers.get("strict-transport-security")).toBeNull();
     } finally {
       await app.close();
@@ -53,15 +54,14 @@ describe("FAB web security headers", () => {
     }
   });
 
-  it("keeps a restrictive development CSP while allowing local Vite HMR", async () => {
+  it("reports development CSP violations without blocking the Vite app", async () => {
     const app = await startSecurityApp(false);
     try {
       const response = await fetch(app.url);
-      const policy = response.headers.get("content-security-policy") || "";
+      const policy = response.headers.get("content-security-policy-report-only") || "";
       expect(policy).toContain("default-src 'self'");
-      expect(policy).toContain("connect-src 'self' ws: wss:");
-      expect(policy).toContain("script-src 'self' 'unsafe-eval'");
-      expect(policy).toContain("frame-ancestors 'none'");
+      expect(policy).toContain("script-src 'self'");
+      expect(response.headers.get("content-security-policy")).toBeNull();
       expect(response.headers.get("strict-transport-security")).toBeNull();
     } finally {
       await app.close();
