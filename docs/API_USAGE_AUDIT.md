@@ -17,7 +17,6 @@ The Flask API is the source of operational truth. Major endpoint groups are:
 | Reconciliation/reporting | `/api/reconciliation/*`, `/api/report-runs/*`, `/api/compliance/*`, `/api/master-ledger` | Local computation; provisional findings are labeled. `summaryOnly=true` returns the exact checksum and aggregate projection without serializing rows to the caller. |
 | Recovery/support | `/api/backups`, `/api/backups/restore-plan`, `/api/backups/restore`, `/api/support-bundles` | Restore is local-maintenance-only, exact-confirmation-gated, and worker-lock protected; support output is sanitized. |
 | HAI | `/api/hai/status`, `/api/hai/manifest`, `/api/hai/commands/execute` | Fixed command allowlist, normalized payloads, no external approval, emergency-stop clear, or restore. All commands are disabled during maintenance; redacted recovery status remains readable. |
-| Managed cloud access | `/api/cloud/status` | Read-only, secret-safe status. Reports active only when project runtime identity and the exact owned ngrok tunnel remain verifiable; maintenance always reports disabled. |
 
 ## Web gateway
 
@@ -28,7 +27,7 @@ The Express/tRPC gateway calls fixed local paths from `web/server/fabLocalGatewa
 - applies timeouts, a four-read concurrency bound, and a bounded projection before returning data;
 - caches only read resources for degraded/stale display;
 - coalesces identical control-center reads for two seconds and invalidates that snapshot after every successful mutation;
-- compresses responses larger than 1 KiB for browser/ngrok clients;
+- compresses responses larger than 1 KiB for browser clients;
 - does not convert an API error into success;
 - uses role-gated `fabOperatorProcedure` for financial operations.
 

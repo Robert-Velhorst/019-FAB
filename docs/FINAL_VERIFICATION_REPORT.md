@@ -1,5 +1,8 @@
 # Final Verification Report
 
+Historical report: Ngrok support was retired on 2026-10-19. Ngrok-specific
+results below describe the earlier implementation and are not current support.
+
 Status: locally and container verified; provider acceptance remains blocked
 
 This report separates local software verification from provider, account, infrastructure, and human acceptance. A green suite does not by itself authorize live financial mutations.

@@ -35,7 +35,6 @@ const connectorIcons: Record<string, typeof Cloud> = {
   mijngeldzaken: Landmark,
   banking_api: CircleDollarSign,
   hai: Bot,
-  ngrok_cloud: Cloud,
 };
 
 type FabConnectionsProps = {
@@ -132,8 +131,6 @@ function connectionSetupTarget(id: string): string {
           ? "reconciliation"
           : id === "hai"
             ? "api/hai/manifest"
-            : id === "ngrok_cloud"
-              ? "api/cloud/status"
             : "settings";
   return fabOperatorLink(anchor.startsWith("api/") ? `/${anchor}` : `/#${anchor}`);
 }

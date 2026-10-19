@@ -1,5 +1,8 @@
 # Windows and VM Production Implementation Plan
 
+Historical plan: Ngrok support was retired on 2026-10-19. Any Ngrok references
+below describe the former design and are superseded by the Hetzner target.
+
 **Goal:** Execute the approved single-business Windows and Docker/VM hardening design.
 **Spec:** ../specs/2026-08-30-fab-production-readiness-design.md
 **Architecture:** Retain Python/SQLite, its owned worker, and the React/Express gateway. Add explicit deployment validation, managed operator authentication, and reproducible deployment checks to these existing entrypoints.

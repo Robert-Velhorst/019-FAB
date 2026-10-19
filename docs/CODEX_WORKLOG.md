@@ -1,5 +1,8 @@
 # Codex Worklog
 
+Historical record: Ngrok support was retired on 2026-10-19. Entries below that
+describe Ngrok document the former implementation and its verification only.
+
 ## 2026-08-13 - Bounded recurring autonomy and canonical operator tickets
 
 - Audited the production ledger after unattended operation. The 150-document database had accumulated 250,572 audit events, 60,153 workflow steps, and 166,347 repeated `local_export_attempt.prepared` events because unchanged drafts and not-due work were repeatedly materialized.

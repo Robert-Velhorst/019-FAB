@@ -30,7 +30,7 @@ async function startServer() {
 
   app.use(...createFabSecurityMiddleware(ENV.isProduction));
 
-  // Compress JSON and static responses for remote/ngrok clients. Small
+  // Compress JSON and static responses for remote clients. Small
   // responses stay uncompressed to avoid spending CPU for negligible savings.
   app.use(compression({ threshold: 1_024 }));
   registerFabManagedAuthRoutes(app);

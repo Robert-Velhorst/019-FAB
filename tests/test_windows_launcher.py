@@ -89,7 +89,7 @@ class TestWindowsLauncher(unittest.TestCase):
         if not shells:
             self.skipTest("PowerShell is unavailable")
         for shell in shells:
-            for name in ("Start-FAB.ps1", "Stop-FAB.ps1", "Start-FAB-Ngrok.ps1", "Test-FAB-Ngrok.ps1", "scripts/Windows-Profile.ps1", "scripts/Windows-Job.ps1", "scripts/Windows-Process.ps1"):
+            for name in ("Start-FAB.ps1", "Stop-FAB.ps1", "scripts/Windows-Profile.ps1", "scripts/Windows-Job.ps1", "scripts/Windows-Process.ps1"):
                 path = str(ROOT / name).replace("'", "''")
                 command = "$tokens=$null; $errors=$null; [void][System.Management.Automation.Language.Parser]::ParseFile('" + path + "',[ref]$tokens,[ref]$errors); if ($errors.Count) { $errors | Out-String | Write-Error; exit 1 }"
                 result = subprocess.run([shell, "-NoProfile", "-NonInteractive", "-Command", command], capture_output=True, text=True, timeout=30)

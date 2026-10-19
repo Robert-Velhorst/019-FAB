@@ -49,7 +49,6 @@ from src.operations.local_bookkeeping_records import (
 )
 from src.operations.local_close_readiness import LocalCloseReadinessService
 from src.operations.local_close_pack import LocalClosePackService
-from src.operations.local_cloud_access import LocalCloudAccessService
 from src.operations.local_categories import fab_category_intents, fab_category_options
 from src.operations.local_category_suggestions import suggest_category_intent
 from src.operations.local_compliance import LocalComplianceService, OPEN_FINDING_STATUSES
@@ -3262,7 +3261,6 @@ DASHBOARD_TEMPLATE = """
         <div class="setting"><span>Dashboard URL</span><strong class="mono">{{ readiness.localAccess.dashboardUrl }}</strong></div>
         <div class="setting"><span>API base URL</span><strong class="mono">{{ readiness.localAccess.apiBaseUrl }}</strong></div>
         <div class="setting"><span>Auth mode</span><strong>{{ readiness.localAccess.authMode }}</strong></div>
-        <div class="setting"><span>Ngrok safety</span><strong>{{ readiness.localAccess.ngrokSafety }}</strong></div>
       </div>
       <details>
         <summary>Windows Local Runbook</summary>
@@ -5105,32 +5103,6 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
     @app.get("/api/hai/status")
     def hai_status_api():
         return jsonify(hai_connector().status())
-
-    @app.get("/api/cloud/status")
-    def cloud_status_api():
-        runtime_path = config.get("fab_ngrok_runtime_path")
-        result = LocalCloudAccessService(
-            project_root=Path(__file__).resolve().parents[2],
-            runtime_path=Path(str(runtime_path)) if runtime_path else None,
-            api_token_configured=bool(token),
-            shared_inspector_url=config.get("fab_ngrok_shared_inspector_url"),
-        ).summarize()
-        if maintenance_mode:
-            result.update({
-                "status": "disabled_for_maintenance",
-                "active": False,
-                "publicUrl": None,
-                "haiManifestUrl": None,
-                "maintenanceMode": True,
-                "nextAction": (
-                    "Complete or cancel local recovery and restart FAB in standard mode "
-                    "before enabling cloud access."
-                ),
-                "externalSubmission": "not_executed",
-            })
-        else:
-            result["maintenanceMode"] = False
-        return jsonify(result)
 
     @app.post("/api/hai/commands/plan")
     def hai_command_plan_api():

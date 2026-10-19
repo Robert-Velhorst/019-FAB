@@ -523,17 +523,6 @@ describe("FAB local API gateway", () => {
       "/api/close-readiness": { status: "blocked", canClose: false, blockingCount: 2 },
       "/api/hai/status": { status: "ready", enabled: true, allowedCommandIds: ["run_safe_cycle", "refresh_notifications"] },
       "/api/hai/manifest": { version: "fab-hai-connector-v1", commands: [] },
-      "/api/cloud/status": {
-        service: "fab-ngrok-cloud-access",
-        status: "active",
-        active: true,
-        configured: true,
-        publicUrl: "https://fab.example.test",
-        authMode: "bearer_token",
-        haiManifestUrl: "https://fab.example.test/api/hai/manifest",
-        verifiedAt: "2026-07-25T09:30:00Z",
-        externalSubmission: "not_executed",
-      },
       "/api/drive-wave/status": { status: "ready", archiveEnabled: true, driveTokenPresent: true },
       "/api/drive-wave/work-orders": {
         count: 1,
@@ -756,14 +745,6 @@ describe("FAB local API gateway", () => {
         allowedCommandIds: ["run_safe_cycle", "refresh_notifications"],
         details: "Governed machine control is enabled for 2 allowlisted commands.",
       }),
-      expect.objectContaining({
-        id: "ngrok_cloud",
-        status: "active",
-        configured: true,
-        ready: true,
-        publicUrl: "https://fab.example.test",
-        authMode: "bearer_token",
-      }),
     ]));
     expect(result.recovery).toMatchObject({ dueCount: 1 });
     expect(result.backups).toMatchObject({
@@ -919,11 +900,6 @@ describe("FAB local API gateway", () => {
       enabled: true,
       ready: false,
     });
-    expect(result.cloudAccess).toMatchObject({
-      status: "active",
-      active: true,
-      externalSubmission: "not_executed",
-    });
     expect(fetchMock.mock.calls.some(([input]) => {
       const url = new URL(String(input));
       return url.pathname === "/api/review"
@@ -1001,7 +977,7 @@ describe("FAB local API gateway", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     const result = await getFabControlCenter();
-    expect(paths.sort()).toEqual(["/api/backups", "/api/cloud/status", "/api/control-center/resources"].sort());
+    expect(paths.sort()).toEqual(["/api/backups", "/api/control-center/resources"].sort());
     expect(result.connection.connected).toBe(false);
     expect(result.metrics.documents).toBeNull();
     expect(result.resourceStates.metrics).toMatchObject({ state: "error", updatedAt: null });
@@ -1044,7 +1020,7 @@ describe("FAB local API gateway", () => {
         });
       });
       const result = await getFabControlCenter();
-      expect(paths.sort()).toEqual(["/api/backups", "/api/cloud/status", "/api/control-center/resources"].sort());
+      expect(paths.sort()).toEqual(["/api/backups", "/api/control-center/resources"].sort());
       expect(result.connection.connected).toBe(false);
       expect(result.metrics.documents).toBeNull();
     } finally {
