@@ -997,7 +997,7 @@ describe("FAB local API gateway", () => {
     expect(result.connection.connected).toBe(true);
     expect(paths).toContain("/api/live");
     expect(paths.filter(path => path === "/api/control-center/resources")).toHaveLength(1);
-    expect(paths.length).toBe(30);
+    expect(paths.length).toBe(29);
   });
 
   it("does not fan out after a real HTTP service-unavailable response", async () => {
@@ -1096,7 +1096,7 @@ describe("FAB local API gateway", () => {
     expect(requestedPaths).not.toContain("/api/health");
     expect(requestedPaths).not.toContain("/api/autonomy/plan");
     expect(requestedPaths).not.toContain("/api/drive-wave/work-orders");
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("coalesces duplicate snapshots and invalidates them after a mutation", async () => {
