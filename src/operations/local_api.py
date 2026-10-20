@@ -200,7 +200,7 @@ CONTROL_CENTER_BATCH_PATHS = {
     "metrics": "/api/dashboard",
     "notifications": "/api/notifications?limit=10",
     "settings": "/api/settings",
-    "bankTransactions": "/api/bank-transactions?limit=250",
+    "bankTransactions": "/api/bank-transactions?view=summary",
     "reconciliation": "/api/reconciliation?limit=10",
     "activity": "/api/audit?limit=12",
     "sources": "/api/sources?limit=50",
@@ -6716,52 +6716,13 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         if not document:
             return jsonify({"error": "Document not found"}), 404
 
-        source_path = str(document.get("storage_path") or "").strip()
-        if not source_path:
-            return jsonify({"error": "No retained source file is registered"}), 404
-        normalized_path = os.path.abspath(os.path.expandvars(os.path.expanduser(source_path)))
-        if not os.path.isfile(normalized_path):
-            return jsonify({"error": "The retained source file is unavailable"}), 404
-
-        expected_sha256 = str(document.get("content_sha256") or "").strip().lower()
-        if len(expected_sha256) != 64 or any(character not in "0123456789abcdef" for character in expected_sha256):
-            return jsonify({"error": "The retained source file has no valid integrity hash"}), 409
-
-        digest = hashlib.sha256()
-        source_chunks = []
-        verified_size = 0
         try:
-            flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
-            descriptor = os.open(normalized_path, flags)
-            try:
-                with os.fdopen(descriptor, "rb", buffering=0, closefd=False) as source_file:
-                    opened = os.fstat(descriptor)
-                    if not stat.S_ISREG(opened.st_mode):
-                        return jsonify({"error": "The retained source file could not be verified"}), 409
-                    if opened.st_size > LOCAL_SOURCE_PREVIEW_MAX_BYTES:
-                        return jsonify({
-                            "error": "The retained source file exceeds the preview limit",
-                            "maxBytes": LOCAL_SOURCE_PREVIEW_MAX_BYTES,
-                        }), 413
-                    while True:
-                        # A growing file can consume at most one byte beyond the limit.
-                        chunk = source_file.read(min(1024 * 1024, LOCAL_SOURCE_PREVIEW_MAX_BYTES - verified_size + 1))
-                        if not chunk:
-                            break
-                        verified_size += len(chunk)
-                        if verified_size > LOCAL_SOURCE_PREVIEW_MAX_BYTES:
-                            return jsonify({
-                                "error": "The retained source file exceeds the preview limit",
-                                "maxBytes": LOCAL_SOURCE_PREVIEW_MAX_BYTES,
-                            }), 413
-                        digest.update(chunk)
-                        source_chunks.append(chunk)
-            finally:
-                os.close(descriptor)
-        except OSError:
-            return jsonify({"error": "The retained source file could not be verified"}), 409
-        if not hmac.compare_digest(digest.hexdigest(), expected_sha256):
-            return jsonify({"error": "The retained source file failed its integrity check"}), 409
+            source_chunks, verified_size, normalized_path, expected_sha256 = _read_verified_source(document)
+        except _SourcePreviewError as exc:
+            payload = {"error": exc.public_message}
+            if exc.status_code == 413:
+                payload["maxBytes"] = LOCAL_SOURCE_PREVIEW_MAX_BYTES
+            return jsonify(payload), exc.status_code
 
         original_filename = str(document.get("original_filename") or Path(normalized_path).name)
         declared_mime_type = str(document.get("mime_type") or "").split(";", 1)[0].strip().lower()
@@ -6774,7 +6735,9 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         if preview_mime_type not in LOCAL_SOURCE_PREVIEW_MIME_TYPES:
             return jsonify({"error": "This retained source file type cannot be previewed safely"}), 415
 
-        response = Response(b"".join(source_chunks), mimetype=preview_mime_type)
+        # All chunks are verified before serving, without a second full-file copy.
+        response = Response(source_chunks, mimetype=preview_mime_type)
+        response.content_length = verified_size
         response.headers["Content-Disposition"] = "inline"
         response.headers["X-FAB-Source-Integrity"] = "verified"
         response.headers["X-FAB-Source-SHA256"] = expected_sha256
@@ -7653,18 +7616,22 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
 
     @app.get("/api/bank-transactions")
     def bank_transactions():
-        return jsonify({
-            "bankTransactions": ledger.list_bank_transactions(
-                account_identifier=request.args.get("accountIdentifier") or request.args.get("account_identifier"),
-                status=request.args.get("status"),
-                reconciliation_status=request.args.get("reconciliationStatus") or request.args.get("reconciliation_status"),
-                limit=_limit_arg(),
-            ),
+        filters = {
+            "account_identifier": request.args.get("accountIdentifier") or request.args.get("account_identifier"),
+            "status": request.args.get("status"),
+            "reconciliation_status": request.args.get("reconciliationStatus") or request.args.get("reconciliation_status"),
+        }
+        summary_only = request.args.get("view") == "summary"
+        payload = {
+            "bankTransactions": [] if summary_only else ledger.list_bank_transactions(**filters, limit=_limit_arg()),
             "bankStatementImports": ledger.list_bank_statement_imports(
-                account_identifier=request.args.get("accountIdentifier") or request.args.get("account_identifier"),
-                limit=25,
+                account_identifier=filters["account_identifier"],
+                limit=5 if summary_only else 25,
             ),
-        })
+        }
+        if summary_only:
+            payload["summary"] = ledger.bank_transaction_summary(**filters)
+        return jsonify(payload)
 
     @app.post("/api/bank-transactions/import")
     def import_bank_transactions():
@@ -8896,32 +8863,87 @@ def _reconciliation_matches_for_record(
     return matches[: _bounded_positive_int(limit, default=100, maximum=500)]
 
 
+class _SourcePreviewError(ValueError):
+    def __init__(self, message: str, status_code: int):
+        super().__init__(message)
+        self.public_message = message
+        self.status_code = status_code
+
+
+def _read_verified_source(document: Dict[str, Any], capture_limit: Optional[int] = None) -> tuple:
+    source_path = str(document.get("storage_path") or "").strip()
+    if not source_path:
+        raise _SourcePreviewError("No retained source file is registered", 404)
+    normalized_path = os.path.abspath(os.path.expandvars(os.path.expanduser(source_path)))
+    if not os.path.isfile(normalized_path):
+        raise _SourcePreviewError("The retained source file is unavailable", 404)
+    expected_sha256 = str(document.get("content_sha256") or "").strip().lower()
+    if len(expected_sha256) != 64 or any(character not in "0123456789abcdef" for character in expected_sha256):
+        raise _SourcePreviewError("The retained source file has no valid integrity hash", 409)
+
+    digest = hashlib.sha256()
+    chunks = []
+    verified_size = 0
+    captured_size = 0
+    try:
+        flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+        descriptor = os.open(normalized_path, flags)
+        try:
+            with os.fdopen(descriptor, "rb", buffering=0, closefd=False) as source_file:
+                opened = os.fstat(descriptor)
+                if not stat.S_ISREG(opened.st_mode):
+                    raise _SourcePreviewError("The retained source file could not be verified", 409)
+                if opened.st_size > LOCAL_SOURCE_PREVIEW_MAX_BYTES:
+                    raise _SourcePreviewError("The retained source file exceeds the preview limit", 413)
+                while True:
+                    # A growing file can consume at most one byte beyond the limit.
+                    chunk = source_file.read(min(1024 * 1024, LOCAL_SOURCE_PREVIEW_MAX_BYTES - verified_size + 1))
+                    if not chunk:
+                        break
+                    verified_size += len(chunk)
+                    if verified_size > LOCAL_SOURCE_PREVIEW_MAX_BYTES:
+                        raise _SourcePreviewError("The retained source file exceeds the preview limit", 413)
+                    digest.update(chunk)
+                    remaining = len(chunk) if capture_limit is None else max(0, capture_limit - captured_size)
+                    if remaining:
+                        retained = chunk[:remaining]
+                        chunks.append(retained)
+                        captured_size += len(retained)
+        finally:
+            os.close(descriptor)
+    except OSError:
+        raise _SourcePreviewError("The retained source file could not be verified", 409) from None
+    if not hmac.compare_digest(digest.hexdigest(), expected_sha256):
+        raise _SourcePreviewError("The retained source file failed its integrity check", 409)
+    return chunks, verified_size, normalized_path, expected_sha256
+
+
 def _document_source_preview(document: Dict[str, Any], character_limit: int = 5000) -> Dict[str, Any]:
     path = document.get("storage_path")
     if not path:
         return {"status": "No source file path is recorded.", "path": None, "text": None}
     normalized_path = os.path.abspath(os.path.expandvars(os.path.expanduser(str(path))))
-    if not os.path.exists(normalized_path):
-        return {"status": "Source file is missing from disk.", "path": normalized_path, "text": None}
     extension = os.path.splitext(normalized_path)[1].lower()
     mime_type = str(document.get("mime_type") or "").lower()
-    file_size = os.path.getsize(normalized_path)
-    if extension in {".txt", ".csv", ".json", ".xml"} or mime_type.startswith("text/"):
-        try:
-            with open(normalized_path, "r", encoding="utf-8", errors="replace") as handle:
-                text = handle.read(character_limit + 1)
-        except OSError as exc:
-            return {"status": f"Could not read source preview: {exc}", "path": normalized_path, "text": None}
+    is_text = extension in {".txt", ".csv", ".json", ".xml"} or mime_type.startswith("text/")
+    try:
+        # UTF-8 needs at most four bytes per character; hash the whole file but
+        # retain only enough bytes for the excerpt and its truncation marker.
+        chunks, file_size, _, _ = _read_verified_source(document, 4 * (character_limit + 1) if is_text else 0)
+    except _SourcePreviewError as exc:
+        return {"status": exc.public_message, "path": normalized_path, "text": None}
+    if is_text:
+        text = b"".join(chunks).decode("utf-8", errors="replace")
         truncated = len(text) > character_limit
         if truncated:
             text = text[:character_limit] + "\n... truncated ..."
         return {
-            "status": f"Text preview from local source file ({file_size} bytes).",
+            "status": f"Text preview from local source file ({file_size} bytes), checksum verified.",
             "path": normalized_path,
             "text": text,
         }
     return {
-        "status": f"Binary source file recorded ({file_size} bytes). Open from local path if visual inspection is needed.",
+        "status": f"Binary source file recorded ({file_size} bytes), checksum verified. Open from local path if visual inspection is needed.",
         "path": normalized_path,
         "text": None,
     }

@@ -1850,6 +1850,7 @@ class TestLocalOperationsApi(unittest.TestCase):
                 "originalFilename": "receipt.txt",
                 "mimeType": "text/plain",
                 "storagePath": receipt_path,
+                "contentSha256": hashlib.sha256(Path(receipt_path).read_bytes()).hexdigest(),
                 "documentType": "text",
                 "processingStatus": "needs_review",
                 "vendorName": "Office Shop",

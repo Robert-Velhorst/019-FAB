@@ -32,6 +32,33 @@ afterEach(() => {
 
 describe("FAB local API gateway", () => {
   it.each([
+    [{ complete: true, unreconciledAmountByCurrency: { EUR: 302.5, USD: 9 } }, { EUR: 302.5, USD: 9 }],
+    [undefined, null],
+    [{ complete: false, unreconciledAmountByCurrency: { EUR: 1 } }, null],
+    [{ complete: true, unreconciledAmountByCurrency: { EUR: -1 } }, null],
+    [{ complete: true, unreconciledAmountByCurrency: { EUR: "302.5" } }, null],
+    [{ complete: true, unreconciledAmountByCurrency: { EURO: 1 } }, null],
+    [{ complete: true, unreconciledAmountByCurrency: {} }, {}],
+  ])("uses complete bank aggregates rather than the latest detail window: %j", async (summary, expected) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/api/control-center/resources") return new Response("{}", { status: 404 });
+      return new Response(JSON.stringify(url.pathname === "/api/bank-transactions" ? {
+        summary,
+        bankTransactions: [{ amount: -1, currency: "EUR" }],
+      } : {}));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await getFabControlCenter();
+
+    expect(result.decisionContext.unreconciledAmountByCurrency).toEqual(expected);
+    const bankRequest = fetchMock.mock.calls.map(([input]) => new URL(String(input)))
+      .find(url => url.pathname === "/api/bank-transactions");
+    expect(bankRequest?.searchParams.get("view")).toBe("summary");
+  });
+
+  it.each([
     [400, "BAD_REQUEST"], [401, "UNAUTHORIZED"], [403, "FORBIDDEN"],
     [404, "NOT_FOUND"], [405, "METHOD_NOT_SUPPORTED"], [409, "CONFLICT"], [413, "PAYLOAD_TOO_LARGE"],
     [422, "UNPROCESSABLE_CONTENT"], [429, "TOO_MANY_REQUESTS"], [503, "SERVICE_UNAVAILABLE"],
@@ -692,6 +719,7 @@ describe("FAB local API gateway", () => {
         rowsOmitted: 2,
       },
       "/api/bank-transactions": {
+        summary: { complete: true, unreconciledAmountByCurrency: { EUR: 145.5, GBP: 8.25 } },
         bankTransactions: [
           { id: 90, amount: -125.5, currency: "EUR", description: "Private bank line" },
           { id: 91, amount: 20, currency: "EUR", description: "Private bank line" },

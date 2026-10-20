@@ -224,7 +224,12 @@ jobs:
         working-directory: web
         env:
           DATABASE_URL: mysql://root:fab-ci-only-password@127.0.0.1:3306/fab_test
-        run: pnpm exec drizzle-kit migrate
+        run: pnpm run db:migrate
+      - name: Verify migration rerun is idempotent
+        working-directory: web
+        env:
+          DATABASE_URL: mysql://root:fab-ci-only-password@127.0.0.1:3306/fab_test
+        run: pnpm run db:migrate
       - name: Exercise MySQL-backed audit and transaction paths
         working-directory: web
         env:

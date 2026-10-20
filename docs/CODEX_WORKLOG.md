@@ -1193,3 +1193,173 @@ describe Ngrok document the former implementation and its verification only.
   another release or container image.
 - No live provider operation, cloud deployment, public tunnel, or accountant
   acceptance was performed.
+
+## 2026-10-20 - Validate HAI results and reduce dispatch allocations
+
+- Reproduced malformed executor dictionaries being marked completed, including
+  string/integer success flags and non-finite or non-JSON values. A list-valued
+  failure status also raised an unhandled type error.
+- Validate executor output before recording completion: optional success/status
+  fields have strict types, and results must be finite JSON within the same
+  1 MiB, depth-32, 10,000-value limits as command metadata. The manifest now
+  advertises these result limits. Invalid output records a durable failure,
+  preserves uncertain provider effects, and cannot execute again under the
+  same request ID.
+- Normalize command input once while retaining both policy checks and the
+  separate copy passed to the executor. In a synthetic 25-iteration benchmark
+  using a 500,063-byte payload and an in-memory ledger stub, median dispatch
+  latency changed from 21.654 ms to 8.241 ms; p95 changed from 45.792 ms to
+  15.541 ms. Traced Python peak changed from 2,512,303 to 2,007,170 bytes, with
+  identical result SHA-256. These figures concern this synthetic dispatch path,
+  not whole-app RAM, sustained load, or provider throughput.
+- HAI and local API suites passed: 147 tests and 17 subtests in 334.15 seconds,
+  including authenticated API failure/replay and oversized-output regressions.
+  No provider write or live HAI controller was exercised.
+- PR #125 was merged into main during this work. Its nested-database backup and
+  case-fold migration fixes are already upstream. The owner confirmed that the
+  newer ngrok retirement remains in effect; Windows local operation and the
+  supported cloud deployment profiles remain the current deployment direction.
+
+## 2026-10-20 - Bound worker telemetry transport
+
+- Reproduced infinite/excessive configured timeouts, redirects reported as
+  successful writes, and unbounded eager response buffering in OperationsClient.
+- Disable redirects, reject redirect responses, stream decoded response bodies
+  with a 1 MiB cap, and always close the response. Invalid/non-finite timeouts
+  fall back to five seconds; valid connect/read timeouts cap at 120 seconds.
+  These are not total wall-clock deadlines. No automatic retry was added.
+- A real loopback HTTP regression proves a redirected document POST is not
+  forwarded and the source identity is persisted in the local SQLite ledger.
+  Additional tests cover response limits/closure and invalid timeout values.
+- Operations-client and workflow-recovery suites passed on Windows: 32 tests
+  and 6 subtests in 15.86 seconds. The initial integration-test cleanup failure
+  was fixed by closing its own SQLite connection explicitly.
+- Corrected stale gateway audit documentation to match the eight-read pool,
+  65-second snapshot cache, and mutation invalidation already in the code.
+- All hosted checks passed for the preceding HAI commit 317492ee, including
+  Linux/Windows backend, frontend, MySQL, container builds, and CodeQL. That
+  result does not validate this subsequent transport change until CI reruns.
+  No live provider write, deployment, or live HAI acceptance was performed.
+
+## 2026-10-20 - Keep HAI failure classification on replay
+
+- Store `invalid_executor_result` as the audit error code and replay the original stored failure code. Historical invalid-result records without that field retain their classification through their existing error type; ordinary executor exceptions retain `executor_failed`.
+- Added assertions for authenticated API replay, all seven malformed-result fixtures, and the durable audit code. Local connector suite: 27 tests and 15 subtests passed. No provider execution or deployment was performed.
+
+## 2026-10-20 - Complete, compact bank dashboard totals
+
+- Found the dashboard deriving gross unreconciled bank amounts from only its
+  latest 250 transaction rows. Replaced that partial window with a complete
+  SQLite aggregate, wired through Flask's individual and batched resources to
+  the dashboard gateway. Shared filters preserve the default detail route.
+- Summary reads omit private transaction rows and limit recent statement
+  imports to five. Approved/reconciled/ignored entries do not contribute.
+  Missing amounts or overflow mark the summary incomplete. The gateway shows
+  unavailable amounts for absent, incomplete, malformed, or unsupported-currency
+  aggregates instead of silently calculating partial legacy totals.
+- Reproduced the API detail-load bug and six gateway failures before fixes.
+  Final checks: 146 Python tests and 7 subtests passed across API, bank import,
+  reconciliation, SQL safety, and new summary coverage; 71 gateway tests passed.
+  Type check and production build/budget verification passed.
+- Actual HTTP smoke check on this Windows host: built standalone dashboard
+  using the windows deployment profile, temporary Flask backend, fresh random
+  secrets, and a synthetic SQLite ledger. The tRPC control-center response
+  reported 301 transactions, EUR 602 exposure, and a live bank resource. The
+  dashboard HTML returned 200; an anonymous backend summary request returned
+  401. All temporary processes stopped and temporary data was removed. This
+  was not browser rendering, installer acceptance, or live provider acceptance.
+- Final-code synthetic benchmark: 2,000 transactions with 4 KiB metadata each,
+  ten Flask test-client reads after warmup, under tracemalloc. Detail-window
+  response: 1,127,049 bytes, 62.437 ms median, 4,772,111-byte traced Python peak.
+  Complete-summary response: 209 bytes, 11.449 ms median, 38,444-byte traced peak.
+  The summary asserted all 2,000 transactions and EUR 2,500 exposure. These are
+  scoped endpoint measurements, not whole-app memory or sustained-load claims.
+- Hosted checks for the preceding transport commit 0e18e590 passed, including
+  Linux/Windows backend, frontend, MySQL, container builds, and CodeQL. The new
+  dashboard-summary commit requires its own CI verification.
+- Preserved concurrent remote HAI replay-classification commit 3d58a92 through
+  a non-force rebase; the only conflict was adjacent work-log entries, both
+  retained. The combined HAI/summary check then passed 29 tests and 17 subtests.
+
+- Hosted Linux validation of bank exposure aggregation found SQLite returning NULL for an overflowing SUM. Treat a non-numeric aggregate as incomplete before calling `math.isfinite`; amounts remain undisclosed in that case. The existing real-database overflow regression passes locally (two tests and two subtests); fresh Linux CI remains the platform-specific acceptance gate.
+
+## 2026-10-20 - Verify review excerpts and reduce preview allocations
+
+- Reproduced the advanced document detail page exposing unhashed local source
+  text. Its excerpt also lacked whole-file verification, unlike the source API.
+- Share the bounded descriptor reader between both paths. Hash the entire
+  retained file before showing bytes; excerpts retain only a bounded UTF-8
+  prefix. Missing/changed evidence stays unavailable and is never rehashed
+  automatically. Existing Windows binary flags, descriptor cleanup, regular-file
+  checks, growing-file limits, and safe errors remain covered.
+- Source API responses now serve their already-verified chunk list with an
+  explicit content length, eliminating the second full-file join allocation.
+- Python API/descriptor suites: 130 tests and 2 subtests passed. Web source
+  proxy/bounded-response suites: 28 tests passed. Tests cover rendered-page
+  tamper rejection, hash changes beyond the excerpt, UTF-8 truncation, and
+  multi-chunk responses as well as existing descriptor safety regressions.
+- Synthetic five-request 20 MiB preview comparison against preceding source:
+  traced Python peak 42,089,351 to 22,057,169 bytes; median request time
+  50.783 to 43.193 ms. Both returned 20,971,520 identical bytes with SHA-256
+  a40abd3ffd6ab0157952bf7ffbdf9b43e1e9806d016d60b7bfcac0421628cdd6.
+  These are scoped test-client measurements, not whole-app memory claims.
+- Actual Windows-profile HTTP smoke used the built dashboard proxy, temporary
+  Flask backend, fresh secrets, and synthetic evidence. Verified bytes returned
+  HTTP 200; modifying the source produced HTTP 409 without exposing the changed
+  bytes. The authenticated advanced HTML page also withheld them and showed the
+  integrity error. Temporary servers/data were cleaned up; no live provider,
+  cloud deployment, installer, or rendered browser acceptance was performed.
+- Preserved concurrent SQLite NULL-overflow fix 2ca2c12 through a clean,
+  non-force rebase. The combined source-preview/bank-summary check passed
+  12 tests and 2 subtests afterward; exact-head hosted CI is still required.
+
+## 2026-10-20 - Reviewed web migration command and rerun gate
+
+- Current branch inspection found no named production migration script;
+  `db:push` combines SQL generation and migration. Ported the existing, preserved
+  checkout's separate `db:generate` and `db:migrate` package scripts, without
+  changing its original files or unrelated pending work.
+- CI now invokes the documented `db:migrate` command twice against disposable
+  MySQL before the persistence/transaction integration suite. This changes no
+  migration SQL, schema, dependencies, or startup auto-migration behavior.
+- README/deployment instructions distinguish optional web MySQL from the
+  standalone SQLite ledger, require reviewed SQL and a verified backup/restore
+  path, and explain non-atomic MySQL DDL and fail/recover handling. `db:push`
+  remains development-only; the migration command never generates SQL.
+- Actual local test used cached mysql:8.4, a uniquely named container, loopback
+  port binding, fresh synthetic credentials, 768 MiB memory limit, and memory-
+  backed database storage with no persistent volume. `npm.cmd run db:migrate`
+  passed twice, then all seven real-MySQL integration tests passed. The container
+  stopped successfully and a follow-up inventory found no audit containers.
+  No user database, provider credential, or deployment was changed.
+- Three portable package-start tests passed through installed pnpm, including
+  paths with spaces. After retaining remote curated-preview-error fix 0906b7a
+  via a clean non-force rebase, 13 combined preview/startup tests passed.
+- Corrected README's stale MIT/no-root-license statement using the checked-in
+  AGPL version-3 LICENSE and package's AGPL-3.0-only declaration; no license
+  terms were changed.
+- Whitespace checks passed. Local YAML parsing was unavailable because neither
+  project nor bundled runtimes exposed a YAML parser; GitHub workflow parsing
+  and exact-head CI remain pending. The MySQL command was exercised with npm,
+  not reported as local pnpm migration proof.
+
+## 2026-10-20 - Strict telemetry response identities
+
+- Reproduced malformed HTTP-200 bodies being reported as successful operations:
+  arrays/scalars, false or string success flags, NaN/Infinity, and exponent
+  overflow. Numeric ID coercion accepted booleans/fractions and could throw on
+  infinity; a boolean ID could return an unrelated existing local row's ID.
+- Require finite-number JSON objects and a correctly typed, non-false optional
+  success flag. Returned IDs must be positive signed 64-bit integers or bounded
+  ASCII decimal strings. Reject malformed responses before selecting a local
+  preferred ID; preserve existing local-ledger fallback and response closure.
+- Regression tests verify malformed responses fail, valid integer/string IDs
+  remain accepted, and new documents remain distinct from a preexisting local
+  document when malformed remote IDs are returned. Combined client, recovery,
+  Windows launcher, and credential tests: 74 passed and 29 subtests passed.
+- A separate synthetic probe confirmed a remaining valid-ID collision: remote
+  ID 1 for a new source returned local ID 1 for an existing unrelated source,
+  without storing the new local document. Recorded as high-priority technical
+  debt: durable cross-store mapping and foreign-key/update translation are not
+  implemented by strict type validation. Do not call dual-store synchronization
+  production-ready on this evidence. No real data or external service was used.
