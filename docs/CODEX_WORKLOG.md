@@ -1193,3 +1193,29 @@ describe Ngrok document the former implementation and its verification only.
   another release or container image.
 - No live provider operation, cloud deployment, public tunnel, or accountant
   acceptance was performed.
+
+## 2026-10-20 - Validate HAI results and reduce dispatch allocations
+
+- Reproduced malformed executor dictionaries being marked completed, including
+  string/integer success flags and non-finite or non-JSON values. A list-valued
+  failure status also raised an unhandled type error.
+- Validate executor output before recording completion: optional success/status
+  fields have strict types, and results must be finite JSON within the same
+  1 MiB, depth-32, 10,000-value limits as command metadata. The manifest now
+  advertises these result limits. Invalid output records a durable failure,
+  preserves uncertain provider effects, and cannot execute again under the
+  same request ID.
+- Normalize command input once while retaining both policy checks and the
+  separate copy passed to the executor. In a synthetic 25-iteration benchmark
+  using a 500,063-byte payload and an in-memory ledger stub, median dispatch
+  latency changed from 21.654 ms to 8.241 ms; p95 changed from 45.792 ms to
+  15.541 ms. Traced Python peak changed from 2,512,303 to 2,007,170 bytes, with
+  identical result SHA-256. These figures concern this synthetic dispatch path,
+  not whole-app RAM, sustained load, or provider throughput.
+- HAI and local API suites passed: 147 tests and 17 subtests in 334.15 seconds,
+  including authenticated API failure/replay and oversized-output regressions.
+  No provider write or live HAI controller was exercised.
+- PR #125 was merged into main during this work. Its nested-database backup and
+  case-fold migration fixes are already upstream. The owner confirmed that the
+  newer ngrok retirement remains in effect; Windows local operation and the
+  supported cloud deployment profiles remain the current deployment direction.

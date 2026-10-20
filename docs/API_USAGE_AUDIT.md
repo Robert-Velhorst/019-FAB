@@ -18,6 +18,22 @@ The Flask API is the source of operational truth. Major endpoint groups are:
 | Recovery/support | `/api/backups`, `/api/backups/restore-plan`, `/api/backups/restore`, `/api/support-bundles` | Restore is local-maintenance-only, exact-confirmation-gated, and worker-lock protected; support output is sanitized. |
 | HAI | `/api/hai/status`, `/api/hai/manifest`, `/api/hai/commands/execute` | Fixed command allowlist, normalized payloads, no external approval, emergency-stop clear, or restore. All commands are disabled during maintenance; redacted recovery status remains readable. |
 
+## HAI command results
+
+Executor results must be finite JSON objects within the limits advertised as
+`resultLimits` in the HAI manifest: 1 MiB encoded JSON, depth 32, and 10,000
+values. Optional `success` fields must be booleans; optional `status` fields
+must be non-empty strings. Results without either field remain valid for local
+services that return aggregate counts.
+
+Malformed or oversized results produce a durable `invalid_executor_result`
+failure rather than a completion event. Reusing the same request ID returns
+the stored failure without invoking the executor again. An operation that could
+have changed an external provider retains an `unknown` effect until verified.
+Input validation is performed once per dispatch; policy and executor readiness
+are still checked before execution, and the executor receives a separate copy
+of the normalized payload.
+
 ## Web gateway
 
 The Express/tRPC gateway calls fixed local paths from `web/server/fabLocalGateway.ts`. The browser supplies a typed command ID, never an arbitrary URL. The gateway:
