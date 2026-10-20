@@ -131,3 +131,153 @@ def test_failed_nested_preparation_preserves_unrelated_outer_transaction(tmp_pat
     assert ledger.get_document_core(document)["processing_status"] == "reviewed"
     assert ledger.list_bookkeeping_records() == []
     assert [event["action"] for event in ledger.list_audit_events()] == ["synthetic.outer_preserved"]
+
+
+@pytest.mark.parametrize("target", ["waveapps", "mijngeldzaken"])
+@pytest.mark.parametrize("approved", [False, True])
+def test_repeated_preparation_returns_existing_draft_without_rewriting_state(tmp_path, target, approved):
+    ledger, document, service = fixture(tmp_path, target)
+    first = service.prepare_document_route(document)
+    record_id = ledger.get_bookkeeping_record_by_document(document)["id"]
+    if approved:
+        ledger.update_bookkeeping_record(record_id, {"exportStatus": "approved_not_submitted"})
+    before_document = ledger.get_document_core(document)
+    before_record = ledger.get_bookkeeping_record(record_id)
+    before_audit = ledger.list_audit_events()
+    with patch.object(LocalBookkeepingRecordService, "record_export_state", side_effect=AssertionError("Unchanged draft must not rewrite normalized state")):
+        second = service.prepare_document_route(document)
+    assert second["success"] and second["status"] == "already_prepared"
+    assert second["routingAttemptId"] == first["routingAttemptId"]
+    assert len(ledger.list_routing_attempts()) == 1
+    assert ledger.get_document_core(document) == before_document
+    assert ledger.get_bookkeeping_record(record_id) == before_record
+    assert ledger.list_audit_events() == before_audit
+
+
+@pytest.mark.parametrize("target", ["waveapps", "mijngeldzaken"])
+@pytest.mark.parametrize("change", [{"totalAmount": 99}, {"confidenceScore": 0.2}])
+def test_prepared_source_drift_requires_review_instead_of_a_replacement_draft(tmp_path, target, change):
+    ledger, document, service = fixture(tmp_path, target)
+    first = service.prepare_document_route(document)
+    old_attempt = ledger.get_routing_attempt(first["routingAttemptId"])
+    ledger.update_document(document, change)
+    result = service.prepare_document_route(document)
+    assert not result["success"] and result["status"] == "needs_review"
+    assert ledger.get_routing_attempt(first["routingAttemptId"]) == old_attempt
+    assert sum(row["status"] in {"draft_prepared", "needs_confirmation"} for row in ledger.list_routing_attempts()) == 1
+    assert ledger.get_document_core(document)["processing_status"] == "needs_review"
+    assert ledger.list_review_items(document_id=document)[0]["status"] == "pending"
+
+
+def test_existing_wave_business_draft_is_not_reused_for_personal_target(tmp_path):
+    ledger, document, service = fixture(tmp_path, "waveapps_business")
+    first = service.prepare_document_route(document)
+    operation_id = first["operation"]["operation_id"]
+    ledger.update_document(document, {"metadata": {"targetSystem": "waveapps_personal"}})
+    result = service.prepare_document_route(document)
+    assert result["status"] == "needs_review"
+    assert ledger.get_routing_attempt(first["routingAttemptId"])["metadata"]["operation"]["operation_id"] == operation_id
+    assert len([row for row in ledger.list_routing_attempts() if row["status"] == "draft_prepared"]) == 1
+
+
+@pytest.mark.parametrize("target, alias", [("waveapps", "wave"), ("mijngeldzaken", "mijngeldzaken.nl")])
+def test_equivalent_generic_target_aliases_reuse_the_same_draft(tmp_path, target, alias):
+    ledger, document, service = fixture(tmp_path, target)
+    first = service.prepare_document_route(document)
+    second = service.prepare_document_route(document, target_system=alias)
+    assert second["status"] == "already_prepared"
+    assert second["routingAttemptId"] == first["routingAttemptId"]
+    assert len(ledger.list_routing_attempts()) == 1
+
+
+@pytest.mark.parametrize("target", ["waveapps", "mijngeldzaken"])
+def test_open_review_still_blocks_reuse_of_a_prepared_draft(tmp_path, target):
+    ledger, document, service = fixture(tmp_path, target)
+    first = service.prepare_document_route(document)
+    ledger.create_review_item({"documentId": document, "reason": "validation_failed"})
+    result = service.prepare_document_route(document)
+    assert result["status"] == "blocked_review"
+    assert result["routingAttemptId"] != first["routingAttemptId"]
+    assert ledger.list_review_items(document_id=document)[0]["status"] == "pending"
+
+
+@pytest.mark.parametrize("target", ["waveapps", "mijngeldzaken"])
+@pytest.mark.parametrize("missing_binding", ["documentSnapshot", "targetSystem"])
+def test_legacy_unbound_draft_requires_review_not_silent_replacement(tmp_path, target, missing_binding):
+    import json
+
+    ledger, document, service = fixture(tmp_path, target)
+    first = service.prepare_document_route(document)
+    metadata = dict(ledger.get_routing_attempt(first["routingAttemptId"])["metadata"])
+    metadata.pop(missing_binding)
+    with ledger._connection() as connection:
+        connection.execute("UPDATE routing_attempts SET metadata_json = ? WHERE id = ?",
+                           (json.dumps(metadata), first["routingAttemptId"]))
+    result = service.prepare_document_route(document)
+    assert result["status"] == "needs_review"
+    assert sum(row["status"] == "draft_prepared" for row in ledger.list_routing_attempts()) == 1
+
+
+@pytest.mark.parametrize("target", ["waveapps", "mijngeldzaken"])
+def test_prepared_draft_without_normalized_record_requires_review(tmp_path, target):
+    ledger, document, service = fixture(tmp_path, target)
+    first = service.prepare_document_route(document)
+    old_attempt = ledger.get_routing_attempt(first["routingAttemptId"])
+    record = ledger.get_bookkeeping_record_by_document(document)
+    with ledger._connection() as connection:
+        connection.execute("DELETE FROM bookkeeping_record_line_items WHERE bookkeeping_record_id = ?", (record["id"],))
+        connection.execute("DELETE FROM bookkeeping_records WHERE id = ?", (record["id"],))
+    assert ledger.get_bookkeeping_record_by_document(document) is None
+    result = service.prepare_document_route(document)
+    assert not result["success"] and result["status"] == "needs_review"
+    assert ledger.get_routing_attempt(first["routingAttemptId"]) == old_attempt
+    assert sum(row["status"] == "draft_prepared" for row in ledger.list_routing_attempts()) == 1
+    assert ledger.list_review_items(document_id=document)[0]["status"] == "pending"
+
+
+@pytest.mark.parametrize("target", ["waveapps", "mijngeldzaken"])
+def test_competing_preparations_create_one_draft_without_blocking_its_record(tmp_path, target):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    ledger, document, service = fixture(tmp_path, target)
+    participants = [LocalRoutingService(LocalOperationsLedger(ledger.path), service.config) for _ in range(2)]
+    barrier = Barrier(2)
+
+    def prepare(participant):
+        barrier.wait(timeout=10)
+        return participant.prepare_document_route(document)
+
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        futures = [workers.submit(prepare, participant) for participant in participants]
+        results = [future.result(timeout=20) for future in futures]
+    assert sorted(result["status"] for result in results) == ["already_prepared", "draft_prepared"]
+    assert len({result["routingAttemptId"] for result in results}) == 1
+    assert len(ledger.list_routing_attempts()) == 1
+    assert ledger.get_bookkeeping_record_by_document(document)["export_status"] == "draft_prepared"
+    assert ledger.list_review_items(document_id=document) == []
+
+
+@pytest.mark.parametrize("target", ["waveapps", "mijngeldzaken"])
+def test_authenticated_route_retry_acknowledges_the_same_local_draft(tmp_path, target):
+    from src.operations.local_api import create_app
+
+    ledger, document, service = fixture(tmp_path, target)
+    token = "R7nP9qV3xM6bT1cE5dG8hJ0kL2sU4wZf"
+    app = create_app({
+        **service.config, "fab_instance_root": str(tmp_path), "fab_local_ledger_path": ledger.path,
+        "fab_local_api_token": token, "fab_local_intake_paths": [],
+        "gmail_enabled": False, "google_drive_enabled": False, "freshdesk_enabled": False,
+    })
+    client = app.test_client()
+    path = f"/api/documents/{document}/route"
+    assert client.post(path, json={}).status_code == 401
+    headers = {"Authorization": "Bearer " + token}
+    first = client.post(path, json={}, headers=headers)
+    assert first.status_code == 200 and first.get_json()["success"]
+    record = ledger.get_bookkeeping_record_by_document(document)
+    second = client.post(path, json={}, headers=headers)
+    assert second.status_code == 200 and second.get_json()["status"] == "already_prepared"
+    assert first.get_json()["routingAttemptId"] == second.get_json()["routingAttemptId"]
+    assert ledger.get_bookkeeping_record_by_document(document) == record
+    assert len(ledger.list_routing_attempts()) == 1

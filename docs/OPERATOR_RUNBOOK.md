@@ -164,6 +164,14 @@ new review or draft row. Other successfully completed items in a batch are not
 rolled back. This only prepares local drafts; external submission still needs
 its existing approvals and execution/readback capabilities.
 
+Retrying preparation of an unchanged prepared document returns its existing
+draft without rewriting approval or audit state. FAB checks the stored operation,
+source snapshot, target and presence of its normalized bookkeeping record.
+Changed evidence, a different explicit account target, missing legacy bindings
+or a missing local record requires review before preparing a replacement. Open
+reviews and duplicate gates still apply. This local identity check does not
+verify a provider entry or its receipt attachment and cannot authorize archival.
+
 ```powershell
 python -m pytest -q -p no:cacheprovider -p no:stepwise
 pnpm.cmd --dir web check

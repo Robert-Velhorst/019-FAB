@@ -1,5 +1,19 @@
 # Codex Checkpoints
 
+Latest prepared-draft retry follow-up: unchanged document preparation returns
+the same local draft without rewriting normalized approval, timestamps or audit.
+Reuse requires the operation, source snapshot (excluding machine processing
+status), target and an existing normalized record. Generic aliases remain
+equivalent; explicit Wave business/personal targets remain distinct. Changed,
+unbound legacy or missing-record drafts require review, not silent replacement.
+Autonomous batch selection still excludes already-prepared documents. Final
+routing/export/reconciliation/records/autonomy checks passed 121 tests and
+20 subtests; the built synthetic dashboard/API/SQLite/auth/HAI rehearsal passed
+with no provider writes and owned children stopped. No new browser/layout
+acceptance is claimed for this Python-only change. Prior 798515e passed all
+nine CI jobs and CodeQL; this follow-up needs fresh exact-head checks. No cleanup
+was performed; host storage and live provider/cloud/HAI-peer gates remain open.
+
 Latest routing follow-up: document and bank-record draft preparation each use
 one writer transaction, including source validation, review/blocked branches,
 routing attempt, document/normalized export state and completion audit. Four

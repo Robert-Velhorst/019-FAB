@@ -1791,3 +1791,34 @@ describe Ngrok document the former implementation and its verification only.
   claimed for this Python-only follow-up. New exact-head CI remains required;
   prior 7f451da verification and CodeQL completed successfully. Host free-space
   headroom, production/cloud/provider and external HAI acceptance remain open.
+
+## 2026-10-20 - Idempotent prepared-document routing retries
+
+- Four red cases reproduced a normal second preparation being blocked and
+  rewriting normalized export state, including a prior local approval. Prepared
+  documents may now look up a matching existing draft without entering the
+  autonomous batch candidate set. A successful unchanged retry returns the same
+  routing ID without normalized-state, document, timestamp or audit mutations.
+- Match the stored operation, source snapshot excluding machine processing
+  status, and target. Generic provider aliases are equivalent; explicit Wave
+  business and personal targets are not. Missing historical source/target
+  bindings or changed evidence require review instead of silent replacement.
+- Two additional red cases found that this fast path could acknowledge a draft
+  after its normalized record had disappeared. Require that record to exist;
+  otherwise retain the old draft and open review, not a fresh prepared state.
+  This checks local presence, not complete projection consistency or external
+  delivery/receipt verification. Existing export and archival gates remain.
+- Added 23 regression cases covering both providers, prior approval preservation,
+  source drift, target isolation/aliases, open review, missing legacy bindings
+  and normalized records, competing separate-ledger callers and authenticated
+  API retries. Final shared-service checks passed 121 tests and 20 subtests in
+  68.43 seconds. The earlier continuation's final test handle was unavailable
+  after context loss; only this fresh terminal run is the final expanded verdict.
+- The built synthetic dashboard/API/SQLite/auth/HAI/reconciliation rehearsal
+  passed with loopback-only access, provider writes disabled and owned children
+  stopped. No frontend source changed; no new rendered browser acceptance is
+  claimed. No live ledger, provider, permission or deployment was changed.
+- Prior commit 798515e passed verification run 39500276822 (all nine jobs) and
+  CodeQL run 39500268031. This update needs its own exact-head hosted checks.
+  No cleanup was performed. C: had about 9.5 GB free when checked; D: remained
+  low. Live provider/cloud/HAI-peer acceptance and storage headroom remain open.
