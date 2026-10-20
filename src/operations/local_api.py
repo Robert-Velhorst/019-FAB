@@ -6719,7 +6719,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         try:
             source_chunks, verified_size, normalized_path, expected_sha256 = _read_verified_source(document)
         except _SourcePreviewError as exc:
-            payload = {"error": str(exc)}
+            payload = {"error": exc.public_message}
             if exc.status_code == 413:
                 payload["maxBytes"] = LOCAL_SOURCE_PREVIEW_MAX_BYTES
             return jsonify(payload), exc.status_code
@@ -8866,6 +8866,7 @@ def _reconciliation_matches_for_record(
 class _SourcePreviewError(ValueError):
     def __init__(self, message: str, status_code: int):
         super().__init__(message)
+        self.public_message = message
         self.status_code = status_code
 
 
@@ -8930,7 +8931,7 @@ def _document_source_preview(document: Dict[str, Any], character_limit: int = 50
         # retain only enough bytes for the excerpt and its truncation marker.
         chunks, file_size, _, _ = _read_verified_source(document, 4 * (character_limit + 1) if is_text else 0)
     except _SourcePreviewError as exc:
-        return {"status": str(exc), "path": normalized_path, "text": None}
+        return {"status": exc.public_message, "path": normalized_path, "text": None}
     if is_text:
         text = b"".join(chunks).decode("utf-8", errors="replace")
         truncated = len(text) > character_limit
