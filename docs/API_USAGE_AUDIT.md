@@ -104,3 +104,19 @@ the gateway then displays the amount as unavailable. It also rejects missing,
 incomplete, malformed, or unsupported-currency aggregates instead of reconstructing
 an apparently complete amount from a legacy server's latest 250 detail rows.
 The default detail endpoint remains available with its existing bounded list.
+
+## Verified source previews
+
+The advanced document review page and `/api/documents/<id>/source` use the same
+bounded, descriptor-based source reader. Both require the recorded SHA-256 to
+match the retained file before exposing any of its bytes. Missing hashes,
+changed or unavailable files, non-regular descriptors, and files over the
+25 MiB preview limit fail closed with safe diagnostics.
+
+Text review excerpts verify the whole file, including content beyond the
+displayed excerpt, while retaining only a bounded UTF-8 prefix. Download
+responses serve the already-verified chunks with an explicit content length;
+they do not reopen the path or join the full file into a second buffer. The
+dashboard proxy still independently checks the hash and allowed content type
+before serving a source preview to the browser. Neither path repairs or
+rehashes changed evidence automatically.

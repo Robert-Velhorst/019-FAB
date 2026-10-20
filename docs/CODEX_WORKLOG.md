@@ -1282,3 +1282,33 @@ describe Ngrok document the former implementation and its verification only.
   retained. The combined HAI/summary check then passed 29 tests and 17 subtests.
 
 - Hosted Linux validation of bank exposure aggregation found SQLite returning NULL for an overflowing SUM. Treat a non-numeric aggregate as incomplete before calling `math.isfinite`; amounts remain undisclosed in that case. The existing real-database overflow regression passes locally (two tests and two subtests); fresh Linux CI remains the platform-specific acceptance gate.
+
+## 2026-10-20 - Verify review excerpts and reduce preview allocations
+
+- Reproduced the advanced document detail page exposing unhashed local source
+  text. Its excerpt also lacked whole-file verification, unlike the source API.
+- Share the bounded descriptor reader between both paths. Hash the entire
+  retained file before showing bytes; excerpts retain only a bounded UTF-8
+  prefix. Missing/changed evidence stays unavailable and is never rehashed
+  automatically. Existing Windows binary flags, descriptor cleanup, regular-file
+  checks, growing-file limits, and safe errors remain covered.
+- Source API responses now serve their already-verified chunk list with an
+  explicit content length, eliminating the second full-file join allocation.
+- Python API/descriptor suites: 130 tests and 2 subtests passed. Web source
+  proxy/bounded-response suites: 28 tests passed. Tests cover rendered-page
+  tamper rejection, hash changes beyond the excerpt, UTF-8 truncation, and
+  multi-chunk responses as well as existing descriptor safety regressions.
+- Synthetic five-request 20 MiB preview comparison against preceding source:
+  traced Python peak 42,089,351 to 22,057,169 bytes; median request time
+  50.783 to 43.193 ms. Both returned 20,971,520 identical bytes with SHA-256
+  a40abd3ffd6ab0157952bf7ffbdf9b43e1e9806d016d60b7bfcac0421628cdd6.
+  These are scoped test-client measurements, not whole-app memory claims.
+- Actual Windows-profile HTTP smoke used the built dashboard proxy, temporary
+  Flask backend, fresh secrets, and synthetic evidence. Verified bytes returned
+  HTTP 200; modifying the source produced HTTP 409 without exposing the changed
+  bytes. The authenticated advanced HTML page also withheld them and showed the
+  integrity error. Temporary servers/data were cleaned up; no live provider,
+  cloud deployment, installer, or rendered browser acceptance was performed.
+- Preserved concurrent SQLite NULL-overflow fix 2ca2c12 through a clean,
+  non-force rebase. The combined source-preview/bank-summary check passed
+  12 tests and 2 subtests afterward; exact-head hosted CI is still required.
