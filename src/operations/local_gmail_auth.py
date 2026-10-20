@@ -250,12 +250,20 @@ class LocalGmailAuthorizationCoordinator:
                 "error": _safe_error(exc),
             }
         success = bool(result.get("success"))
+        if success:
+            try:
+                self.token_store.clear_reauthorization()
+            except OSError as exc:
+                result = {
+                    "success": False,
+                    "status": "authorization_failed",
+                    "error": f"Authorization succeeded but consent-state cleanup failed: {_safe_error(exc)}",
+                }
+                success = False
         state = "authorized" if success else str(result.get("status") or "authorization_failed")
         error = None if success else _safe_message(result.get("error"))
         email_address = str(result.get("emailAddress") or "") or None
         finished_at = _now()
-        if success:
-            self.token_store.clear_reauthorization()
         with self._lock:
             self._session = {
                 "state": state,

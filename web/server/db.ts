@@ -1,4 +1,4 @@
-import { eq, sql, desc, and, gte, lte } from "drizzle-orm";
+import { eq, sql, desc, and, gte, lte, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   InsertUser,
@@ -29,11 +29,42 @@ const log = createLogger("Database");
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
+type FabDatabase = NonNullable<Awaited<ReturnType<typeof getDb>>>;
+type FabTransaction = Parameters<Parameters<FabDatabase["transaction"]>[0]>[0];
+type AuditEventTemplate = Omit<InsertAuditEvent, "entityId"> & Pick<Partial<InsertAuditEvent>, "entityId">;
+
+function auditEventForEntity(event: AuditEventTemplate, id: number): InsertAuditEvent {
+  return { ...event, entityId: event.entityId ?? String(id) };
+}
+
+async function withAuditTransaction<T>(
+  operation: (tx: FabTransaction) => Promise<{ result: T; audit: InsertAuditEvent | null }>,
+): Promise<T> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  return db.transaction(async (tx) => {
+    const { result, audit } = await operation(tx);
+    if (audit) await tx.insert(auditEvents).values(audit);
+    return result;
+  });
+}
+
 // Lazily create the drizzle instance so local tooling can run without a DB.
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
-      _db = drizzle(process.env.DATABASE_URL);
+      _db = drizzle({
+        connection: {
+          uri: process.env.DATABASE_URL,
+          waitForConnections: true,
+          connectionLimit: 10,
+          maxIdle: 5,
+          idleTimeout: 60_000,
+          queueLimit: 50,
+          connectTimeout: 10_000,
+        },
+      });
     } catch (error) {
       log.warn(
         "Failed to connect",
@@ -44,6 +75,16 @@ export async function getDb() {
     }
   }
   return _db;
+}
+
+export async function closeDb(): Promise<void> {
+  const db = _db;
+  _db = null;
+  if (!db) return;
+
+  await new Promise<void>((resolve, reject) => {
+    db.$client.end((error) => error ? reject(error) : resolve());
+  });
 }
 
 export async function upsertUser(user: InsertUser): Promise<void> {
@@ -288,7 +329,9 @@ export async function createBookkeepingDocument(document: InsertBookkeepingDocum
     await db
       .insert(bookkeepingDocuments)
       .values(document)
-      .onDuplicateKeyUpdate({ set: document });
+      .onDuplicateKeyUpdate({
+        set: { sourceDocumentId: document.sourceDocumentId },
+      });
 
     const registered = await db
       .select({ id: bookkeepingDocuments.id })
@@ -309,14 +352,87 @@ export async function createBookkeepingDocument(document: InsertBookkeepingDocum
   return { id: Number(result[0].insertId) };
 }
 
+export async function createBookkeepingDocumentWithAudit(
+  document: InsertBookkeepingDocument,
+  event: AuditEventTemplate,
+): Promise<{ id: number }> {
+  return withAuditTransaction(async (tx) => {
+    let id: number;
+    if (document.sourceDocumentId) {
+      await tx
+        .insert(bookkeepingDocuments)
+        .values(document)
+        .onDuplicateKeyUpdate({ set: { sourceDocumentId: document.sourceDocumentId } });
+      const registered = await tx
+        .select({ id: bookkeepingDocuments.id })
+        .from(bookkeepingDocuments)
+        .where(and(
+          eq(bookkeepingDocuments.source, document.source),
+          eq(bookkeepingDocuments.sourceDocumentId, document.sourceDocumentId),
+        ))
+        .limit(1);
+      if (!registered[0]) throw new Error("Bookkeeping document registration failed");
+      id = registered[0].id;
+    } else {
+      const inserted = await tx.insert(bookkeepingDocuments).values(document);
+      id = Number(inserted[0].insertId);
+    }
+    return {
+      result: { id },
+      audit: auditEventForEntity(event, id),
+    };
+  });
+}
+
 export async function updateBookkeepingDocument(
   id: number,
   document: Partial<InsertBookkeepingDocument>
-): Promise<void> {
+): Promise<boolean> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
-  await db.update(bookkeepingDocuments).set(document).where(eq(bookkeepingDocuments.id, id));
+  return db.transaction(async (tx) => {
+    const [result] = await tx
+      .update(bookkeepingDocuments)
+      .set(document)
+      .where(eq(bookkeepingDocuments.id, id));
+    if (result.affectedRows > 0) return true;
+
+    const existing = await tx
+      .select({ id: bookkeepingDocuments.id })
+      .from(bookkeepingDocuments)
+      .where(eq(bookkeepingDocuments.id, id))
+      .limit(1)
+      .for("update");
+    return Boolean(existing[0]);
+  });
+}
+
+export async function updateBookkeepingDocumentWithAudit(
+  id: number,
+  document: Partial<InsertBookkeepingDocument>,
+  event: AuditEventTemplate,
+): Promise<boolean> {
+  return withAuditTransaction(async (tx) => {
+    const [result] = await tx
+      .update(bookkeepingDocuments)
+      .set(document)
+      .where(eq(bookkeepingDocuments.id, id));
+    if (result.affectedRows > 0) {
+      return { result: true, audit: auditEventForEntity(event, id) };
+    }
+
+    const existing = await tx
+      .select({ id: bookkeepingDocuments.id })
+      .from(bookkeepingDocuments)
+      .where(eq(bookkeepingDocuments.id, id))
+      .limit(1)
+      .for("update");
+    return {
+      result: Boolean(existing[0]),
+      audit: null,
+    };
+  });
 }
 
 export async function addReviewItem(item: InsertReviewItem): Promise<{ id: number }> {
@@ -327,6 +443,20 @@ export async function addReviewItem(item: InsertReviewItem): Promise<{ id: numbe
   return { id: Number(result[0].insertId) };
 }
 
+export async function addReviewItemWithAudit(
+  item: InsertReviewItem,
+  event: AuditEventTemplate,
+): Promise<{ id: number }> {
+  return withAuditTransaction(async (tx) => {
+    const inserted = await tx.insert(reviewItems).values(item);
+    const id = Number(inserted[0].insertId);
+    return {
+      result: { id },
+      audit: auditEventForEntity(event, id),
+    };
+  });
+}
+
 export async function createWorkflowRun(run: InsertWorkflowRun): Promise<{ id: number }> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
@@ -335,14 +465,79 @@ export async function createWorkflowRun(run: InsertWorkflowRun): Promise<{ id: n
   return { id: Number(result[0].insertId) };
 }
 
+export async function createWorkflowRunWithAudit(
+  run: InsertWorkflowRun,
+  event: AuditEventTemplate,
+): Promise<{ id: number }> {
+  return withAuditTransaction(async (tx) => {
+    const inserted = await tx.insert(workflowRuns).values(run);
+    const id = Number(inserted[0].insertId);
+    return {
+      result: { id },
+      audit: auditEventForEntity(event, id),
+    };
+  });
+}
+
 export async function updateWorkflowRun(
   id: number,
   data: Partial<InsertWorkflowRun>
-): Promise<void> {
+): Promise<boolean> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
-  await db.update(workflowRuns).set(data).where(eq(workflowRuns.id, id));
+  return db.transaction(async (tx) => {
+    const [result] = await tx
+      .update(workflowRuns)
+      .set(data)
+      .where(eq(workflowRuns.id, id));
+    if (result.affectedRows > 0) return true;
+
+    const existing = await tx
+      .select({ id: workflowRuns.id })
+      .from(workflowRuns)
+      .where(eq(workflowRuns.id, id))
+      .limit(1)
+      .for("update");
+    return Boolean(existing[0]);
+  });
+}
+
+export async function updateWorkflowRunWithAudit(
+  id: number,
+  data: Partial<InsertWorkflowRun>,
+  event: AuditEventTemplate,
+  options: { expectedMetadata?: Record<string, unknown> | null } = {},
+): Promise<boolean> {
+  return withAuditTransaction(async (tx) => {
+    const where = Object.prototype.hasOwnProperty.call(options, "expectedMetadata")
+      ? and(
+          eq(workflowRuns.id, id),
+          options.expectedMetadata === null
+            ? isNull(workflowRuns.metadata)
+            : sql`JSON_CONTAINS(${workflowRuns.metadata}, CAST(${JSON.stringify(options.expectedMetadata)} AS JSON))
+                AND JSON_CONTAINS(CAST(${JSON.stringify(options.expectedMetadata)} AS JSON), ${workflowRuns.metadata})`,
+        )
+      : eq(workflowRuns.id, id);
+    const [result] = await tx
+      .update(workflowRuns)
+      .set(data)
+      .where(where);
+    if (result.affectedRows > 0) {
+      return { result: true, audit: { ...event, entityId: String(id) } };
+    }
+
+    const existing = await tx
+      .select({ id: workflowRuns.id })
+      .from(workflowRuns)
+      .where(where)
+      .limit(1)
+      .for("update");
+    return {
+      result: Boolean(existing[0]),
+      audit: null,
+    };
+  });
 }
 
 export async function createRoutingAttempt(attempt: InsertRoutingAttempt): Promise<{ id: number }> {
@@ -353,12 +548,40 @@ export async function createRoutingAttempt(attempt: InsertRoutingAttempt): Promi
   return { id: Number(result[0].insertId) };
 }
 
+export async function createRoutingAttemptWithAudit(
+  attempt: InsertRoutingAttempt,
+  event: Omit<InsertAuditEvent, "entityId">,
+): Promise<{ id: number }> {
+  return withAuditTransaction(async (tx) => {
+    const inserted = await tx.insert(routingAttempts).values(attempt);
+    const id = Number(inserted[0].insertId);
+    return {
+      result: { id },
+      audit: auditEventForEntity(event, id),
+    };
+  });
+}
+
 export async function createReconciliationMatch(match: InsertReconciliationMatch): Promise<{ id: number }> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
   const result = await db.insert(reconciliationMatches).values(match);
   return { id: Number(result[0].insertId) };
+}
+
+export async function createReconciliationMatchWithAudit(
+  match: InsertReconciliationMatch,
+  event: AuditEventTemplate,
+): Promise<{ id: number }> {
+  return withAuditTransaction(async (tx) => {
+    const inserted = await tx.insert(reconciliationMatches).values(match);
+    const id = Number(inserted[0].insertId);
+    return {
+      result: { id },
+      audit: auditEventForEntity(event, id),
+    };
+  });
 }
 
 export async function getRecentReconciliationMatches(limit = 10) {
@@ -483,18 +706,32 @@ export async function updateReviewItemStatus(
   status: "pending" | "in_review" | "approved" | "rejected" | "resolved",
   resolution?: string,
   actorUserId?: number
-): Promise<void> {
+): Promise<boolean> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
   const resolvedAt = ["approved", "rejected", "resolved"].includes(status) ? new Date() : null;
-  await db.update(reviewItems).set({ status, resolution: resolution || null, resolvedAt }).where(eq(reviewItems.id, id));
+  return db.transaction(async (tx) => {
+    const existing = await tx
+      .select({ id: reviewItems.id })
+      .from(reviewItems)
+      .where(eq(reviewItems.id, id))
+      .limit(1)
+      .for("update");
+    if (!existing[0]) return false;
 
-  await recordAuditEvent({
-    actorUserId: actorUserId || null,
-    action: "review_item.update_status",
-    entityType: "review_item",
-    entityId: String(id),
-    details: { status, resolution: resolution || null },
+    await tx
+      .update(reviewItems)
+      .set({ status, resolution: resolution || null, resolvedAt })
+      .where(eq(reviewItems.id, id));
+
+    await tx.insert(auditEvents).values({
+      actorUserId: actorUserId || null,
+      action: "review_item.update_status",
+      entityType: "review_item",
+      entityId: String(id),
+      details: { status, resolution: resolution || null },
+    });
+    return true;
   });
 }

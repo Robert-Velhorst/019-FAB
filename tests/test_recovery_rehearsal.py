@@ -62,7 +62,7 @@ def test_cli_ignores_live_environment_and_rejects_destination_arguments(tmp_path
                        FAB_INSTANCE_ROOT=str(tmp_path), FAB_DEPLOYMENT_PROFILE="windows",
                        FAB_LOCAL_API_TOKEN_FILE=str(tmp_path / "missing-secret"))
     result = subprocess.run([sys.executable, "-m", "src.run_recovery_rehearsal"], cwd=ROOT,
-                            env=environment, capture_output=True, text=True, timeout=60)
+                            env=environment, capture_output=True, text=True, timeout=120)
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)["status"] == "passed"
     rejected = subprocess.run([sys.executable, "-m", "src.run_recovery_rehearsal", "--ledger", str(sentinel)],

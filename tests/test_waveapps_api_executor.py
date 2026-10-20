@@ -139,6 +139,27 @@ class TestWaveappsApiExecutor(unittest.TestCase):
         self.assertEqual(unsupported["status"], "needs_review")
         self.assertEqual(unsupported["review_reason"], "wave_executor_unavailable")
 
+    def test_unverified_handler_exception_is_unknown_and_redacted(self):
+        class ExplodingHandler:
+            def enter_data(self, _data):
+                raise RuntimeError("secret-token private receipt details")
+
+        result = WaveappsApiExecutor(
+            self._config(),
+            handlers={"waveapps_business": ExplodingHandler()},
+        ).execute(
+            target_system="waveapps_business",
+            action_id="transaction_add",
+            payload={"category": "Office Supplies"},
+            idempotency_key="wave:unknown-outcome",
+        )
+
+        self.assertEqual(result["status"], "outcome_unknown")
+        self.assertEqual(result["review_reason"], "wave_api_outcome_unknown")
+        self.assertEqual(result["provider_external_id"], "fab:wave:unknown-outcome")
+        self.assertNotIn("secret-token", result["message"])
+        self.assertNotIn("private receipt", result["message"])
+
 
 if __name__ == "__main__":
     unittest.main()

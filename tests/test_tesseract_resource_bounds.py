@@ -24,7 +24,8 @@ class TestTesseractResourceBounds(unittest.TestCase):
         self.processor = module.TesseractProcessor({})
 
     def page(self, number):
-        page = SimpleNamespace(number=number, size=(100, 100), close=Mock(side_effect=lambda: self.events.append(("close", number))))
+        page = SimpleNamespace(number=number, size=(100, 100), n_frames=1,
+                               close=Mock(side_effect=lambda: self.events.append(("close", number))))
         self.pages.append(page)
         return page
 
@@ -131,7 +132,7 @@ class TestTesseractResourceBounds(unittest.TestCase):
         self.render.assert_not_called()
 
     def test_oversized_raster_is_rejected_before_ocr(self):
-        page = SimpleNamespace(size=(5000, 5000), close=Mock())
+        page = SimpleNamespace(size=(5001, 5000), n_frames=1, close=Mock())
         with patch.object(module.Image, "open", return_value=page):
             result = self.processor.process_document("oversized.png")
 
@@ -139,6 +140,21 @@ class TestTesseractResourceBounds(unittest.TestCase):
         page.close.assert_called_once()
         self.ocr.assert_not_called()
         self.render.assert_not_called()
+
+    def test_image_open_error_does_not_expose_local_path(self):
+        path = "C:/private/receipts/missing.png"
+        with patch.object(module.Image, "open", side_effect=OSError(f"missing {path}")):
+            result = self.processor.process_document(path)
+        self.assertNotIn(path, result["error"])
+        self.assertIn("could not be opened", result["error"])
+
+    def test_multiframe_image_fails_instead_of_silently_ignoring_frames(self):
+        page = SimpleNamespace(size=(100, 100), n_frames=2, close=Mock())
+        with patch.object(module.Image, "open", return_value=page):
+            result = self.processor.process_document("animated.gif")
+        self.assertIn("Multi-frame", result["error"])
+        self.ocr.assert_not_called()
+        page.close.assert_called_once()
 
     def test_document_deadline_stops_before_next_page_and_discards_partial_text(self):
         self.processor.config["tesseract_document_timeout_seconds"] = 2

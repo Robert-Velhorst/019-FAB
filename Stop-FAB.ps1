@@ -8,7 +8,6 @@ $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $webRoot = Join-Path $root "web"
 $runtimePath = Join-Path $root "data\fab-runtime.json"
 $workerRuntimePath = Join-Path $root "data\fab-worker-runtime.json"
-$cloudRuntimePath = Join-Path $root "data\fab-ngrok-runtime.json"
 $venvPython = Join-Path $root ".venv\Scripts\python.exe"
 
 Set-Location -LiteralPath $root
@@ -71,7 +70,13 @@ function Test-FabRuntimeContainmentCoverage {
         foreach ($field in @('rootPid', 'startedAtTicks', 'jobName')) {
             if (-not $identity.Value.PSObject.Properties[$field]) { return $false }
         }
-        if ([int]$identity.Value.rootPid -ne [int]$pidProperty.Value) { return $false }
+        $expectedRootPid = if ($service -eq 'worker' -and $Runtime.PSObject.Properties['workerProcessRootPid'] -and $Runtime.workerProcessRootPid) {
+            [int]$Runtime.workerProcessRootPid
+        }
+        else {
+            [int]$pidProperty.Value
+        }
+        if ([int]$identity.Value.rootPid -ne $expectedRootPid) { return $false }
     }
     return $true
 }
@@ -519,16 +524,6 @@ catch {
 }
 $apiToken = [string]$apiToken
 
-if (Test-Path -LiteralPath $cloudRuntimePath) {
-    try {
-        & (Join-Path $root "Stop-FAB-Ngrok.ps1") -Quiet
-    }
-    catch {
-        $stopFailed = $true
-        Write-Warning "FAB could not stop the managed ngrok process safely: $($_.Exception.Message)" -WarningAction Continue
-    }
-}
-
 $apiPid = $null
 $workerPid = $null
 $webPid = $null
@@ -559,9 +554,16 @@ if ($runtime) {
                     throw 'Unknown or empty service containment identity. It will not be terminated.'
                 }
                 $expectedPid = $runtime.PSObject.Properties[$entry.Name + 'Pid']
+                $expectedRootPid = 0
+                if ($entry.Name -eq 'worker' -and $runtime.PSObject.Properties['workerProcessRootPid'] -and $runtime.workerProcessRootPid) {
+                    $expectedRootPid = [int]$runtime.workerProcessRootPid
+                }
+                elseif ($expectedPid -and $expectedPid.Value) {
+                    $expectedRootPid = [int]$expectedPid.Value
+                }
                 if (-not $expectedPid -or -not $expectedPid.Value -or
                     -not $entry.Value.PSObject.Properties['rootPid'] -or
-                    [int]$entry.Value.rootPid -ne [int]$expectedPid.Value) {
+                    [int]$entry.Value.rootPid -ne $expectedRootPid) {
                     throw 'Recorded process group does not match its service root. It will not be terminated.'
                 }
                 Stop-FabRecordedProcess -Identity $entry.Value

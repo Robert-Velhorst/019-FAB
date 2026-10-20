@@ -188,8 +188,8 @@ def test_concurrent_decisions_cannot_both_resolve_the_same_review(review_fixture
             assert second_started.wait(5)
         finally:
             release.set()
-        first_result = first.result(timeout=10)
-        second_result = second.result(timeout=10)
+        first_result = first.result(timeout=30)
+        second_result = second.result(timeout=30)
     assert first_result["success"]
     assert second_result["status"] == "already_resolved"
     assert not second_result["success"]

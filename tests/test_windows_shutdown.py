@@ -23,57 +23,15 @@ def run_script(tmp_path, shell, script):
     return json.loads(result.stdout.strip().splitlines()[-1])
 
 
-@pytest.mark.parametrize("pid_value", ["invalid", None])
-def test_ngrok_shutdown_preserves_ownership_files_when_pid_is_invalid(tmp_path, pid_value):
-    shell = shutil.which("pwsh") or shutil.which("powershell")
-    if not shell:
-        pytest.skip("PowerShell unavailable")
-    source = (ROOT / "Stop-FAB-Ngrok.ps1").read_text(encoding="utf-8")
-    start = source.index("$processId = 0")
-    end = source.index("if (-not $Quiet)", start)
-    shutdown = source[start:end]
-    runtime_setup = (
-        "$runtime=[pscustomobject]@{}"
-        if pid_value is None
-        else "$runtime=[pscustomobject]@{processId='invalid'}"
-    )
-    script = r"""
-    __RUNTIME_SETUP__
-    $runtimePath='cloud-runtime.json'
-    $managedRoot='managed'
-    $cleanupCalls=0
-    function Get-CimInstance { throw 'PID must not be queried for invalid metadata' }
-    function Stop-Process { throw 'process must not be stopped for invalid metadata' }
-    function Wait-Process { throw 'process must not be waited for invalid metadata' }
-    function Test-OwnedManagedPath { return $true }
-    function Remove-Item { $script:cleanupCalls++ }
-    $failure=$null
-    try { __SHUTDOWN__ } catch { $failure=$_.Exception.Message }
-    @{failure=$failure;cleanupCalls=$cleanupCalls} | ConvertTo-Json -Compress
-    """.replace("__RUNTIME_SETUP__", runtime_setup).replace("__SHUTDOWN__", shutdown)
-    observed = run_script(tmp_path, shell, script)
-    assert "no valid process ID" in observed["failure"]
-    assert observed["cleanupCalls"] == 0
-
-
-@pytest.mark.parametrize("failure", ["worker", "api", "web", "alive", "query", "unresponsive", "leases", "tunnel", "none"])
+@pytest.mark.parametrize("failure", ["worker", "api", "web", "alive", "query", "unresponsive", "leases", "none"])
 def test_incomplete_shutdown_retains_metadata_and_leases(tmp_path, failure):
     source = (ROOT / "Stop-FAB.ps1").read_text(encoding="utf-8")
     tail = source[source.index("foreach ($ownedWebPid in $webPids) {"):source.index("\n}\nfinally {\n    foreach ($process in $script:fabStopProcesses.Values)")]
     (tmp_path / "runtime.json").write_text('{"existing":"preserve"}', encoding="utf-8")
     (tmp_path / "worker.json").write_text('{"existing":"worker"}', encoding="utf-8")
-    if failure == "tunnel":
-        (tmp_path / "cloud.json").write_text('{"existing":"tunnel"}', encoding="utf-8")
-        (tmp_path / "Stop-FAB-Ngrok.ps1").write_text(
-            "param([switch]$Quiet)\nthrow 'synthetic-tunnel-stop-failed'\n", encoding="utf-8"
-        )
-        start = source.index("if (Test-Path -LiteralPath $cloudRuntimePath) {")
-        end = source.index("$apiPid = $null", start)
-        tail = source[start:end] + tail
     script = r"""
     $root=(Get-Location).Path; $webRoot=$root
     $runtimePath=Join-Path $root 'runtime.json'; $workerRuntimePath=Join-Path $root 'worker.json'
-    $cloudRuntimePath=Join-Path $root 'cloud.json'
     $webPids=@(300); $workerPid=200; $apiPids=@(100); $apiToken='synthetic-only'
     $venvPython='Invoke-SyntheticLeaseCleanup'; $stopFailed=$false
     $failure='__FAILURE__'; $cleanupCalls=0; $events=[Collections.Generic.List[string]]::new()
@@ -307,13 +265,13 @@ def test_dashboard_ancestry_does_not_promote_recycled_or_foreign_parent(tmp_path
     assert observed["root"] == (101 if parent == "older" else 102)
 
 
-@pytest.mark.parametrize("mode", ["complete", "missing", "empty", "partial", "stale", "null", "no-services"])
+@pytest.mark.parametrize("mode", ["complete", "worker-descendant", "worker-descendant-mismatch", "missing", "empty", "partial", "stale", "null", "no-services"])
 def test_runtime_requires_containment_proof_for_each_service(tmp_path, mode):
     source = (ROOT / "Stop-FAB.ps1").read_text(encoding="utf-8")
     coverage = source[source.index("function Test-FabRuntimeContainmentCoverage {"):source.index("function Get-FabInstanceId {")]
     script = r"""
     __COVERAGE__
-    $runtime=[pscustomobject]@{apiPid=100; workerPid=200; webPid=300; processes=[pscustomobject]@{
+    $runtime=[pscustomobject]@{apiPid=100; workerPid=200; workerProcessRootPid=$null; webPid=300; processes=[pscustomobject]@{
         api=[pscustomobject]@{rootPid=100; startedAtTicks='123'; jobName='job-api'}
         worker=[pscustomobject]@{rootPid=200; startedAtTicks='456'; jobName='job-worker'}
         web=[pscustomobject]@{rootPid=300; startedAtTicks='789'; jobName='job-web'}
@@ -323,13 +281,15 @@ def test_runtime_requires_containment_proof_for_each_service(tmp_path, mode):
         empty { $runtime.processes=[pscustomobject]@{} }
         partial { $runtime.processes.PSObject.Properties.Remove('worker') }
         stale { $runtime.processes.worker.rootPid=999 }
+        worker-descendant { $runtime.workerPid=201; $runtime.workerProcessRootPid=200 }
+        worker-descendant-mismatch { $runtime.workerPid=201; $runtime.workerProcessRootPid=202 }
         null { $runtime.processes=$null }
         no-services { $runtime=[pscustomobject]@{apiPid=$null; workerPid=$null; webPid=$null} }
     }
     @{covered=(Test-FabRuntimeContainmentCoverage -Runtime $runtime)} | ConvertTo-Json -Compress
     """.replace("__COVERAGE__", coverage).replace("__MODE__", mode)
     observed = run_script(tmp_path, shutil.which("pwsh") or shutil.which("powershell"), script)
-    assert observed["covered"] == (mode in {"complete", "no-services"})
+    assert observed["covered"] == (mode in {"complete", "worker-descendant", "no-services"})
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows process groups")
@@ -389,7 +349,24 @@ def test_startup_carries_over_only_owned_matching_process_identities(tmp_path, m
     assert observed["copied"] == (mode == "owned")
 
 
-@pytest.mark.parametrize("mode", ["owned", "unknown", "mismatched"])
+def test_startup_carries_worker_job_root_separately_from_runtime_pid(tmp_path):
+    source = (ROOT / "Start-FAB.ps1").read_text(encoding="utf-8")
+    carryover = source[source.index("$processIdentities = @{}"):source.index("# Retain rollback handles until metadata publication succeeds.")]
+    script = r"""
+    $root=(Get-Location).Path
+    $runtimeMetadata=[ordered]@{apiPid=$null; workerPid=201; workerProcessRootPid=200; webPid=$null}
+    $apiProcess=$null; $webProcess=$null; $workerProcess=$null
+    $savedRuntime=[pscustomobject]@{root=$root; processes=[pscustomobject]@{
+        worker=[pscustomobject]@{rootPid=200; startedAtTicks='456'; jobName='synthetic-worker'}
+    }}
+    __CARRYOVER__
+    @{rootPid=$runtimeMetadata.processes.worker.rootPid} | ConvertTo-Json -Compress
+    """.replace("__CARRYOVER__", carryover)
+    observed = run_script(tmp_path, shutil.which("pwsh") or shutil.which("powershell"), script)
+    assert observed["rootPid"] == 200
+
+
+@pytest.mark.parametrize("mode", ["owned", "unknown", "mismatched", "worker-descendant", "worker-descendant-mismatch"])
 def test_shutdown_never_terminates_uncovered_recorded_group(tmp_path, mode):
     source = (ROOT / "Stop-FAB.ps1").read_text(encoding="utf-8")
     start = source.index("    if ($runtimeOwned -and $runtime.PSObject.Properties['processes'] -and")
@@ -397,14 +374,21 @@ def test_shutdown_never_terminates_uncovered_recorded_group(tmp_path, mode):
     stop_recorded = source[start:end]
     script = r"""
     $runtimeOwned=$true; $stopFailed=$false; $calls=0
-    $runtime=[pscustomobject]@{apiPid=100; workerPid=$null; webPid=$null; processes=[pscustomobject]@{
+    $runtime=[pscustomobject]@{apiPid=100; workerPid=$null; workerProcessRootPid=$null; webPid=$null; processes=[pscustomobject]@{
         api=[pscustomobject]@{rootPid=100; startedAtTicks='123'; jobName='synthetic-api'}
     }}
     if ('__MODE__' -eq 'mismatched') { $runtime.processes.api.rootPid=999 }
     if ('__MODE__' -eq 'unknown') { $runtime.processes=[pscustomobject]@{foreign=$runtime.processes.api} }
+    if ('__MODE__' -like 'worker-descendant*') {
+        $runtime.workerPid=201
+        $runtime.workerProcessRootPid=if ('__MODE__' -eq 'worker-descendant') { 200 } else { 202 }
+        $runtime.processes | Add-Member -NotePropertyName worker -NotePropertyValue ([pscustomobject]@{rootPid=200; startedAtTicks='456'; jobName='synthetic-worker'})
+    }
     function Stop-FabRecordedProcess { $script:calls++ }
     __STOP_RECORDED__
     @{calls=$calls; failed=$stopFailed} | ConvertTo-Json -Compress
     """.replace("__STOP_RECORDED__", stop_recorded).replace("__MODE__", mode)
     observed = run_script(tmp_path, shutil.which("pwsh") or shutil.which("powershell"), script)
-    assert observed == {"calls": 1 if mode == "owned" else 0, "failed": mode != "owned"}
+    expected = {"owned": (1, False), "worker-descendant": (2, False)}
+    calls, failed = expected.get(mode, (0 if mode != "worker-descendant-mismatch" else 1, True))
+    assert observed == {"calls": calls, "failed": failed}

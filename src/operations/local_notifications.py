@@ -25,39 +25,40 @@ class LocalNotificationService:
         reopened = []
         suppressed = 0
         active_fingerprints = []
-        for issue in health.get("issues") or []:
-            notification_payload = self._notification_payload(issue, health.get("generatedAt"))
-            fingerprint = notification_payload["fingerprint"]
-            active_fingerprints.append(fingerprint)
-            preference = self.effective_preference(notification_payload["eventType"])
-            visible = self._preference_allows(preference, notification_payload["severity"])
-            notification_payload["status"] = "unread" if visible else "suppressed"
-            result = self.ledger.upsert_notification(notification_payload)
-            notification = result["notification"]
-            if result["created"]:
-                created.append(notification["id"])
-            if result["reopened"]:
-                reopened.append(notification["id"])
-            if notification.get("status") == "suppressed":
-                suppressed += 1
+        with self.ledger.write_transaction():
+            for issue in health.get("issues") or []:
+                notification_payload = self._notification_payload(issue, health.get("generatedAt"))
+                fingerprint = notification_payload["fingerprint"]
+                active_fingerprints.append(fingerprint)
+                preference = self.effective_preference(notification_payload["eventType"])
+                visible = self._preference_allows(preference, notification_payload["severity"])
+                notification_payload["status"] = "unread" if visible else "suppressed"
+                result = self.ledger.upsert_notification(notification_payload)
+                notification = result["notification"]
+                if result["created"]:
+                    created.append(notification["id"])
+                if result["reopened"]:
+                    reopened.append(notification["id"])
+                if notification.get("status") == "suppressed":
+                    suppressed += 1
 
-        resolved = self.ledger.resolve_inactive_notifications(self.SOURCE, active_fingerprints)
-        if created or reopened or resolved:
-            self.ledger.record_audit_event({
-                "action": "local_notifications.health_refresh",
-                "entityType": "notification_center",
-                "entityId": "local",
-                "actorUserId": None,
-                "details": {
-                    "actor": actor,
-                    "createdNotificationIds": created,
-                    "reopenedNotificationIds": reopened,
-                    "resolvedCount": resolved,
-                    "activeIssueCount": len(active_fingerprints),
-                    "suppressedCount": suppressed,
-                    "externalDelivery": "not_executed",
-                },
-            })
+            resolved = self.ledger.resolve_inactive_notifications(self.SOURCE, active_fingerprints)
+            if created or reopened or resolved:
+                self.ledger.record_audit_event({
+                    "action": "local_notifications.health_refresh",
+                    "entityType": "notification_center",
+                    "entityId": "local",
+                    "actorUserId": None,
+                    "details": {
+                        "actor": actor,
+                        "createdNotificationIds": created,
+                        "reopenedNotificationIds": reopened,
+                        "resolvedCount": resolved,
+                        "activeIssueCount": len(active_fingerprints),
+                        "suppressedCount": suppressed,
+                        "externalDelivery": "not_executed",
+                    },
+                })
         return {
             "success": True,
             "status": "refreshed",
@@ -73,15 +74,8 @@ class LocalNotificationService:
         }
 
     def summary(self) -> Dict[str, Any]:
-        active = self.ledger.list_notifications(status=ACTIVE_NOTIFICATION_STATUSES, limit=500)
-        unread = [item for item in active if item.get("status") == "unread"]
         return {
-            "active": len(active),
-            "unread": len(unread),
-            "high": sum(1 for item in active if item.get("severity") == "high"),
-            "medium": sum(1 for item in active if item.get("severity") == "medium"),
-            "low": sum(1 for item in active if item.get("severity") == "low"),
-            "acknowledged": sum(1 for item in active if item.get("status") == "acknowledged"),
+            **self.ledger.notification_summary(),
             "externalDelivery": "not_executed",
         }
 
@@ -103,41 +97,43 @@ class LocalNotificationService:
         status = str(status or "").strip().lower()
         if status not in NOTIFICATION_STATUSES:
             raise ValueError(f"Unsupported notification status: {status}")
-        previous = self.ledger.get_notification(notification_id)
-        if not previous:
-            return {"success": False, "status": "not_found", "notification": None}
-        notification = self.ledger.update_notification_status(notification_id, status)
-        self.ledger.record_audit_event({
-            "action": "local_notifications.status_changed",
-            "entityType": "notification",
-            "entityId": str(notification_id),
-            "details": {
-                "actor": actor,
-                "fromStatus": previous.get("status"),
-                "toStatus": status,
-                "eventType": previous.get("event_type"),
-                "externalDelivery": "not_executed",
-            },
-        })
+        with self.ledger.write_transaction():
+            previous = self.ledger.get_notification(notification_id)
+            if not previous:
+                return {"success": False, "status": "not_found", "notification": None}
+            notification = self.ledger.update_notification_status(notification_id, status)
+            self.ledger.record_audit_event({
+                "action": "local_notifications.status_changed",
+                "entityType": "notification",
+                "entityId": str(notification_id),
+                "details": {
+                    "actor": actor,
+                    "fromStatus": previous.get("status"),
+                    "toStatus": status,
+                    "eventType": previous.get("event_type"),
+                    "externalDelivery": "not_executed",
+                },
+            })
         return {"success": True, "status": "updated", "notification": notification}
 
     def update_preference(self, payload: Dict[str, Any], actor: str = "local_user") -> Dict[str, Any]:
-        preference_id = self.ledger.upsert_notification_preference(payload)
         event_type = str(payload.get("eventType") or payload.get("event_type") or "").strip()
-        preference = self.ledger.get_notification_preference(event_type)
-        self.ledger.record_audit_event({
-            "action": "local_notifications.preference_changed",
-            "entityType": "notification_preference",
-            "entityId": str(preference_id),
-            "details": {
-                "actor": actor,
-                "eventType": event_type,
-                "enabled": bool(preference.get("enabled")),
-                "inAppEnabled": bool(preference.get("in_app_enabled")),
-                "minimumSeverity": preference.get("minimum_severity"),
-                "externalDelivery": "disabled",
-            },
-        })
+        with self.ledger.write_transaction():
+            preference_id = self.ledger.upsert_notification_preference(payload)
+            preference = self.ledger.get_notification_preference(event_type)
+            self.ledger.record_audit_event({
+                "action": "local_notifications.preference_changed",
+                "entityType": "notification_preference",
+                "entityId": str(preference_id),
+                "details": {
+                    "actor": actor,
+                    "eventType": event_type,
+                    "enabled": bool(preference.get("enabled")),
+                    "inAppEnabled": bool(preference.get("in_app_enabled")),
+                    "minimumSeverity": preference.get("minimum_severity"),
+                    "externalDelivery": "disabled",
+                },
+            })
         return {
             "success": True,
             "status": "updated",

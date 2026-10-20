@@ -4,6 +4,7 @@ import base64
 import json
 import os
 import tempfile
+import time
 from typing import Any, Iterable, Optional
 
 from src.security.local_secret_store import (
@@ -198,10 +199,16 @@ class GoogleOAuthTokenStore:
 
     def clear_reauthorization(self) -> None:
         for path in self.marker_paths:
-            try:
-                os.unlink(path)
-            except FileNotFoundError:
-                pass
+            for attempt in range(5):
+                try:
+                    os.unlink(path)
+                    break
+                except FileNotFoundError:
+                    break
+                except PermissionError:
+                    if attempt == 4:
+                        raise
+                    time.sleep(0.02 * (attempt + 1))
 
     @staticmethod
     def _marker_reason(path: Optional[str]) -> Optional[str]:

@@ -6,6 +6,8 @@ import re
 import tempfile
 from typing import Any, Dict, Optional
 
+from werkzeug.utils import secure_filename
+
 from src.operations.local_intake import LocalFolderIntake
 from src.operations.local_ledger import LocalOperationsLedger
 
@@ -216,7 +218,8 @@ class DriveRelayIntakeService:
 
 
 def _safe_filename(filename: str) -> str:
-    safe = re.sub(r"[^A-Za-z0-9._ -]+", "_", os.path.basename(filename)).strip(" .")
+    portable_basename = os.path.basename(str(filename).replace("\\", "/"))
+    safe = secure_filename(portable_basename).strip(" .")
     safe = safe or "drive-document"
     if len(safe) <= 180:
         return safe

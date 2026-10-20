@@ -23,7 +23,6 @@ provider diagnostics. A failing check does not authorise deleting evidence.
 | `deployment_ledger_disabled` | Enable the authoritative operations ledger; scheduled recovery requires it. |
 | `deployment_storage_encryption` | Check host disk/volume encryption and record the operator attestation. This is a readiness warning. |
 | Secret-file error | Use either a value or an absolute readable `_FILE`, never both; files must contain a bounded UTF-8 secret. |
-| ngrok cannot load existing API/HAI credentials | Use the same configuration/environment as the running FAB instance. Both scripts read configured secrets/files first and otherwise reuse existing encrypted credentials; they never provision replacements. Resolve missing, weak or identical credentials through the normal startup configuration before retrying. |
 | Remote ledger link opens localhost | Configure `FAB_LOCAL_API_PUBLIC_URL` with the owned HTTPS ledger origin before starting the dashboard. The internal API stays on loopback. A public address alone does not start a tunnel or expose the dashboard. |
 | `EADDRINUSE` | The selected web port is occupied. Check ownership, then choose an explicit free port or stop the owned service. |
 | Windows startup/build/registration failed | The launcher attempts to stop only services created by the failed launch, preserves existing runtime metadata and reports the original failure. Correct the reported cause before retrying. Retained metadata alone does not prove a process is alive. |

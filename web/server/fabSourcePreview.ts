@@ -1,4 +1,5 @@
 import { createHash, timingSafeEqual } from "crypto";
+import rateLimit from "express-rate-limit";
 import type { Application, Request, Response } from "express";
 import { ENV } from "./_core/env";
 import { getFabLocalApiBaseUrl } from "./fabLocalGateway";
@@ -74,7 +75,16 @@ export function registerFabSourcePreviewRoutes(
     throw new Error("Invalid FAB source preview resource limits");
   }
   let activePreviews = 0;
-  app.get("/api/fab/source/:documentId", async (req: Request, res: Response) => {
+  const sourcePreviewLimiter = rateLimit({
+    windowMs: 60_000,
+    limit: 60,
+    standardHeaders: "draft-7",
+    legacyHeaders: false,
+    keyGenerator: req => req.socket.remoteAddress || "unknown",
+    validate: false,
+    message: { error: "Too many source previews. Try again later." },
+  });
+  app.get("/api/fab/source/:documentId", sourcePreviewLimiter, async (req: Request, res: Response) => {
     const documentId = Number(req.params.documentId);
     if (!Number.isSafeInteger(documentId) || documentId <= 0) {
       sourceError(res, 400, "Invalid FAB document id");

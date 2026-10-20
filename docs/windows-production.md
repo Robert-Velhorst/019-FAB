@@ -4,6 +4,12 @@ This profile is for one Windows account, one business, one local API, and one
 worker. It is not a public or multi-tenant deployment. The existing local profile
 remains the default; selecting Windows production does not migrate any data.
 
+The Windows launcher also requires Node.js 22.12 or newer and pnpm 11.20.0 or
+newer to build and run the production operator dashboard. FAB provisions its
+project-local Python runtime when a supported Python installer is available,
+but does not install Node.js or pnpm. Missing dashboard runtimes are reported
+before startup continues.
+
 ## Storage and Credentials
 
 Before switching an existing installation, stop it with its previous configuration
@@ -52,7 +58,13 @@ Restrict ledger, evidence, backup, and credential directories to the owning acco
 and approved administrators. Verify host encryption and recovery-key custody before
 setting `FAB_STORAGE_ENCRYPTION_CONFIRMED=true`. That setting is an operator
 attestation, not proof of BitLocker or any other host control. Missing attestation
-is reported as attention/degraded rather than an automatic encryption claim.
+blocks production startup; it is never treated as proof that encryption is enabled.
+
+The Windows profile uses SQLite WAL with `synchronous=FULL`, syncing each committed
+transaction for stronger power-loss durability. This can increase write latency;
+group related ledger writes into explicit transactions rather than weakening
+production durability. The default `local` profile retains `synchronous=NORMAL` for
+development and test performance.
 
 ## Start and Stop
 
@@ -191,31 +203,12 @@ Review their configuration, access controls, encryption, and backup policy befor
 operational acceptance. The launcher is interactive startup support, not a newly
 installed Windows service or scheduled task.
 
-### Managed HTTPS Access
+### Production deployment
 
-Ordinary loopback-only Windows access is unchanged. If enabling managed HTTPS
-sign-in (including an owned ngrok/proxy endpoint), also set
-`FAB_OPERATOR_SESSION_VALIDATION_URL` in the Python/API environment to the actual
-dashboard listener, for example
-`http://127.0.0.1:3000/api/fab/operator-session/status`. Use the configured `PORT`,
-not an assumed fallback port. The INI equivalent is
-`[operations] operator_session_validation_url`. The URL is not a credential and
-must not include user information, query parameters or a fragment.
-
-Managed configuration requires a strong shared API token even under the `local`
-profile; preflight blocks missing credentials or a missing/invalid validation URL
-before creating the ledger. Configure the separate operator access secret, JWT
-secret, exact HTTPS public origin and trusted proxy peers on Node. The validation
-URL alone does not enable managed sign-in on Node. The launcher does not provision
-an ngrok tunnel, public domain or TLS configuration automatically.
-
-Set `FAB_LOCAL_API_PUBLIC_URL` to the HTTPS ledger origin reachable by the remote
-browser. The launcher preserves this configured address while keeping
-`FAB_LOCAL_API_URL` pointed at the actual loopback API. Without a public address,
-the browser ledger address defaults to that loopback URL. Neither setting opens
-a port or provisions a tunnel; the managed ngrok scripts expose only the API,
-not the React dashboard. See [ngrok setup](local_windows_ngrok_setup.md) for the
-existing-credential and endpoint ownership requirements.
+The Windows launcher is for local operation and keeps services on loopback.
+Production hosting is targeted to Hetzner behind a TLS reverse proxy with
+authenticated access, managed secrets, and an explicitly trusted public origin.
+Do not expose this Windows profile through a public tunnel.
 
 Dashboard logout, expiry and restart revoke subsequent linked ledger requests.
 If the dashboard authority cannot be reached, linked browser access is denied;

@@ -60,3 +60,11 @@ def test_windows_rejects_long_placeholder_without_store_fallback():
         with pytest.raises(ValueError):
             existing_api_credentials({"fab_deployment_profile": "windows", "fab_local_api_token": "x" * 48, "fab_hai_api_token": HAI})
     store.assert_not_called()
+
+
+def test_remote_access_rejects_weak_tokens_even_in_local_profile():
+    with pytest.raises(ValueError, match="credential"):
+        existing_api_credentials({
+            "fab_local_api_token": "x" * 48,
+            "fab_hai_api_token": "y" * 48,
+        }, require_strong=True)

@@ -105,7 +105,9 @@ class GmailFetcher(BaseFetcher):
         effective_query = str(query).strip()
         if incremental_after and not re.search(r"(?:^|\s)(?:after:|newer_than:)", effective_query, re.IGNORECASE):
             effective_query = f"{effective_query} after:{incremental_after}"
-        attachments_dir = self.config.get('gmail_attachment_download_dir') or self.config.get('attachments_save_dir', '/tmp/gmail_attachments')
+        attachments_dir = self._download_directory(
+            "gmail", "gmail_attachment_download_dir", "gmail_download_dir"
+        )
         os.makedirs(attachments_dir, exist_ok=True)
         max_pages = _bounded_int(self.config.get("gmail_max_pages"), 50, 1, 500)
         max_messages = _bounded_int(self.config.get("gmail_max_messages"), 5000, 1, 50000)
@@ -115,10 +117,25 @@ class GmailFetcher(BaseFetcher):
             1024,
             50 * 1024 * 1024,
         )
+        max_run_bytes = _bounded_int(
+            self.config.get("gmail_max_run_bytes"),
+            250 * 1024 * 1024,
+            max_attachment_bytes,
+            10 * 1024 * 1024 * 1024,
+        )
+        max_run_attachments = _bounded_int(
+            self.config.get("gmail_max_run_attachments"),
+            min(max_messages, 5000),
+            1,
+            50000,
+        )
 
         documents = []
         skipped = 0
         pages = 0
+        downloaded_bytes = 0
+        downloaded_attachments = 0
+        run_budget_exceeded = False
         rejected = {
             "untrusted_sender": 0,
             "not_pdf": 0,
@@ -167,6 +184,12 @@ class GmailFetcher(BaseFetcher):
                     skipped += 1
                     continue
                 for part in _attachment_parts(payload):
+                    if downloaded_attachments >= max_run_attachments:
+                        first_error = RuntimeError(
+                            "Gmail scan reached its configured attachment cap; increase the cap before advancing the source checkpoint."
+                        )
+                        run_budget_exceeded = True
+                        break
                     file_name = str(part.get('filename') or '').strip()
                     body = part.get('body') if isinstance(part.get('body'), dict) else {}
                     attachment_id = str(body.get('attachmentId') or '').strip()
@@ -191,6 +214,17 @@ class GmailFetcher(BaseFetcher):
                         continue
                     try:
                         encoded += "=" * (-len(encoded) % 4)
+                        estimated_size = _estimated_base64_decoded_size(encoded)
+                        if estimated_size > max_attachment_bytes:
+                            rejected["oversized"] += 1
+                            skipped += 1
+                            continue
+                        if downloaded_bytes + estimated_size > max_run_bytes:
+                            first_error = RuntimeError(
+                                "Gmail scan reached its configured byte cap; increase the cap before advancing the source checkpoint."
+                            )
+                            run_budget_exceeded = True
+                            break
                         file_data = base64.urlsafe_b64decode(encoded)
                     except Exception:
                         rejected["missing_attachment"] += 1
@@ -200,6 +234,12 @@ class GmailFetcher(BaseFetcher):
                         rejected["oversized"] += 1
                         skipped += 1
                         continue
+                    if downloaded_bytes + len(file_data) > max_run_bytes:
+                        first_error = RuntimeError(
+                            "Gmail scan reached its configured byte cap; increase the cap before advancing the source checkpoint."
+                        )
+                        run_budget_exceeded = True
+                        break
                     if scanner_mode and not _is_pdf(file_data):
                         rejected["invalid_pdf"] += 1
                         skipped += 1
@@ -212,6 +252,8 @@ class GmailFetcher(BaseFetcher):
                         document_id,
                         file_data,
                     )
+                    downloaded_bytes += len(file_data)
+                    downloaded_attachments += 1
 
                     documents.append({
                         'id': document_id,
@@ -233,6 +275,8 @@ class GmailFetcher(BaseFetcher):
                             'delivery_path': 'gmail_to_fab_direct' if scanner_mode else None,
                         }
                     })
+                if run_budget_exceeded:
+                    break
             if first_error:
                 self._fail_run(first_error, fetched=len(documents), skipped=skipped, pages=pages)
             else:
@@ -244,6 +288,10 @@ class GmailFetcher(BaseFetcher):
                 "incrementalAfter": incremental_after,
                 "truncated": truncated,
                 "rejected": rejected,
+                "downloadedBytes": downloaded_bytes,
+                "maxRunBytes": max_run_bytes,
+                "downloadedAttachments": downloaded_attachments,
+                "maxRunAttachments": max_run_attachments,
             })
         except Exception as error:
             self._fail_run(error, fetched=len(documents), skipped=skipped, pages=pages)
@@ -254,6 +302,10 @@ class GmailFetcher(BaseFetcher):
                 "incrementalAfter": incremental_after,
                 "truncated": bool(page_token),
                 "rejected": rejected,
+                "downloadedBytes": downloaded_bytes,
+                "maxRunBytes": max_run_bytes,
+                "downloadedAttachments": downloaded_attachments,
+                "maxRunAttachments": max_run_attachments,
             })
         return documents
 
@@ -264,6 +316,11 @@ def _attachment_parts(payload: Dict[str, Any]):
             yield from _attachment_parts(part)
         if part.get("filename") and isinstance(part.get("body"), dict):
             yield part
+
+
+def _estimated_base64_decoded_size(value: str) -> int:
+    padding = min(len(value) - len(value.rstrip("=")), 2)
+    return max(0, (len(value) * 3 // 4) - padding)
 
 
 def _headers(payload: Dict[str, Any]) -> Dict[str, str]:

@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { AlertCircle, CheckCircle2, FileUp, Loader2, RotateCcw, Trash2, UploadCloud, X } from "lucide-react";
 import { useFabLocale } from "./fabLocale";
 import { asRecord, text, type FabRecord } from "./fabView";
+import { appendIntakeItems, MAX_INTAKE_FILES_PER_BATCH } from "./fabIntakeQueue";
 
 const MAX_UPLOAD_BYTES = 6 * 1024 * 1024;
 const ACCEPTED_EXTENSIONS = ["pdf", "jpg", "jpeg", "png", "heic", "tif", "tiff", "txt", "csv"];
@@ -27,6 +28,7 @@ type FabIntakeDrawerProps = {
 export function FabIntakeDrawer({ open, connected, onClose, onUploadFile, onFinished, onBusyChange }: FabIntakeDrawerProps) {
   const { copy } = useFabLocale();
   const [items, setItems] = useState<IntakeItem[]>([]);
+  const [selectionNotice, setSelectionNotice] = useState("");
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -61,17 +63,23 @@ export function FabIntakeDrawer({ open, connected, onClose, onUploadFile, onFini
 
   if (!open) return null;
 
-  function addFiles(files: File[]) {
-    const incoming = files.map((file) => {
+  function addFiles(files: ArrayLike<File>) {
+    const result = appendIntakeItems(items, files, (file) => {
       const extension = file.name.split(".").pop()?.toLowerCase() || "";
       const error = file.size > MAX_UPLOAD_BYTES
         ? copy("Exceeds the 6 MB local upload limit.", "Overschrijdt de lokale uploadlimiet van 6 MB.")
         : !ACCEPTED_EXTENSIONS.includes(extension)
           ? copy("Unsupported file type.", "Niet-ondersteund bestandstype.")
           : undefined;
-      return { id: `${file.name}-${file.size}-${file.lastModified}`, file, status: error ? "error" as const : "queued" as const, error };
+      return { id: createFileItemId(), file, status: error ? "error" as const : "queued" as const, error };
     });
-    setItems((current) => [...current.filter((item) => !incoming.some((next) => next.id === item.id)), ...incoming]);
+    setItems(result.items);
+    setSelectionNotice(result.rejectedCount
+      ? copy(
+        `The ${MAX_INTAKE_FILES_PER_BATCH}-file batch limit was reached. ${result.rejectedCount} additional file(s) were not added. Clear this batch to start another.`,
+        `De limiet van ${MAX_INTAKE_FILES_PER_BATCH} bestanden per batch is bereikt. ${result.rejectedCount} extra bestand(en) zijn niet toegevoegd. Wis deze batch om een nieuwe te starten.`,
+      )
+      : "");
   }
 
   async function uploadSelected() {
@@ -106,21 +114,22 @@ export function FabIntakeDrawer({ open, connected, onClose, onUploadFile, onFini
         </div>
         <div className="fab-detail-body">
           <p id="fab-intake-description">{copy("Review files before they enter the authoritative local ledger. Uploading does not submit anything to an external bookkeeping platform.", "Controleer bestanden voordat ze het gezaghebbende lokale grootboek ingaan. Uploaden dient niets in bij een extern boekhoudplatform.")}</p>
-          <input ref={inputRef} className="sr-only" type="file" multiple accept={ACCEPTED_EXTENSIONS.map((type) => `.${type}`).join(",")} onChange={(event) => { addFiles(Array.from(event.currentTarget.files || [])); event.currentTarget.value = ""; }} />
+          <input ref={inputRef} className="sr-only" type="file" multiple accept={ACCEPTED_EXTENSIONS.map((type) => `.${type}`).join(",")} onChange={(event) => { if (event.currentTarget.files) addFiles(event.currentTarget.files); event.currentTarget.value = ""; }} />
           <button
             className={`fab-drop-zone ${dragging ? "is-dragging" : ""}`}
             onClick={() => inputRef.current?.click()}
             onDragEnter={(event) => { event.preventDefault(); setDragging(true); }}
             onDragOver={(event) => event.preventDefault()}
             onDragLeave={() => setDragging(false)}
-            onDrop={(event) => { event.preventDefault(); setDragging(false); addFiles(Array.from(event.dataTransfer.files)); }}
+            onDrop={(event) => { event.preventDefault(); setDragging(false); addFiles(event.dataTransfer.files); }}
           >
             <UploadCloud aria-hidden="true" />
             <strong>{copy("Drop files here or choose files", "Sleep bestanden hierheen of kies bestanden")}</strong>
-            <span>{copy("PDF, JPG, PNG, HEIC, TIFF, TXT, or CSV. Maximum 6 MB per file.", "PDF, JPG, PNG, HEIC, TIFF, TXT of CSV. Maximaal 6 MB per bestand.")}</span>
+            <span>{copy("PDF, JPG, PNG, HEIC, TIFF, TXT, or CSV. Maximum 6 MB per file and 100 files per batch.", "PDF, JPG, PNG, HEIC, TIFF, TXT of CSV. Maximaal 6 MB per bestand en 100 bestanden per batch.")}</span>
           </button>
 
           <div className="fab-intake-summary"><strong>{items.length} {copy("selected", "geselecteerd")}</strong><span>{formatBytes(items.reduce((total, item) => total + item.file.size, 0))} {copy("total", "totaal")}</span></div>
+          {selectionNotice && <div className="fab-inline-error" role="alert">{selectionNotice}</div>}
           <div className="fab-intake-list" aria-live="polite">
             {items.map((item) => (
               <div className={`fab-intake-row tone-${item.status === "error" ? "bad" : item.status === "complete" ? "good" : item.status === "uploading" ? "info" : "neutral"}`} key={item.id}>
@@ -130,7 +139,7 @@ export function FabIntakeDrawer({ open, connected, onClose, onUploadFile, onFini
                   <span>{formatBytes(item.file.size)}{item.error ? ` - ${item.error}` : ` - ${intakeStatus(item, copy)}`}</span>
                   {item.result && <small>{intakeResult(item.result, copy)}</small>}
                 </div>
-                <button className="fab-icon-button" onClick={() => setItems((current) => current.filter((entry) => entry.id !== item.id))} disabled={busy} aria-label={`${copy("Remove", "Verwijder")} ${item.file.name}`} title={`${copy("Remove", "Verwijder")} ${item.file.name}`}><Trash2 aria-hidden="true" /></button>
+                <button className="fab-icon-button" onClick={() => { setItems((current) => current.filter((entry) => entry.id !== item.id)); setSelectionNotice(""); }} disabled={busy} aria-label={`${copy("Remove", "Verwijder")} ${item.file.name}`} title={`${copy("Remove", "Verwijder")} ${item.file.name}`}><Trash2 aria-hidden="true" /></button>
               </div>
             ))}
             {!items.length && <div className="fab-empty-state compact"><FileUp aria-hidden="true" /><strong>{copy("No files selected", "Geen bestanden geselecteerd")}</strong><span>{copy("Add documents to review their type and size before upload.", "Voeg documenten toe om type en grootte voor de upload te controleren.")}</span></div>}
@@ -138,13 +147,20 @@ export function FabIntakeDrawer({ open, connected, onClose, onUploadFile, onFini
           {!connected && <div className="fab-panel-state tone-bad" role="alert"><AlertCircle aria-hidden="true" /><div><strong>{copy("Local API disconnected", "Lokale API niet verbonden")}</strong><span>{copy("Selection is available, but upload requires the authoritative local FAB API.", "Selecteren is mogelijk, maar uploaden vereist de gezaghebbende lokale FAB-API.")}</span></div></div>}
           <div className="fab-detail-actions">
             <button className="fab-primary-button" onClick={() => { void uploadSelected(); }} disabled={!connected || busy || !queued.some((item) => isUploadable(item.file))}>{busy ? <Loader2 className="is-spinning" aria-hidden="true" /> : queued.some((item) => item.status === "error" && isUploadable(item.file)) ? <RotateCcw aria-hidden="true" /> : <FileUp aria-hidden="true" />}{busy ? copy("Uploading...", "Uploaden...") : copy("Upload ready files", "Gereedstaande bestanden uploaden")}</button>
-            <button className="fab-secondary-button" onClick={() => setItems([])} disabled={busy || !items.length}>{copy("Clear selection", "Selectie wissen")}</button>
+            <button className="fab-secondary-button" onClick={() => { setItems([]); setSelectionNotice(""); }} disabled={busy || !items.length}>{copy("Clear selection", "Selectie wissen")}</button>
           </div>
         </div>
       </aside>
     </div>,
     document.body,
   );
+}
+
+function createFileItemId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 function formatBytes(value: number): string {

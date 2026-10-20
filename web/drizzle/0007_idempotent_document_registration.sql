@@ -38,8 +38,8 @@ SET `referencing`.`duplicateOfDocumentId` = `canonical`.`canonicalId`;
 --> statement-breakpoint
 UPDATE `audit_events` AS `event`
 INNER JOIN `bookkeeping_documents` AS `document`
-	ON `event`.`entityType` = 'bookkeeping_document'
-	AND `event`.`entityId` = CAST(`document`.`id` AS CHAR)
+	ON BINARY `event`.`entityType` = BINARY 'bookkeeping_document'
+	AND BINARY `event`.`entityId` = BINARY CAST(`document`.`id` AS CHAR)
 INNER JOIN `fab_document_canonical` AS `canonical`
 	ON `canonical`.`source` = `document`.`source`
 	AND `canonical`.`sourceDocumentId` = `document`.`sourceDocumentId`

@@ -75,6 +75,66 @@ def test_identical_prepared_vendors_do_not_allocate_fuzzy_matchers(monkeypatch):
     assert AutomatedReconciliation({}).reconcile(bank, documents) == expected
 
 
+def test_amount_index_preserves_tolerance_edges_and_original_tie_order():
+    engine = AutomatedReconciliation({"reconciliation_amount_tolerance": "0.01"})
+    bank = [{"id": "bank", "amount": -4.29, "date": "2026-09-30", "description": "Synthetic Shop"}]
+    documents = [
+        {"document_id": "first", "total_amount": "4.30", "date": "2026-09-30", "vendor_name": "Synthetic Shop"},
+        {"document_id": "second", "total_amount": "4.28", "date": "2026-09-30", "vendor_name": "Synthetic Shop"},
+        {"document_id": "outside", "total_amount": "4.31", "date": "2026-09-30", "vendor_name": "Synthetic Shop"},
+    ]
+
+    result = engine.reconcile(bank, documents)
+
+    assert result[0]["type"] == "match"
+    assert result[0]["document_id"] == "first"
+    assert result[0]["amount_difference"] == 0.01
+    assert [row.get("document_id") for row in result[1:]] == ["second", "outside"]
+
+
+def test_amount_index_respects_signed_amount_matching():
+    engine = AutomatedReconciliation({
+        "reconciliation_use_absolute_amounts": False,
+        "reconciliation_amount_tolerance": "0.01",
+        "reconciliation_match_threshold": 0.6,
+    })
+    result = engine.reconcile(
+        [{"id": "bank", "amount": -4.28}],
+        [
+            {"document_id": "positive", "total_amount": 4.28},
+            {"document_id": "negative", "total_amount": -4.28},
+        ],
+    )
+
+    assert result[0]["type"] == "match"
+    assert result[0]["document_id"] == "negative"
+
+
+def test_amount_index_falls_back_for_decimal_ranges_exceeding_context_precision():
+    config = {
+        "reconciliation_use_absolute_amounts": False,
+        "reconciliation_amount_tolerance": "0.01",
+    }
+    bank = [{
+        "id": "bank",
+        "amount": "1000000000000000000000000000000",
+        "date": "2026-09-30",
+        "description": "Synthetic Shop",
+    }]
+    documents = [{
+        "document_id": "boundary",
+        "total_amount": "999999999999999999999999999999.99",
+        "date": "2026-09-30",
+        "vendor_name": "Synthetic Shop",
+    }]
+
+    assert AutomatedReconciliation(config).reconcile(bank, documents) == UnpreparedReconciliation(config).reconcile(
+        bank,
+        documents,
+    )
+    assert AutomatedReconciliation(config).reconcile(bank, documents)[0]["type"] == "match"
+
+
 def test_prepared_features_do_not_survive_between_runs():
     engine = AutomatedReconciliation({})
     bank = [{"id": "bank", "amount": -4.28, "date": "2026-09-30", "description": "Synthetic Shop"}]

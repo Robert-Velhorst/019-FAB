@@ -5,12 +5,11 @@ google-cloud-vision
 requests
 Pillow
 pytesseract # Python bridge for the local Tesseract OCR executable
-opencv-python-headless # For image processing in some processors
 pdf2image # For PDF-to-image conversion before OCR
 langdetect # For BilingualProcessor
 python-dateutil # Windows-compatible IANA timezone data for local scheduling
-pandas # For DataMigration and FinancialAnalyzer
-openpyxl # For reading .xlsx files with pandas
+openpyxl # For streaming local .xlsx bank exports
 Flask>=3.1.3,<4 # Authenticated local operations API and retained compatibility dashboard
 waitress # Production WSGI server for the local FAB API
 cryptography # For SecurityManager
+defusedxml # Hardened parsing for untrusted CAMT/XML bank statements

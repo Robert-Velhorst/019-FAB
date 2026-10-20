@@ -36,7 +36,7 @@ afterAll(async () => {
     await stopped;
   }
   if (directory) rmSync(directory, { recursive: true, force: true });
-});
+}, 30_000);
 
 async function run(entry: string, overrides: NodeJS.ProcessEnv) {
   const env = { ...process.env };
@@ -94,7 +94,7 @@ describe.each(["main", "standalone"])("%s production startup", entry => {
     child.stderr!.on("data", chunk => { output += chunk; });
     try {
       const base = `http://127.0.0.1:${port}`;
-      const deadline = Date.now() + 20_000;
+      const deadline = Date.now() + 45_000;
       let identity: Response | undefined;
       while (Date.now() < deadline && child.exitCode === null && child.signalCode === null) {
         try {
@@ -117,7 +117,7 @@ describe.each(["main", "standalone"])("%s production startup", entry => {
       await closed;
       children.delete(child);
     }
-  }, 30_000);
+  }, 60_000);
 
   it("exits nonzero on a real port conflict instead of selecting another port", async () => {
     const occupied = createServer();

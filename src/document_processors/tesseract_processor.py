@@ -25,6 +25,11 @@ from src.document_processors.poppler_renderer import render_pdf_page as convert_
 from src.document_processors.image_resource_limits import validate_raster_dimensions
 
 from src.document_processors.base import BaseProcessor
+from src.document_processors.image_resource_limits import (
+    MAX_RASTER_IMAGE_PIXELS,
+    open_raster_image,
+    validate_raster_dimensions,
+)
 from src.utils.tesseract_runtime import (
     configured_tesseract_languages,
     resolve_poppler_path,
@@ -33,6 +38,7 @@ from src.utils.tesseract_runtime import (
 )
 
 PDF_RENDER_MAX_EDGE = 3000
+IMAGE_MAX_PIXELS = MAX_RASTER_IMAGE_PIXELS
 PDF_CONVERSION_TIMEOUT_SECONDS = 30
 OCR_TIMEOUT_SECONDS = 30
 DOCUMENT_TIMEOUT_SECONDS = 300
@@ -135,9 +141,11 @@ class TesseractProcessor(BaseProcessor):
     def _load_pages(self, document_path: str, *, deadline=None) -> Iterator[Any]:
         deadline = deadline if deadline is not None else monotonic() + DOCUMENT_TIMEOUT_SECONDS
         if not str(document_path).lower().endswith(".pdf"):
-            page = Image.open(document_path)
+            page = open_raster_image(document_path)
             try:
                 validate_raster_dimensions(page)
+                if getattr(page, "n_frames", 1) != 1:
+                    raise ValueError("Multi-frame images are not supported for OCR.")
                 yield page
             finally:
                 page.close()

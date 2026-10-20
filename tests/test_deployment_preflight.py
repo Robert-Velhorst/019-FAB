@@ -71,6 +71,42 @@ def test_weak_tokens_block_startup_before_ledger_creation(tmp_path, value):
     assert not strong_secret(value)
 
 
+@pytest.mark.parametrize("host", ["0.0.0.0", "192.168.1.40", "::"])
+def test_local_profile_requires_strong_token_when_api_binds_off_loopback(host):
+    report = deployment_preflight({
+        "fab_deployment_profile": "local",
+        "fab_local_api_host": host,
+        "fab_local_api_token": "weak-token",
+    })
+    assert any(issue["id"] == "deployment_api_secret" for issue in report["issues"])
+
+
+def test_local_profile_can_keep_weak_token_for_loopback_only_api():
+    report = deployment_preflight({
+        "fab_deployment_profile": "local",
+        "fab_local_api_host": "127.0.0.1",
+        "fab_local_api_token": "weak-token",
+    })
+    assert not any(issue["id"] == "deployment_api_secret" for issue in report["issues"])
+
+
+@pytest.mark.parametrize("profile", ["local", "windows", "vm"])
+def test_hai_token_must_differ_from_operator_token_in_every_profile(tmp_path, profile):
+    config = production(tmp_path, profile)
+    config["fab_hai_api_token"] = config["fab_local_api_token"]
+
+    report = deployment_preflight(config)
+
+    assert report["status"] == "blocked"
+    assert any(issue["id"] == "deployment_hai_secret" for issue in report["issues"])
+
+    from src.operations.local_api import create_app
+
+    with pytest.raises(ValueError, match="startup blocked"):
+        create_app(config)
+    assert not (tmp_path / "data" / "ledger.sqlite3").exists()
+
+
 @pytest.mark.parametrize("key,value", [
     ("fab_local_api_host", "0.0.0.0"), ("fab_local_api_port", "3000oops"),
     ("fab_local_api_port", "0"), ("fab_local_api_port", 65536),
@@ -93,7 +129,11 @@ def test_locations_disk_and_encryption(tmp_path):
     assert deployment_preflight(config)["status"] == "blocked"
     config = production(tmp_path)
     config["fab_storage_encryption_confirmed"] = False
-    assert require_deployment_ready(config)["status"] == "degraded"
+    report = deployment_preflight(config)
+    assert report["status"] == "blocked"
+    assert any(issue["id"] == "deployment_storage_encryption" for issue in report["issues"])
+    with pytest.raises(ValueError, match="Encrypt the ledger"):
+        require_deployment_ready(config)
     with patch("src.operations.deployment_preflight.shutil.disk_usage") as usage:
         usage.return_value.free = 12
         assert deployment_preflight(config)["status"] == "blocked"

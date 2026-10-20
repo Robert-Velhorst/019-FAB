@@ -7,6 +7,8 @@ import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { decodeJwt, SignJWT } from "jose";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ENV } from "./_core/env";
+import { createContext } from "./_core/context";
+import { appRouter } from "./routers";
 import { createFabContext } from "./fabContext";
 import { fabStandaloneRouter } from "./fabRouter";
 import { resolveFabOperatorAccess } from "./fabOperatorAccess";
@@ -71,6 +73,31 @@ async function fixture() {
   return { auth, request, login, upstreamCalls };
 }
 
+async function generalRouterFixture() {
+  const ledger = express();
+  ledger.use(express.json());
+  ledger.use((_req, res) => res.json({ success: true }));
+  ENV.fabLocalApiUrl = await listen(ledger);
+  ENV.fabLocalApiToken = "test-ledger-token";
+  const auth = await import("./fabManagedAuth");
+  const app = express();
+  app.set("trust proxy", ["127.0.0.1", "::ffff:127.0.0.1"]);
+  auth.registerFabManagedAuthRoutes(app);
+  app.use(express.json());
+  app.use("/api/trpc", createExpressMiddleware({ router: appRouter, createContext }));
+  const baseUrl = await listen(app);
+  const request = (path: string, init: RequestInit = {}) => fetch(`${baseUrl}${path}`, {
+    ...init, redirect: "manual", headers: {
+      "x-forwarded-host": "fab.example.test", "x-forwarded-proto": "https", ...init.headers,
+    },
+  });
+  const login = () => request("/operator/login", {
+    method: "POST", headers: { origin, "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ accessToken }),
+  });
+  return { request, login };
+}
+
 function sessionCookie(response: Response) {
   const cookie = response.headers.get("set-cookie");
   expect(cookie).toContain(`${cookieName}=`);
@@ -111,6 +138,29 @@ it("binds ledger handoffs to the managed session and revokes status on logout", 
   expect(active.headers.get("cache-control")).toBe("no-store");
   await request("/operator/logout", { method: "POST", headers: { cookie, origin } });
   expect(await (await status(`Bearer ${credential}`)).json()).toEqual({ active: false });
+});
+
+it("rate-limits managed authentication pages and backend session status checks", async () => {
+  const { request } = await fixture();
+  for (let attempt = 0; attempt < 60; attempt++) {
+    expect((await request("/operator/login")).status).toBe(200);
+  }
+  expect((await request("/operator/login")).status).toBe(429);
+
+  const authorization = `Bearer ${createHmac("sha256", ENV.fabLocalApiToken)
+    .update("fab-managed-parent-status:v1").digest("base64url")}`;
+  for (let attempt = 0; attempt < 120; attempt++) {
+    const response = await request("/api/fab/operator-session/status", {
+      method: "POST", headers: { authorization, "content-type": "application/json" },
+      body: JSON.stringify({ id: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" }),
+    });
+    expect(response.status).toBe(200);
+  }
+  const limited = await request("/api/fab/operator-session/status", {
+    method: "POST", headers: { authorization, "content-type": "application/json" },
+    body: JSON.stringify({ id: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" }),
+  });
+  expect(limited.status).toBe(429);
 });
 
 it.each(["/operator/logout", "/api/trpc/auth.logout"])("invalidates ledger authority through %s", async logoutPath => {
@@ -414,4 +464,18 @@ describe("FAB managed operator authentication", () => {
       ENV[property] = saved;
     }
   });
+});
+
+it("revokes managed sessions when the general app router handles logout", async () => {
+  const { request, login } = await generalRouterFixture();
+  const cookie = sessionCookie(await login());
+  const logout = await request("/api/trpc/auth.logout", {
+    method: "POST",
+    headers: { cookie, origin, "content-type": "application/json" },
+    body: '{"json":null}',
+  });
+
+  expect(logout.status).toBe(200);
+  expect(logout.headers.get("set-cookie")).toContain(`${cookieName}=;`);
+  expect((await request("/api/trpc/fab.access", { headers: { cookie } })).status).toBe(403);
 });

@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { motion } from "framer-motion";
 import { Calendar, Clock, ArrowLeft, BookOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -6,7 +7,11 @@ import Footer from "@/components/Footer";
 import { Link, useParams } from "wouter";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { trpc } from "@/lib/trpc";
-import { Streamdown } from "streamdown";
+
+const Streamdown = lazy(async () => {
+  const { Streamdown: MarkdownRenderer } = await import("streamdown");
+  return { default: MarkdownRenderer };
+});
 
 const fadeUp = {
   hidden: { opacity: 0, y: 30 },
@@ -160,7 +165,17 @@ export default function BlogPost() {
               variants={fadeUp}
               className="prose prose-lg max-w-none prose-headings:text-charcoal prose-headings:font-sans prose-p:text-charcoal-light prose-p:leading-relaxed prose-a:text-teal prose-a:no-underline hover:prose-a:underline prose-strong:text-charcoal prose-blockquote:border-teal prose-blockquote:text-charcoal-light"
             >
-              <Streamdown>{content}</Streamdown>
+              <Suspense fallback={(
+                <div role="status" aria-live="polite" className="min-h-64 space-y-3 animate-pulse">
+                  <span className="sr-only">{language === "nl" ? "Artikelinhoud laden" : "Loading article content"}</span>
+                  <div aria-hidden="true" className="h-4 w-full rounded bg-sand/60" />
+                  <div aria-hidden="true" className="h-4 w-5/6 rounded bg-sand/60" />
+                  <div aria-hidden="true" className="h-4 w-4/5 rounded bg-sand/60" />
+                  <div aria-hidden="true" className="h-4 w-full rounded bg-sand/60" />
+                </div>
+              )}>
+                <Streamdown>{content}</Streamdown>
+              </Suspense>
             </motion.div>
 
             {/* Bottom CTA */}

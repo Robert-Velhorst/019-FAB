@@ -82,8 +82,7 @@ class TestDocumentProcessors(unittest.TestCase):
     @patch("src.document_processors.tesseract_processor.Image.open")
     def test_tesseract_processor(self, mock_image_open, mock_image_to_string):
         mock_image_to_string.return_value = "Tesseract OCR Text"
-        mock_image_open.return_value = MagicMock()
-        mock_image_open.return_value.size = (100, 50)
+        mock_image_open.return_value = MagicMock(size=(1200, 800), n_frames=1)
 
         processor = TesseractProcessor(self.config)
         result = processor.process_document(self.dummy_image_path)
@@ -251,6 +250,26 @@ class TestDocumentProcessors(unittest.TestCase):
         decode.assert_not_called()
         self.assertEqual(result["preprocessing_reason"], "preprocessing_failed")
 
+    def test_handwritten_oversized_raster_is_rejected_before_opencv_decode(self):
+        fake_cv2 = MagicMock()
+        with (
+            patch.object(handwritten_module, "cv2", fake_cv2),
+            patch.object(handwritten_module, "np", MagicMock()),
+            patch.object(handwritten_module, "Image", MagicMock()),
+            patch.object(handwritten_module, "pytesseract", MagicMock()),
+            patch.object(
+                handwritten_module,
+                "validate_raster_path",
+                side_effect=ValueError("Image pixel limit exceeds the local processing limit."),
+            ),
+        ):
+            result = HandwrittenRecognitionProcessor(self.config).process_document(
+                self.dummy_image_path
+            )
+
+        self.assertIn("pixel limit", result["error"])
+        fake_cv2.imread.assert_not_called()
+
     def test_template_matching_processor(self):
         with open(self.config["vendor_templates_file"], "w", encoding="utf-8") as handle:
             json.dump({
@@ -370,6 +389,18 @@ class TestDocumentProcessors(unittest.TestCase):
         self.assertEqual(result["preprocessing_reason"], "unsupported_image_type")
         self.assertEqual(result["processed_image_path"], self.dummy_pdf_path)
         self.assertEqual(result["cleanup_paths"], [])
+
+    @unittest.skipIf(enhanced_module.cv2 is None, "OpenCV is optional in this test runtime")
+    def test_enhanced_oversized_raster_is_rejected_before_opencv_decode(self):
+        with (
+            patch.object(enhanced_module, "validate_raster_path", side_effect=ValueError("oversized")),
+            patch.object(enhanced_module.cv2, "imread") as image_read,
+        ):
+            result = EnhancedProcessor({}).process_document(self.dummy_image_path)
+
+        self.assertFalse(result["preprocessing_applied"])
+        self.assertEqual(result["preprocessing_reason"], "preprocessing_failed")
+        image_read.assert_not_called()
 
     @unittest.skipIf(enhanced_module.cv2 is None, "OpenCV is optional in this test runtime")
     def test_enhanced_processor_corrects_skew_without_doubling_it(self):

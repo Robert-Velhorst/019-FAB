@@ -594,9 +594,12 @@ class LocalBookkeepingRecordService:
         applied_reconciliation_status = reconciliation_status or transaction.get("reconciliation_status") or "not_started"
         record_status = status or _record_status_for_bank_reconciliation(applied_reconciliation_status)
         applied_rule = self._approved_vendor_category_rule(transaction)
-        category = applied_rule.get("category") if applied_rule else None
-        target_account = category if applied_rule else None
-        rule_confidence = _float(applied_rule.get("confidence_score")) if applied_rule else None
+        rule_conflict = bool(applied_rule and applied_rule.get("conflict"))
+        if rule_conflict:
+            record_status = "needs_review"
+        category = applied_rule.get("category") if applied_rule and not rule_conflict else None
+        target_account = category if applied_rule and not rule_conflict else None
+        rule_confidence = _float(applied_rule.get("confidence_score")) if applied_rule and not rule_conflict else None
         return {
             "bankTransactionId": transaction.get("id"),
             "sourceType": "bank_transaction",
@@ -611,7 +614,7 @@ class LocalBookkeepingRecordService:
             "currency": transaction.get("currency") or "EUR",
             "description": transaction.get("description"),
             "confidenceScore": rule_confidence,
-            "reviewRequired": record_status in {"needs_review", "missing_receipt"},
+            "reviewRequired": rule_conflict or record_status in {"needs_review", "missing_receipt"},
             "exportStatus": _bank_export_status(applied_reconciliation_status),
             "reconciliationStatus": applied_reconciliation_status,
             "metadata": {
@@ -620,7 +623,8 @@ class LocalBookkeepingRecordService:
                 "source": transaction.get("source"),
                 "transactionStatus": transaction.get("status"),
                 "duplicateFingerprint": transaction.get("duplicate_fingerprint"),
-                "appliedVendorCategoryRule": _rule_summary(applied_rule),
+                "appliedVendorCategoryRule": _rule_summary(applied_rule) if not rule_conflict else None,
+                "vendorCategoryRuleConflict": applied_rule if rule_conflict else None,
             },
         }
 
@@ -646,6 +650,14 @@ class LocalBookkeepingRecordService:
         candidates = exact_target or universal
         if not candidates:
             return None
+        categories = sorted({str(rule.get("category") or "").strip() for rule in candidates})
+        if len(categories) > 1:
+            return {
+                "conflict": True,
+                "target_system": "waveapps",
+                "rule_ids": sorted(int(rule["id"]) for rule in candidates),
+                "categories": categories,
+            }
         return candidates[0]
 
     def _document_review_required(

@@ -494,7 +494,6 @@ class LocalReadinessService:
         dashboard_url = dashboard_url or ledger_dashboard_url
         api_base_url = api_origin + "/api"
         token_required = bool(self.api_token_configured)
-        ngrok_ready = bool(token_required and security["remoteExposureSafe"])
         return {
             "dashboardUrl": dashboard_url,
             "dashboardSource": dashboard_source,
@@ -503,12 +502,6 @@ class LocalReadinessService:
             "authMode": "bearer_token_or_dashboard_login" if token_required else "loopback_no_token",
             "authHeaderRequired": token_required,
             "authHeaderExample": "Authorization: Bearer <FAB_LOCAL_API_TOKEN>" if token_required else "",
-            "ngrokReady": ngrok_ready,
-            "ngrokSafety": (
-                "safe_with_token" if ngrok_ready
-                else "blocked_without_token" if security["remoteExposureBlocked"]
-                else "loopback_only"
-            ),
             "windows": {
                 "startCommand": "python -m src.operations.local_api",
                 "workingDirectory": "019-FAB repository root",
@@ -522,7 +515,7 @@ class LocalReadinessService:
                 ],
             },
             "safeRemoteChecklist": [
-                "Set FAB_LOCAL_API_TOKEN before any ngrok or non-loopback exposure.",
+                "Set FAB_LOCAL_API_TOKEN before any non-loopback exposure.",
                 "Keep the dashboard on 127.0.0.1 for normal local use.",
                 "Do not put credentials, tokens, or financial documents in Git-tracked folders.",
                 "Use approval phrases for export, restore, and other irreversible actions.",

@@ -2,7 +2,7 @@ import json
 import os
 import tempfile
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from src.security.google_oauth_store import (
     GoogleOAuthTokenStore,
@@ -146,6 +146,34 @@ class TestGoogleOAuthTokenStore(unittest.TestCase):
                 self.assertEqual(saved, {"token": "secret"})
             self.assertFalse(os.path.exists(store.marker_path))
             self.assertFalse(os.path.exists(f"{written_path}.tmp"))
+
+    def test_clear_reauthorization_retries_transient_windows_sharing_violation(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = GoogleOAuthTokenStore(
+                os.path.join(temp_dir, "gmail.json"),
+                ["gmail.readonly"],
+                credentials_type=FakeCredentialsType,
+            )
+            with open(store.marker_path, "w", encoding="utf-8") as handle:
+                handle.write("reauthorize")
+            original_unlink = os.unlink
+            calls = 0
+
+            def unlink_with_transient_lock(path):
+                nonlocal calls
+                if path == store.marker_path:
+                    calls += 1
+                    if calls < 3:
+                        raise PermissionError("synthetic sharing violation")
+                return original_unlink(path)
+
+            with patch("src.security.google_oauth_store.os.unlink", side_effect=unlink_with_transient_lock):
+                with patch("src.security.google_oauth_store.time.sleep") as sleep:
+                    store.clear_reauthorization()
+
+            self.assertEqual(calls, 3)
+            self.assertEqual(sleep.call_count, 2)
+            self.assertFalse(os.path.exists(store.marker_path))
 
     def test_google_credentials_round_trip_through_platform_token_format(self):
         if Credentials is None:

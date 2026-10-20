@@ -129,7 +129,6 @@ class TestLocalReadinessService(unittest.TestCase):
             self.assertEqual(summary["localAccess"]["dashboardUrl"], "http://127.0.0.1:5055/")
             self.assertEqual(summary["localAccess"]["apiBaseUrl"], "http://127.0.0.1:5055/api")
             self.assertEqual(summary["localAccess"]["authMode"], "bearer_token_or_dashboard_login")
-            self.assertEqual(summary["localAccess"]["ngrokSafety"], "safe_with_token")
             self.assertIn("FAB_LOCAL_API_TOKEN", summary["localAccess"]["windows"]["recommendedEnvironment"])
             self.assertNotIn("wave-business-secret", rendered)
             self.assertNotIn("mgz-secret", rendered)
@@ -149,7 +148,6 @@ class TestLocalReadinessService(unittest.TestCase):
 
             self.assertEqual(summary["status"], "blocked")
             self.assertFalse(summary["security"]["remoteExposureSafe"])
-            self.assertEqual(summary["localAccess"]["ngrokSafety"], "blocked_without_token")
             self.assertIn("remote_api_without_token", {issue["type"] for issue in summary["issues"]})
 
     def test_freshdesk_readiness_accepts_repository_025_api_url_form(self):
@@ -210,7 +208,7 @@ class TestLocalReadinessService(unittest.TestCase):
 
     def test_base_url_overrides_displayed_local_access_without_exposing_token(self):
         summary = LocalReadinessService(
-            {"fab_local_api_base_url": "https://fab-local.example.ngrok-free.app", "fab_local_api_token": "secret-token"},
+            {"fab_local_api_base_url": "https://fab-local.example.test", "fab_local_api_token": "secret-token"},
             ledger_path="data/fab.sqlite3",
             api_host="127.0.0.1",
             api_port=5001,
@@ -220,8 +218,8 @@ class TestLocalReadinessService(unittest.TestCase):
         ).summarize()
         rendered = json.dumps(summary, sort_keys=True)
 
-        self.assertEqual(summary["localAccess"]["dashboardUrl"], "https://fab-local.example.ngrok-free.app/")
-        self.assertEqual(summary["localAccess"]["apiBaseUrl"], "https://fab-local.example.ngrok-free.app/api")
+        self.assertEqual(summary["localAccess"]["dashboardUrl"], "https://fab-local.example.test/")
+        self.assertEqual(summary["localAccess"]["apiBaseUrl"], "https://fab-local.example.test/api")
         self.assertEqual(summary["localAccess"]["authHeaderExample"], "Authorization: Bearer <FAB_LOCAL_API_TOKEN>")
         self.assertNotIn("secret-token", rendered)
 

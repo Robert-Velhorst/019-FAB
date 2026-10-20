@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -15,7 +16,7 @@ concurrency:
 jobs:
   backend-linux:
     name: Backend (Linux)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Check out repository
@@ -35,6 +36,8 @@ jobs:
           cache-dependency-path: requirements-test.lock
       - name: Install Python dependencies
         run: python -m pip install --disable-pip-version-check --require-hashes -r requirements-test.lock
+      - name: Audit Python dependency locks
+        run: python -m pip_audit --progress-spinner=off --format=markdown --require-hashes -r requirements.lock -r requirements-local.lock -r requirements-ml.lock -r requirements-test.lock
       - name: Run backend suite
         run: python -m pytest -q -p no:cacheprovider -p no:stepwise
       - name: Rehearse synthetic source-complete recovery
@@ -113,7 +116,7 @@ jobs:
 
   frontend:
     name: Frontend
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Check out repository
@@ -154,22 +157,76 @@ jobs:
       - name: Rehearse Linux dashboard API and ledger
         run: python scripts/run_stack_rehearsal.py
 
-  container-build-api:
-    name: Container build (api)
-    runs-on: ubuntu-latest
+  container-build:
+    name: Container build (${{ matrix.component }})
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: api
+            context: .
+            dockerfile: Dockerfile
+          - component: dashboard
+            context: ./web
+            dockerfile: ./web/Dockerfile
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Build API image
-        run: docker build --pull --file Dockerfile --tag fab-api:ci .
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build production container without publishing
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: false
+          tags: local/fab-${{ matrix.component }}:${{ github.sha }}
+          cache-from: type=gha,scope=ci-${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=ci-${{ matrix.component }}
 
-  container-build-dashboard:
-    name: Container build (dashboard)
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+  database-integration:
+    name: Web database integration (MySQL)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: fab-ci-only-password
+          MYSQL_DATABASE: fab_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping --host=127.0.0.1 --user=root --password=fab-ci-only-password --silent"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Build dashboard image
-        run: docker build --pull --file web/Dockerfile --tag fab-dashboard:ci web
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+        with:
+          version: 11.20.0
+          run_install: false
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26.12.0"
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: Install web dependencies
+        run: pnpm --dir web install --frozen-lockfile
+      - name: Apply tracked database migrations
+        working-directory: web
+        env:
+          DATABASE_URL: mysql://root:fab-ci-only-password@127.0.0.1:3306/fab_test
+        run: pnpm exec drizzle-kit migrate
+      - name: Exercise MySQL-backed audit and transaction paths
+        working-directory: web
+        env:
+          FAB_MYSQL_INTEGRATION_URL: mysql://root:fab-ci-only-password@127.0.0.1:3306/fab_test
+        run: pnpm exec vitest run server/db.mysql.integration.test.ts

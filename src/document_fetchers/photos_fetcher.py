@@ -82,7 +82,9 @@ class PhotosFetcher(BaseFetcher):
             self._fail_run(self.auth_error)
             return []
 
-        attachments_dir = self.config.get("google_photos_download_dir") or self.config.get("attachments_save_dir", "/tmp/photos_attachments")
+        attachments_dir = self._download_directory(
+            "google_photos", "google_photos_download_dir"
+        )
         os.makedirs(attachments_dir, exist_ok=True)
 
         documents = []

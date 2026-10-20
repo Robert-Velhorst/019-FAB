@@ -1,5 +1,8 @@
+import hashlib
 import os
 import re
+import stat
+import tempfile
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
@@ -10,6 +13,10 @@ from src.document_processors.document_type_classifier import (
     is_non_posting_document_type,
 )
 from src.document_processors.financial_field_extractor import FinancialFieldExtractor
+from src.document_processors.document_resource_limits import (
+    MAX_SOURCE_DOCUMENT_BYTES,
+    MAX_TEXT_DOCUMENT_BYTES,
+)
 from src.operations.local_backup import LocalBackupService
 from src.operations.local_bookkeeping_records import LocalBookkeepingRecordService
 from src.operations.local_category_suggestions import (
@@ -542,7 +549,6 @@ class LocalDocumentProcessor:
 
         affected_document_ids = set()
         for plan in plans:
-            canonical = plan["canonicalDocument"]
             subject = plan["subjectDocument"]
             canonical_id, subject_id = plan["pair"]
             result = plan["result"]
@@ -1485,7 +1491,7 @@ class LocalDocumentProcessor:
         *,
         reuse_stored_ocr: bool = False,
     ) -> Dict[str, Any]:
-        document = self.ledger.get_document(document_id)
+        document = self.ledger.get_document_for_processing(document_id)
         if not document:
             return {"documentId": document_id, "status": "not_found", "error": "Document not found"}
 
@@ -1518,11 +1524,13 @@ class LocalDocumentProcessor:
             )
 
         try:
-            processed_data = (
-                self._process_stored_ocr(document)
-                if reuse_stored_ocr and str(document.get("ocr_text") or "").strip()
-                else self._process_path(path, document)
-            )
+            if reuse_stored_ocr and str(document.get("ocr_text") or "").strip():
+                processed_data = self._process_stored_ocr(document)
+            else:
+                with tempfile.TemporaryDirectory(prefix="fab-process-") as work_dir:
+                    snapshot_path = _snapshot_source_file(document, path, work_dir)
+                    processed_data = self._process_path(snapshot_path, document)
+                    processed_data["document_path"] = path
             extracted_data = _sanitize_extracted_data(processed_data.get("extracted_data") or {})
             document_type_classification = self.document_type_classifier.classify(
                 processed_data.get("ocr_text", ""),
@@ -1572,7 +1580,16 @@ class LocalDocumentProcessor:
                 category = category_result.get("category", "Manual Review")
                 confidence_score = _safe_float(category_result.get("confidence_score"), 0.0)
                 applied_rule = self._approved_vendor_category_rule(document, extracted_data)
-                if applied_rule:
+                if applied_rule and applied_rule.get("conflict"):
+                    category = "Manual Review"
+                    confidence_score = 0.0
+                    processed_data["vendor_category_rule_conflict"] = {
+                        "vendorName": extracted_data.get("vendor_name") or document.get("vendor_name"),
+                        "targetSystem": applied_rule["target_system"],
+                        "ruleIds": applied_rule["rule_ids"],
+                        "categories": applied_rule["categories"],
+                    }
+                elif applied_rule:
                     category = applied_rule["category"]
                     confidence_score = max(confidence_score or 0.0, _safe_float(applied_rule.get("confidence_score"), 1.0) or 1.0)
                     processed_data["applied_vendor_category_rule"] = {
@@ -1604,6 +1621,17 @@ class LocalDocumentProcessor:
             processed_data["category"] = category
             processed_data["confidence_score"] = confidence_score
             duplicate_match = self._duplicate_match(document, extracted_data, processed_data)
+        except SourceFileIntegrityError as exc:
+            details = (
+                "Source document exceeds its supported processing size limit."
+                if exc.reason.endswith("exceeds_limit")
+                else "Source file changed or no longer matches the document registered at intake."
+            )
+            return self._needs_review(
+                document,
+                [exc.reason],
+                details,
+            )
         except Exception as exc:
             self.ledger.update_document(document_id, {
                 "processingStatus": "failed",
@@ -1671,6 +1699,7 @@ class LocalDocumentProcessor:
                     "fieldEvidence": processed_data.get("field_evidence") or {},
                     "duplicateMatch": duplicate_match if duplicate_match.get("is_duplicate") else None,
                     "appliedVendorCategoryRule": processed_data.get("applied_vendor_category_rule"),
+                    "vendorCategoryRuleConflict": processed_data.get("vendor_category_rule_conflict"),
                     "appliedTrustedCategorySuggestion": processed_data.get("applied_trusted_category_suggestion"),
                     "documentTypeClassification": document_type_classification,
                     "providerEvidencePolicy": provider_evidence_policy or None,
@@ -1760,6 +1789,7 @@ class LocalDocumentProcessor:
                 "duplicateOfDocumentId": duplicate_of_document_id,
                 "bookkeepingRecordId": record_result.get("recordId"),
                 "appliedVendorCategoryRule": processed_data.get("applied_vendor_category_rule"),
+                "vendorCategoryRuleConflict": processed_data.get("vendor_category_rule_conflict"),
                 "appliedTrustedCategorySuggestion": processed_data.get("applied_trusted_category_suggestion"),
                 "documentTypeClassification": document_type_classification,
                 "creditNoteAmountNormalization": credit_note_amount_normalization,
@@ -1778,6 +1808,7 @@ class LocalDocumentProcessor:
             "reviewReasons": review_reasons,
             "validation": validation,
             "appliedVendorCategoryRule": processed_data.get("applied_vendor_category_rule"),
+            "vendorCategoryRuleConflict": processed_data.get("vendor_category_rule_conflict"),
             "appliedTrustedCategorySuggestion": processed_data.get("applied_trusted_category_suggestion"),
             "documentType": semantic_document_type,
             "documentTypeClassification": document_type_classification,
@@ -1844,6 +1875,14 @@ class LocalDocumentProcessor:
         candidates = exact_target or universal
         if not candidates:
             return None
+        categories = sorted({str(rule.get("category") or "").strip() for rule in candidates})
+        if len(categories) > 1:
+            return {
+                "conflict": True,
+                "target_system": target_system,
+                "rule_ids": sorted(int(rule["id"]) for rule in candidates),
+                "categories": categories,
+            }
         return candidates[0]
 
     def _process_path(self, path: str, document: Dict[str, Any]) -> Dict[str, Any]:
@@ -1889,6 +1928,8 @@ class LocalDocumentProcessor:
         confidence_score: float,
     ) -> list:
         reasons = []
+        if processed_data.get("vendor_category_rule_conflict"):
+            reasons.append("conflicting_approved_vendor_category_rules")
         if not str(processed_data.get("ocr_text") or "").strip():
             reasons.append("empty_ocr_text")
         document_type_classification = processed_data.get("document_type_classification") or {}
@@ -2134,9 +2175,125 @@ def _duplicate_comparison_document(document: Dict[str, Any]) -> Dict[str, Any]:
     return normalized
 
 
+class SourceFileIntegrityError(ValueError):
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
+def _snapshot_source_file(
+    document: Dict[str, Any],
+    path: str,
+    work_dir: str,
+) -> str:
+    metadata = document.get("metadata") if isinstance(document.get("metadata"), dict) else {}
+    registered_root = str(metadata.get("folder") or "").strip()
+    resolved_path = os.path.realpath(os.path.abspath(path))
+    if registered_root:
+        resolved_root = os.path.realpath(os.path.abspath(registered_root))
+        try:
+            contained = os.path.normcase(os.path.commonpath((resolved_root, resolved_path))) == os.path.normcase(resolved_root)
+        except ValueError:
+            contained = False
+        if not contained:
+            raise SourceFileIntegrityError("source_file_outside_registered_root")
+
+    expected_hash = str(
+        document.get("content_sha256") or metadata.get("contentSha256") or ""
+    ).strip().lower()
+    if expected_hash and not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
+        raise SourceFileIntegrityError("invalid_registered_content_hash")
+    is_text = _is_text_document(path, document)
+    max_bytes = MAX_TEXT_DOCUMENT_BYTES if is_text else MAX_SOURCE_DOCUMENT_BYTES
+    size_limit_reason = "text_document_exceeds_limit" if is_text else "document_exceeds_limit"
+
+    source_fd = -1
+    snapshot_fd = -1
+    snapshot_path = ""
+    try:
+        path_stat = os.stat(path, follow_symlinks=False)
+        if stat.S_ISLNK(path_stat.st_mode) or not stat.S_ISREG(path_stat.st_mode):
+            raise SourceFileIntegrityError("source_file_not_regular")
+        if path_stat.st_size > max_bytes:
+            raise SourceFileIntegrityError(size_limit_reason)
+
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        source_fd = os.open(path, flags)
+        opened_stat = os.fstat(source_fd)
+        if not _same_file_identity(path_stat, opened_stat):
+            raise SourceFileIntegrityError("source_file_changed_during_open")
+
+        suffix = os.path.splitext(path)[1].lower()
+        snapshot_fd, snapshot_path = tempfile.mkstemp(prefix="source-", suffix=suffix, dir=work_dir)
+        digest = hashlib.sha256()
+        byte_count = 0
+        with os.fdopen(source_fd, "rb") as source, os.fdopen(snapshot_fd, "wb") as snapshot:
+            source_fd = snapshot_fd = -1
+            while chunk := source.read(1024 * 1024):
+                digest.update(chunk)
+                snapshot.write(chunk)
+                byte_count += len(chunk)
+                if byte_count > max_bytes:
+                    raise SourceFileIntegrityError(size_limit_reason)
+            snapshot.flush()
+            after_stat = os.fstat(source.fileno())
+
+        current_path_stat = os.stat(path, follow_symlinks=False)
+        if (
+            stat.S_ISLNK(current_path_stat.st_mode)
+            or not _same_file_identity(opened_stat, after_stat)
+            or not _same_file_identity(opened_stat, current_path_stat)
+            or byte_count != opened_stat.st_size
+        ):
+            raise SourceFileIntegrityError("source_file_changed_during_snapshot")
+        if registered_root:
+            current_real_path = os.path.realpath(os.path.abspath(path))
+            try:
+                contained = os.path.normcase(
+                    os.path.commonpath((resolved_root, current_real_path))
+                ) == os.path.normcase(resolved_root)
+            except ValueError:
+                contained = False
+            if not contained:
+                raise SourceFileIntegrityError("source_file_outside_registered_root")
+        if expected_hash and digest.hexdigest() != expected_hash:
+            raise SourceFileIntegrityError("source_file_hash_mismatch")
+        return snapshot_path
+    except Exception:
+        if source_fd >= 0:
+            try:
+                os.close(source_fd)
+            except OSError:
+                pass
+        if snapshot_fd >= 0:
+            try:
+                os.close(snapshot_fd)
+            except OSError:
+                pass
+        if snapshot_path:
+            try:
+                os.unlink(snapshot_path)
+            except OSError:
+                pass
+        raise
+
+
+def _same_file_identity(first: os.stat_result, second: os.stat_result) -> bool:
+    return (
+        first.st_dev == second.st_dev
+        and (not first.st_ino or not second.st_ino or first.st_ino == second.st_ino)
+        and first.st_size == second.st_size
+        and getattr(first, "st_mtime_ns", int(first.st_mtime * 1_000_000_000))
+        == getattr(second, "st_mtime_ns", int(second.st_mtime * 1_000_000_000))
+    )
+
+
 def _read_text_file(path: str) -> str:
-    with open(path, "r", encoding="utf-8", errors="replace") as handle:
-        return handle.read()
+    with open(path, "rb") as handle:
+        content = handle.read(MAX_TEXT_DOCUMENT_BYTES + 1)
+    if len(content) > MAX_TEXT_DOCUMENT_BYTES:
+        raise ValueError("text_document_exceeds_limit")
+    return content.decode("utf-8", errors="replace")
 
 
 def _extract_basic_fields(text: str) -> Dict[str, Any]:

@@ -71,6 +71,49 @@ class TestLocalBankTransactionImportService(unittest.TestCase):
             self.assertEqual(by_id["csv-1"]["amount"], -42.5)
             self.assertEqual(by_id["csv-2"]["amount"], 100.0)
 
+    def test_csv_rejects_corrupted_amount_instead_of_sanitizing_digits(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            service = LocalBankTransactionImportService(ledger, {})
+
+            result = service.import_statement_text(
+                "Date;Description;Amount\n"
+                "28-06-2026;Office Shop;1x2\n",
+                format="csv",
+                account_identifier="nl-bank",
+            )
+
+            self.assertEqual(result["rowsImported"], 0)
+            self.assertEqual(result["skipped"], 1)
+            self.assertEqual(ledger.list_bank_transactions(account_identifier="nl-bank"), [])
+
+    def test_csv_rejects_malformed_grouping_and_accepts_euro_formatting(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            service = LocalBankTransactionImportService(ledger, {})
+
+            invalid = service.import_statement_text(
+                "Date;Description;Amount\n"
+                "28-06-2026;Bad grouping;1,2,3\n"
+                "29-06-2026;Invalid separator;1_234\n",
+                format="csv",
+                account_identifier="nl-bank",
+            )
+            valid = service.import_statement_text(
+                "Date;Description;Amount\n"
+                "28-06-2026;Office Shop;€ 1.234,56\n",
+                format="csv",
+                account_identifier="nl-bank",
+            )
+
+            self.assertEqual(invalid["rowsImported"], 0)
+            self.assertEqual(invalid["skipped"], 2)
+            self.assertEqual(valid["rowsImported"], 1)
+            self.assertEqual(
+                ledger.list_bank_transactions(account_identifier="nl-bank")[0]["amount"],
+                1234.56,
+            )
+
     def test_exact_reimport_preserves_final_reconciliation_and_original_provenance(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
@@ -176,6 +219,63 @@ class TestLocalBankTransactionImportService(unittest.TestCase):
             self.assertEqual(transaction["transaction_id"], "camt-1")
             self.assertEqual(transaction["amount"], -42.5)
             self.assertEqual(transaction["counterparty"], "Office Shop")
+
+    def test_import_camt_splits_batched_entry_when_detail_amounts_reconcile(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            service = LocalBankTransactionImportService(ledger, {})
+
+            result = service.import_statement_text(
+                """
+                <Document><BkToCstmrStmt><Stmt><Ntry>
+                  <Amt Ccy="EUR">42.50</Amt><CdtDbtInd>DBIT</CdtDbtInd>
+                  <BookgDt><Dt>2026-06-28</Dt></BookgDt><AcctSvcrRef>batch-1</AcctSvcrRef>
+                  <NtryDtls><TxDtls><Refs><EndToEndId>purchase-1</EndToEndId></Refs>
+                    <AmtDtls><TxAmt><Amt Ccy="EUR">25.00</Amt></TxAmt></AmtDtls>
+                    <RltdPties><Cdtr><Nm>Office Shop</Nm></Cdtr></RltdPties>
+                    <RmtInf><Ustrd>Paper</Ustrd></RmtInf>
+                  </TxDtls><TxDtls><Refs><EndToEndId>purchase-2</EndToEndId></Refs>
+                    <AmtDtls><TxAmt><Amt Ccy="EUR">17.50</Amt></TxAmt></AmtDtls>
+                    <RltdPties><Cdtr><Nm>Stationery BV</Nm></Cdtr></RltdPties>
+                    <RmtInf><Ustrd>Ink</Ustrd></RmtInf>
+                  </TxDtls></NtryDtls>
+                </Ntry></Stmt></BkToCstmrStmt></Document>
+                """,
+                format="camt",
+                account_identifier="camt-batch",
+            )
+
+            transactions = ledger.list_bank_transactions(account_identifier="camt-batch")
+
+            self.assertEqual(result["rowsImported"], 2)
+            self.assertEqual({row["transaction_id"] for row in transactions}, {"purchase-1", "purchase-2"})
+            self.assertEqual({row["amount"] for row in transactions}, {-25.0, -17.5})
+            self.assertEqual({row["counterparty"] for row in transactions}, {"Office Shop", "Stationery BV"})
+
+    def test_import_camt_keeps_batched_entry_aggregate_when_details_do_not_reconcile(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            service = LocalBankTransactionImportService(ledger, {})
+
+            result = service.import_statement_text(
+                """
+                <Document><BkToCstmrStmt><Stmt><Ntry>
+                  <Amt Ccy="EUR">42.50</Amt><CdtDbtInd>DBIT</CdtDbtInd>
+                  <BookgDt><Dt>2026-06-28</Dt></BookgDt><AcctSvcrRef>batch-unsafe</AcctSvcrRef>
+                  <NtryDtls><TxDtls><AmtDtls><TxAmt><Amt Ccy="EUR">25.00</Amt></TxAmt></AmtDtls></TxDtls>
+                    <TxDtls><AmtDtls><TxAmt><Amt Ccy="EUR">16.00</Amt></TxAmt></AmtDtls></TxDtls></NtryDtls>
+                </Ntry></Stmt></BkToCstmrStmt></Document>
+                """,
+                format="camt",
+                account_identifier="camt-unsafe-batch",
+            )
+
+            transactions = ledger.list_bank_transactions(account_identifier="camt-unsafe-batch")
+
+            self.assertEqual(result["rowsImported"], 1)
+            self.assertEqual(len(transactions), 1)
+            self.assertEqual(transactions[0]["transaction_id"], "batch-unsafe")
+            self.assertEqual(transactions[0]["amount"], -42.5)
 
     def test_import_mt940_statement_extracts_amount_date_and_description(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -309,6 +409,20 @@ class TestLocalBankTransactionImportService(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "not valid XML"):
                 service.import_statement_text("<Document>", format="camt")
+
+    def test_camt_rejects_internal_entity_declarations(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            service = LocalBankTransactionImportService(ledger, {})
+            statement = """<!DOCTYPE Document [
+                <!ENTITY amount "42.50">
+            ]>
+            <Document><Ntry><Amt>&amount;</Amt></Ntry></Document>"""
+
+            with self.assertRaisesRegex(ValueError, "not valid XML"):
+                service.import_statement_text(statement, format="camt")
+
+            self.assertEqual(ledger.list_bank_transactions(), [])
 
 
 if __name__ == "__main__":

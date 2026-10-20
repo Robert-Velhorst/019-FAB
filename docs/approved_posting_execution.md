@@ -62,12 +62,18 @@ record completion through the token-protected dashboard API:
 POST /api/export-attempts/{export_attempt_id}/result
 ```
 
-The JSON body must include `confirmation` with the exact value
-`RECORD FAB EXPORT RESULT`, plus `status` (`executed`, `submitted`, or
-`failed`) and optional `externalId`/`result` evidence. FAB then updates the
-master ledger, resolves the supervision review item for a successful
-submission, and writes an audit event. This endpoint records the observed
-result; it does not log in to MijnGeldzaken or bypass DigiD.
+The attempt must already be `supervision_required`, and the JSON body must
+include `confirmation` with the exact value `RECORD FAB EXPORT RESULT`, a
+`status` (`executed`, `submitted`, or `failed`), and
+`result.artifactSha256` exactly matching the SHA-256 of the persisted artifact.
+FAB stores only a fixed operator-attestation source label and that checksum as
+evidence; an optional `externalId` is limited to 200 printable characters.
+The dashboard supplies the persisted artifact checksum with its supervised
+result form. FAB then updates the master ledger, resolves the supervision
+review item for a successful submission, and writes an audit event. This
+endpoint records an operator attestation; it does not independently verify
+the external import, log in to MijnGeldzaken, or bypass DigiD. Wave and other
+provider results cannot be recorded through this manual endpoint.
 
 The older `/posting-attempts/{attempt_id}/complete-supervised` endpoint remains
 available only for compatibility with legacy databases. New operations use the

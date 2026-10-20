@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, ChevronDown, LockKeyhole } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/_core/hooks/useAuth";
@@ -18,13 +18,15 @@ import { FabOperationsPanels } from "@/components/fab/FabOperationsPanels";
 import { FabOperatorShell } from "@/components/fab/FabOperatorShell";
 import { FabReportingCenter } from "@/components/fab/FabReportingCenter";
 import { FabReviewWorkspace, type FabReviewResolution } from "@/components/fab/FabReviewWorkspace";
+import { refreshFabReviewPages } from "@/components/fab/fabReviewPages";
 import { FabWaveReceiptExecutorDrawer } from "@/components/fab/FabWaveReceiptExecutorDrawer";
 import { FabWaveSetupDrawer, type FabWaveSetupSaveInput } from "@/components/fab/FabWaveSetupDrawer";
 import type { FabCommandId, FabRecord } from "@/components/fab/fabView";
 import type { FabBankStatementFormat } from "@/components/fab/fabBankStatement";
-import { asRecord, count, humanize, records, text } from "@/components/fab/fabView";
+import { asRecord, commandDetails, commandOutcome, count, humanize, records, text } from "@/components/fab/fabView";
 import { useFabLocale } from "@/components/fab/fabLocale";
 import { trpc } from "@/lib/trpc";
+import { startVisiblePoll } from "@/hooks/visiblePoll";
 import "@/components/fab/fab-operator.css";
 
 type CommandPayload = {
@@ -64,6 +66,8 @@ export default function AdminOperations() {
   const [reviewWorkItems, setReviewWorkItems] = useState<FabRecord[]>([]);
   const [reviewPagination, setReviewPagination] = useState<FabRecord>({});
   const [loadingMoreReviews, setLoadingMoreReviews] = useState(false);
+  const loadedReviewOffsets = useRef<number[]>([]);
+  const reviewRefreshSequence = useRef(0);
   const isAdmin = user?.role === "admin";
   const utils = trpc.useUtils();
   const operatorAccess = trpc.fab.access.useQuery(undefined, {
@@ -74,7 +78,6 @@ export default function AdminOperations() {
 
   const controlCenter = trpc.fab.controlCenter.useQuery(undefined, {
     enabled: hasOperatorAccess,
-    refetchInterval: 60_000,
     refetchOnWindowFocus: false,
   });
   const refreshControlCenter = trpc.fab.refreshControlCenter.useMutation({
@@ -83,12 +86,33 @@ export default function AdminOperations() {
     },
   });
   const refresh = useCallback(async () => {
+    reviewRefreshSequence.current += 1;
+    loadedReviewOffsets.current = [];
     await refreshControlCenter.mutateAsync();
-  }, [refreshControlCenter]);
+  }, [refreshControlCenter.mutateAsync]);
+  const refetchControlCenter = useCallback(async () => {
+    reviewRefreshSequence.current += 1;
+    loadedReviewOffsets.current = [];
+    const result = await controlCenter.refetch();
+    if (result.data) {
+      setReviewWorkItems(result.data.reviews.workItems || []);
+      setReviewPagination(result.data.reviews.pagination || {});
+    }
+    return result;
+  }, [controlCenter.refetch]);
+  useEffect(() => {
+    if (!hasOperatorAccess) return;
+    return startVisiblePoll(
+      async () => {
+        await controlCenter.refetch();
+      },
+      { intervalMs: 60_000, initialDelayMs: 60_000 },
+    );
+  }, [controlCenter.refetch, hasOperatorAccess]);
   const runCommand = trpc.fab.runCommand.useMutation({
     onSuccess: async (result) => {
-      const commandResult = asRecord(result.result);
-      const status = text(result.status, text(commandResult.status, "completed"));
+      const commandResult = commandDetails(result);
+      const status = text(commandResult.status, "completed");
       if (pendingCommand) {
         setLastCommand({
           id: pendingCommand,
@@ -98,10 +122,14 @@ export default function AdminOperations() {
           summary: summarizeCommandResult(commandResult),
         });
       }
-      toast.success(`${pendingCommand ? humanize(pendingCommand) : "Command"}: ${humanize(status)}`);
+      const message = `${pendingCommand ? humanize(pendingCommand) : "Command"}: ${humanize(status)}`;
+      const outcome = commandOutcome(result);
+      if (outcome === "failure") toast.error(message);
+      else if (outcome === "attention") toast.warning(message);
+      else toast.success(message);
       setPendingCommand(null);
       setCommandStartedAt(null);
-      await controlCenter.refetch();
+      await refetchControlCenter();
     },
     onError: (error) => {
       toast.error(error.message || copy("FAB command failed", "FAB-opdracht mislukt"));
@@ -125,7 +153,7 @@ export default function AdminOperations() {
         `Verified recovery package created for ${count(evidence.includedDocuments)} documents.`,
         `Geverifieerd herstelpakket gemaakt voor ${count(evidence.includedDocuments)} documenten.`,
       ));
-      await controlCenter.refetch();
+      await refetchControlCenter();
     },
     onError: (error) => {
       toast.error(error.message || copy(
@@ -176,9 +204,9 @@ export default function AdminOperations() {
 
   const finishIntake = useCallback(async (uploadedCount: number) => {
     toast.success(`${uploadedCount} ${copy(uploadedCount === 1 ? "document added to FAB intake." : "documents added to FAB intake.", uploadedCount === 1 ? "document toegevoegd aan FAB-inname." : "documenten toegevoegd aan FAB-inname.")}`);
-    await controlCenter.refetch();
+    await refetchControlCenter();
     executeCommand("process_imported");
-  }, [controlCenter, executeCommand]);
+  }, [executeCommand, refetchControlCenter]);
 
   const uploadBankStatement = useCallback(async (
     file: File,
@@ -212,9 +240,9 @@ export default function AdminOperations() {
       );
     if (identityConflicts > 0) toast.warning(message);
     else toast.success(message);
-    await controlCenter.refetch();
+    await refetchControlCenter();
     if (imported > 0) executeCommand("run_reconciliation");
-  }, [controlCenter, copy, executeCommand]);
+  }, [copy, executeCommand, refetchControlCenter]);
 
   const installDriveCredentials = useCallback(async (file: File, replace: boolean) => {
     await installGoogleDriveCredentials.mutateAsync({
@@ -223,8 +251,8 @@ export default function AdminOperations() {
       replace,
     });
     toast.success(copy("Google OAuth client installed locally.", "Google OAuth-client lokaal geïnstalleerd."));
-    await controlCenter.refetch();
-  }, [controlCenter, copy, installGoogleDriveCredentials]);
+    await refetchControlCenter();
+  }, [copy, installGoogleDriveCredentials, refetchControlCenter]);
 
   const installScannerCredentials = useCallback(async (file: File, replace: boolean) => {
     await installGmailCredentials.mutateAsync({
@@ -233,36 +261,36 @@ export default function AdminOperations() {
       replace,
     });
     toast.success(copy("Gmail OAuth client installed locally.", "Gmail OAuth-client lokaal geinstalleerd."));
-    await controlCenter.refetch();
-  }, [controlCenter, copy, installGmailCredentials]);
+    await refetchControlCenter();
+  }, [copy, installGmailCredentials, refetchControlCenter]);
 
   const authorizeScanner = useCallback(async () => {
     await startGmailAuthorization.mutateAsync();
     toast.info(copy("Read-only Gmail authorization opened in your default browser.", "Alleen-lezen Gmail-autorisatie is geopend in je standaardbrowser."));
-    await controlCenter.refetch();
-  }, [controlCenter, copy, startGmailAuthorization]);
+    await refetchControlCenter();
+  }, [copy, refetchControlCenter, startGmailAuthorization]);
 
   const authorizeDrive = useCallback(async () => {
     await startGoogleDriveAuthorization.mutateAsync();
     toast.info(copy("Google authorization opened in your default browser.", "Google-autorisatie is geopend in je standaardbrowser."));
-    await controlCenter.refetch();
-  }, [controlCenter, copy, startGoogleDriveAuthorization]);
+    await refetchControlCenter();
+  }, [copy, refetchControlCenter, startGoogleDriveAuthorization]);
 
   const saveWaveConnection = useCallback(async (input: FabWaveSetupSaveInput) => {
     const result = await saveWaveSetup.mutateAsync(input);
     toast.success(result.ready === true
       ? copy("Wave is connected and mapped.", "Wave is gekoppeld en toegewezen.")
       : copy("Wave setup was saved locally.", "Wave-instellingen zijn lokaal opgeslagen."));
-    await controlCenter.refetch();
-  }, [controlCenter, copy, saveWaveSetup]);
+    await refetchControlCenter();
+  }, [copy, refetchControlCenter, saveWaveSetup]);
 
   const validateWaveConnection = useCallback(async () => {
     const result = await validateWaveSetup.mutateAsync({ targetSystem: "waveapps_business" });
     const discovery = result.discovery && typeof result.discovery === "object" ? result.discovery as FabRecord : {};
     const accounts = Array.isArray(discovery.accounts) ? discovery.accounts.length : 0;
     toast.success(`${copy("Wave business validated", "Wave-bedrijf gevalideerd")}: ${accounts} ${copy("accounts", "rekeningen")}`);
-    await controlCenter.refetch();
-  }, [controlCenter, copy, validateWaveSetup]);
+    await refetchControlCenter();
+  }, [copy, refetchControlCenter, validateWaveSetup]);
 
   const resolveReviewItem = useCallback(async (input: FabReviewResolution) => {
     try {
@@ -283,22 +311,47 @@ export default function AdminOperations() {
           `Geverifieerde gegevens opgeslagen en categorie toegepast op ${propagated} andere exacte leveranciersmatch${propagated === 1 ? "" : "es"}.`,
         )
         : `${copy("Review updated", "Controle bijgewerkt")}: ${humanize(text(result.processingStatus, text(result.status)))}`);
-      await controlCenter.refetch();
+      await refetchControlCenter();
     } catch (error) {
       const message = error instanceof Error ? error.message : copy("Review update failed", "Bijwerken van controle mislukt");
       toast.error(message);
       throw error;
     }
-  }, [controlCenter, copy, resolveReview]);
+  }, [copy, refetchControlCenter, resolveReview]);
 
   const operatorLabel = user?.name || user?.email || operatorAccess.data?.operatorLabel || "Operator";
   const data = controlCenter.data;
   const connected = Boolean(data?.connection.connected);
 
   useEffect(() => {
-    setReviewWorkItems(data?.reviews.workItems || []);
-    setReviewPagination(data?.reviews.pagination || {});
-  }, [data?.connection.checkedAt, data?.reviews.pagination, data?.reviews.workItems]);
+    const firstPage = data?.reviews.workItems || [];
+    const firstPagePagination = data?.reviews.pagination || {};
+    const offsets = [...loadedReviewOffsets.current];
+    if (offsets.length === 0) {
+      setReviewWorkItems(firstPage);
+      setReviewPagination(firstPagePagination);
+      return;
+    }
+
+    let cancelled = false;
+    const sequence = ++reviewRefreshSequence.current;
+    const limit = Math.max(1, count(firstPagePagination.limit) || 50);
+    void refreshFabReviewPages(
+      { workItems: firstPage, pagination: firstPagePagination },
+      offsets,
+      limit,
+      (offset, pageLimit) => utils.fab.reviewPage.fetch({ offset, limit: pageLimit }),
+    ).then((refreshed) => {
+      if (cancelled || sequence !== reviewRefreshSequence.current) return;
+      setReviewWorkItems(refreshed.workItems);
+      setReviewPagination(refreshed.pagination);
+    }).catch(() => {
+      // Keep the last successfully loaded pages if a background refresh fails.
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [data?.connection.checkedAt, data?.reviews.pagination, data?.reviews.workItems, utils.fab.reviewPage]);
 
   const loadMoreReviews = useCallback(async () => {
     if (loadingMoreReviews || reviewPagination.hasMore !== true) return;
@@ -313,6 +366,9 @@ export default function AdminOperations() {
         nextItems.forEach((item) => merged.set(text(item.id), item));
         return Array.from(merged.values());
       });
+      if (!loadedReviewOffsets.current.includes(nextOffset)) {
+        loadedReviewOffsets.current.push(nextOffset);
+      }
       setReviewPagination(asRecord(page.pagination));
     } catch (error) {
       toast.error(error instanceof Error

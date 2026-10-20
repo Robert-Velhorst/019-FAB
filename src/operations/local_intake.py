@@ -1,12 +1,20 @@
 import hashlib
+from itertools import chain
 import mimetypes
 import os
+import stat as stat_module
+from uuid import uuid4
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, Optional, Sequence, Set
 
 from src.document_handling.source_identity import source_document_id
-from src.operations.local_ledger import LocalOperationsLedger
+from src.document_processors.document_resource_limits import (
+    MAX_SOURCE_DOCUMENT_BYTES,
+    MAX_TEXT_DOCUMENT_BYTES,
+)
+from src.operations.local_ledger import LocalOperationsLedger, SourceScanManifestLimitError
 from src.operations.local_targets import resolve_document_target_system
+from src.operations.runtime_lease import RuntimeLeaseHeartbeat
 
 
 DEFAULT_ALLOWED_EXTENSIONS = {
@@ -20,10 +28,19 @@ DEFAULT_ALLOWED_EXTENSIONS = {
     ".tiff",
     ".txt",
 }
+LOCAL_FOLDER_INTAKE_LEASE_NAME = "local_folder_intake"
+LOCAL_FOLDER_INTAKE_LEASE_TTL_SECONDS = 21600
 
 
 class LocalFolderIntake:
     """Import document metadata from local or synced folders into the ledger."""
+
+    MAX_FILES_PER_SCAN = 100
+    MAX_BYTES_PER_SCAN = 256 * 1024 * 1024
+    MAX_MANIFEST_ENTRIES = 100_000
+    MAX_MANIFEST_PATH_BYTES = 16 * 1024 * 1024
+    MAX_DIRECTORIES_PER_SCAN = 20_000
+    MAX_FILESYSTEM_ENTRIES_PER_SCAN = 120_000
 
     def __init__(
         self,
@@ -37,6 +54,44 @@ class LocalFolderIntake:
 
     def rescan(self, folders: Sequence[str]) -> Dict[str, Any]:
         roots = [_normalize_path(folder) for folder in folders if str(folder or "").strip()]
+        owner_token = uuid4().hex
+        lease = self.ledger.acquire_runtime_lease(
+            LOCAL_FOLDER_INTAKE_LEASE_NAME,
+            owner_token,
+            ttl_seconds=LOCAL_FOLDER_INTAKE_LEASE_TTL_SECONDS,
+            metadata={"source": self.source, "folderCount": len(roots)},
+        )
+        if not lease.get("acquired"):
+            return {
+                "folders": roots,
+                "allowedExtensions": sorted(self.allowed_extensions),
+                "scanned": 0,
+                "registered": 0,
+                "duplicates": 0,
+                "alreadyRegistered": 0,
+                "skipped": [{"reason": "intake_already_running"}],
+                "documents": [],
+                "status": "already_running",
+                "runtimeLease": lease.get("lease"),
+            }
+        try:
+            with RuntimeLeaseHeartbeat(
+                self.ledger,
+                LOCAL_FOLDER_INTAKE_LEASE_NAME,
+                owner_token,
+                LOCAL_FOLDER_INTAKE_LEASE_TTL_SECONDS,
+                thread_name="fab-folder-intake-lease-heartbeat",
+            ) as heartbeat:
+                result = self._rescan_with_lease(roots)
+                heartbeat.assert_owned()
+                return result
+        finally:
+            self.ledger.release_runtime_lease(
+                LOCAL_FOLDER_INTAKE_LEASE_NAME,
+                owner_token,
+            )
+
+    def _rescan_with_lease(self, roots: Sequence[str]) -> Dict[str, Any]:
         summary: Dict[str, Any] = {
             "folders": roots,
             "allowedExtensions": sorted(self.allowed_extensions),
@@ -76,16 +131,61 @@ class LocalFolderIntake:
                     "allowedExtensions": sorted(self.allowed_extensions),
                 },
             })
+            cursor = self.ledger.get_source_scan_cursor(source_account_id)
+            try:
+                paths, next_cursor, scan_incomplete, scan_bytes = self._scan_batch(
+                    root,
+                    source_account_id,
+                    cursor,
+                )
+            except (SourceScanManifestLimitError, OSError) as exc:
+                reason = getattr(exc, "reason", "source_tree_unreadable")
+                summary["skipped"].append({
+                    "path": root,
+                    "reason": reason,
+                    "maxManifestEntries": self.MAX_MANIFEST_ENTRIES,
+                    "maxManifestPathBytes": self.MAX_MANIFEST_PATH_BYTES,
+                    "maxDirectories": self.MAX_DIRECTORIES_PER_SCAN,
+                    "maxFilesystemEntries": self.MAX_FILESYSTEM_ENTRIES_PER_SCAN,
+                })
+                summary.setdefault("scanIncomplete", {})[root] = True
+                summary["status"] = "attention_required"
+                self.ledger.upsert_source_account({
+                    "sourceType": self.source,
+                    "sourceIdentifier": root,
+                    "label": os.path.basename(root) or root,
+                    "status": "attention_required",
+                    "lastScanAt": scan_started_at,
+                    "metadata": {
+                        "path": root,
+                        "reason": reason,
+                        "maxManifestEntries": self.MAX_MANIFEST_ENTRIES,
+                        "maxManifestPathBytes": self.MAX_MANIFEST_PATH_BYTES,
+                        "maxDirectories": self.MAX_DIRECTORIES_PER_SCAN,
+                        "maxFilesystemEntries": self.MAX_FILESYSTEM_ENTRIES_PER_SCAN,
+                    },
+                })
+                continue
             root_summary = {
                 "scanned": 0,
                 "registered": 0,
                 "duplicates": 0,
                 "alreadyRegistered": 0,
             }
-            for path in self._iter_document_paths(root):
-                result = self._register_file(root, path, source_account_id)
+            read_budget = _SourceReadBudget(self.MAX_BYTES_PER_SCAN)
+            for index, path in enumerate(paths):
+                result = self._register_file(
+                    root,
+                    path,
+                    source_account_id,
+                    read_budget=read_budget,
+                )
                 if result.get("skipped"):
                     summary["skipped"].append(result["skipped"])
+                    if result["skipped"].get("reason") == "scan_byte_limit_exceeded":
+                        scan_incomplete = True
+                        next_cursor = paths[index - 1] if index else cursor
+                        break
                     continue
                 summary["scanned"] += 1
                 root_summary["scanned"] += 1
@@ -100,6 +200,9 @@ class LocalFolderIntake:
                         summary["duplicates"] += 1
                         root_summary["duplicates"] += 1
                 summary["documents"].append(result["document"])
+            self.ledger.set_source_scan_cursor(source_account_id, next_cursor)
+            summary.setdefault("scanIncomplete", {})[root] = scan_incomplete
+            summary.setdefault("scanBytes", {})[root] = read_budget.bytes_read
             self.ledger.upsert_source_account({
                 "sourceType": self.source,
                 "sourceIdentifier": root,
@@ -114,6 +217,7 @@ class LocalFolderIntake:
                     "path": root,
                     "allowedExtensions": sorted(self.allowed_extensions),
                     **root_summary,
+                    "scanIncomplete": scan_incomplete,
                 },
             })
 
@@ -133,16 +237,19 @@ class LocalFolderIntake:
 
     def register_local_file(self, root: str, path: str) -> Dict[str, Any]:
         """Register one newly uploaded file without rescanning its whole folder."""
-        normalized_root = _normalize_path(root)
-        normalized_path = _normalize_path(path)
+        raw_root = _normalize_path(root)
+        raw_path = _normalize_path(path)
+        normalized_root = os.path.realpath(raw_root)
+        normalized_path = os.path.realpath(raw_path)
         try:
-            if os.path.commonpath((normalized_root, normalized_path)) != normalized_root:
+            common_root = os.path.commonpath((normalized_root, normalized_path))
+            if os.path.normcase(common_root) != os.path.normcase(normalized_root):
                 return {"skipped": {"reason": "path_outside_source_root"}}
         except ValueError:
             return {"skipped": {"reason": "path_outside_source_root"}}
         if (
             not os.path.isdir(normalized_root)
-            or os.path.islink(normalized_path)
+            or os.path.islink(raw_path)
             or not os.path.isfile(normalized_path)
         ):
             return {"skipped": {"reason": "local_file_unavailable"}}
@@ -195,7 +302,7 @@ class LocalFolderIntake:
         return result
 
     def has_pending_changes(self, folders: Sequence[str]) -> bool:
-        """Return true when a scheduled rescan would change durable state."""
+        """Return whether a scheduled rescan could change durable state."""
         roots = [_normalize_path(folder) for folder in folders if str(folder or "").strip()]
         source_accounts = {
             str(account.get("source_identifier") or account.get("sourceIdentifier") or ""): account
@@ -210,11 +317,20 @@ class LocalFolderIntake:
                 if not account or str(account.get("status") or "").lower() != "missing":
                     return True
                 continue
+            if account and str(account.get("status") or "").lower() == "attention_required":
+                continue
+
+            # Empty watch folders need no recurring autonomy workflow or hashes.
+            document_paths = iter(self._iter_document_paths(root))
+            first_path = next(document_paths, None)
+            if first_path is None:
+                continue
             if not account or str(account.get("status") or "").lower() != "ready":
                 return True
-            for path in self._iter_document_paths(root):
+
+            for path in chain((first_path,), document_paths):
                 try:
-                    stat = os.stat(path)
+                    stat = os.stat(path, follow_symlinks=False)
                     modified_at = datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat()
                     source_id = source_document_id({
                         "local_path": path,
@@ -227,29 +343,91 @@ class LocalFolderIntake:
                     if not existing:
                         return True
                     existing_hash = _document_content_hash(existing)
-                    if not existing_hash:
+                    if not existing_hash or existing_hash != _sha256_file(path, source_root=root):
                         return True
-                    if existing_hash != _sha256_file(path):
-                        return True
-                except OSError:
+                except (OSError, DocumentSizeLimitError):
                     return True
         return False
 
+    def _scan_batch(self, root: str, source_account_id: int, cursor: Optional[str]):
+        limit = max(1, int(self.MAX_FILES_PER_SCAN))
+        byte_limit = max(1, int(self.MAX_BYTES_PER_SCAN))
+        if not cursor:
+            self.ledger.rebuild_source_scan_manifest(
+                source_account_id,
+                self._iter_manifest_entries(root),
+                max_entries=self.MAX_MANIFEST_ENTRIES,
+                max_path_bytes=self.MAX_MANIFEST_PATH_BYTES,
+            )
+        candidates = self.ledger.get_source_scan_batch(
+            source_account_id,
+            cursor,
+            limit + 1,
+        )
+        paths = []
+        scan_bytes = 0
+        incomplete = False
+        for candidate in candidates:
+            path = str(candidate["path"])
+            try:
+                size = os.stat(path, follow_symlinks=False).st_size
+            except OSError:
+                size = 0
+            is_text = os.path.splitext(path)[1].lower() in {".csv", ".txt"}
+            max_file_bytes = MAX_TEXT_DOCUMENT_BYTES if is_text else MAX_SOURCE_DOCUMENT_BYTES
+            admitted_bytes = size if size <= max_file_bytes else 0
+            if len(paths) >= limit or (paths and scan_bytes + admitted_bytes > byte_limit):
+                incomplete = True
+                break
+            paths.append(path)
+            scan_bytes += admitted_bytes
+            if scan_bytes >= byte_limit and len(paths) < len(candidates):
+                incomplete = True
+                break
+        return paths, paths[-1] if incomplete and paths else None, incomplete, scan_bytes
+
+    def _iter_manifest_entries(self, root: str):
+        yield from self._iter_document_paths(root)
+
     def _iter_document_paths(self, root: str):
-        for current_root, dir_names, file_names in os.walk(root, followlinks=False):
-            dir_names[:] = [
-                name
-                for name in dir_names
-                if not os.path.islink(os.path.join(current_root, name))
-            ]
-            for file_name in sorted(file_names):
-                path = os.path.join(current_root, file_name)
-                if os.path.islink(path):
-                    continue
-                extension = os.path.splitext(file_name)[1].lower()
-                if "*" not in self.allowed_extensions and extension not in self.allowed_extensions:
-                    continue
+        visited_directories = 0
+        visited_entries = 0
+        pending_directories = [root]
+        while pending_directories:
+            current_root = pending_directories.pop()
+            visited_directories += 1
+            if visited_directories > self.MAX_DIRECTORIES_PER_SCAN:
+                raise SourceScanManifestLimitError(
+                    "directory_limit_exceeded",
+                    max_entries=self.MAX_MANIFEST_ENTRIES,
+                    max_path_bytes=self.MAX_MANIFEST_PATH_BYTES,
+                )
+            child_directories = []
+            document_paths = []
+            with os.scandir(current_root) as entries:
+                for entry in entries:
+                    visited_entries += 1
+                    if visited_entries > self.MAX_FILESYSTEM_ENTRIES_PER_SCAN:
+                        raise SourceScanManifestLimitError(
+                            "filesystem_entry_limit_exceeded",
+                            max_entries=self.MAX_MANIFEST_ENTRIES,
+                            max_path_bytes=self.MAX_MANIFEST_PATH_BYTES,
+                        )
+                    if entry.is_symlink():
+                        continue
+                    if entry.is_dir(follow_symlinks=False):
+                        child_directories.append(entry.name)
+                        continue
+                    extension = os.path.splitext(entry.name)[1].lower()
+                    if "*" not in self.allowed_extensions and extension not in self.allowed_extensions:
+                        continue
+                    document_paths.append(os.path.join(current_root, entry.name))
+            for path in sorted(document_paths):
                 yield path
+            pending_directories.extend(
+                os.path.join(current_root, name)
+                for name in reversed(sorted(child_directories))
+            )
 
     def register_fetched_document(
         self,
@@ -261,10 +439,20 @@ class LocalFolderIntake:
         path_value = document.get("local_path") or document.get("storage_path")
         if not str(path_value or "").strip():
             return {"skipped": {"path": None, "reason": "local_path_missing"}}
-        path = _normalize_path(path_value)
-        source_root = _normalize_path(root or os.path.dirname(path))
+        if not str(root or "").strip():
+            return {
+                "skipped": {
+                    "path": _normalize_path(path_value),
+                    "reason": "source_root_missing",
+                }
+            }
+        source_root = os.path.realpath(_normalize_path(root))
+        path = os.path.realpath(_normalize_path(path_value))
+        if not os.path.isdir(source_root):
+            return {"skipped": {"path": path, "reason": "source_root_missing"}}
         try:
-            if os.path.commonpath((source_root, path)) != source_root:
+            common_root = os.path.commonpath((source_root, path))
+            if os.path.normcase(common_root) != os.path.normcase(source_root):
                 return {"skipped": {"path": path, "reason": "path_outside_source_root"}}
         except ValueError:
             return {"skipped": {"path": path, "reason": "path_outside_source_root"}}
@@ -281,10 +469,64 @@ class LocalFolderIntake:
         path: str,
         source_account_id: Optional[int] = None,
         source_document: Optional[Dict[str, Any]] = None,
+        read_budget: Optional["_SourceReadBudget"] = None,
     ) -> Dict[str, Any]:
+        raw_path = _normalize_path(path)
+        root = os.path.realpath(_normalize_path(root))
+        path = os.path.realpath(raw_path)
+        normalized_root = os.path.normcase(root)
+        normalized_path = os.path.normcase(path)
+        root_prefix = normalized_root if normalized_root.endswith(os.sep) else normalized_root + os.sep
+        if os.path.islink(raw_path) or not normalized_path.startswith(root_prefix):
+            return {"skipped": {"path": path, "reason": "path_outside_source_root"}}
         try:
-            stat = os.stat(path)
-            content_hash = _sha256_file(path)
+            stat = os.stat(path, follow_symlinks=False)
+            if not stat_module.S_ISREG(stat.st_mode):
+                return {"skipped": {"path": path, "reason": "not_regular_file"}}
+            is_text = os.path.splitext(path)[1].lower() in {".csv", ".txt"}
+            max_bytes = MAX_TEXT_DOCUMENT_BYTES if is_text else MAX_SOURCE_DOCUMENT_BYTES
+            if stat.st_size > max_bytes:
+                return {
+                    "skipped": {
+                        "path": path,
+                        "reason": "text_document_exceeds_limit" if is_text else "document_exceeds_limit",
+                        "maxBytes": max_bytes,
+                    }
+                }
+            if read_budget is not None and stat.st_size > read_budget.remaining:
+                return {
+                    "skipped": {
+                        "path": path,
+                        "reason": "scan_byte_limit_exceeded",
+                        "maxBytes": self.MAX_BYTES_PER_SCAN,
+                    }
+                }
+            try:
+                content_hash = _sha256_file(
+                    path,
+                    max_bytes=max_bytes,
+                    read_budget=read_budget,
+                    source_root=root,
+                )
+            except DocumentSizeLimitError as exc:
+                if str(exc) == "scan_byte_limit_exceeded":
+                    return {
+                        "skipped": {
+                            "path": path,
+                            "reason": "scan_byte_limit_exceeded",
+                            "maxBytes": self.MAX_BYTES_PER_SCAN,
+                        }
+                    }
+                return {
+                    "skipped": {
+                        "path": path,
+                        "reason": "text_document_exceeds_limit" if is_text else "document_exceeds_limit",
+                        "maxBytes": max_bytes,
+                    }
+                }
+            current_stat = os.stat(path, follow_symlinks=False)
+            if not _same_file_identity(stat, current_stat):
+                return {"skipped": {"path": path, "reason": "source_changed_during_intake"}}
         except OSError as exc:
             return {"skipped": {"path": path, "reason": "read_error", "message": str(exc)}}
 
@@ -312,7 +554,18 @@ class LocalFolderIntake:
         source_id = source_document_id(identity_document)
         existing = self.ledger.get_document_by_source(self.source, source_id) if source_id else None
         if existing:
-            existing_hash = _document_content_hash(existing)
+            try:
+                existing_hash = _document_content_hash(existing, read_budget=read_budget)
+            except DocumentSizeLimitError as exc:
+                if str(exc) == "scan_byte_limit_exceeded":
+                    return {
+                        "skipped": {
+                            "path": path,
+                            "reason": "scan_byte_limit_exceeded",
+                            "maxBytes": self.MAX_BYTES_PER_SCAN,
+                        }
+                    }
+                existing_hash = ""
             if existing_hash and existing_hash != content_hash:
                 revision_source_id = source_document_id({
                     "id": f"{source_id}:revision:{content_hash[:16]}",
@@ -498,6 +751,7 @@ class LocalFolderIntake:
 
         return {
             "status": status,
+            "bytesRead": read_budget.bytes_read if read_budget is not None else 0,
             "document": {
                 "id": document_id,
                 "path": path,
@@ -530,15 +784,108 @@ def _normalize_path(path: str) -> str:
     return os.path.abspath(os.path.expandvars(os.path.expanduser(str(path).strip())))
 
 
-def _sha256_file(path: str) -> str:
+class DocumentSizeLimitError(ValueError):
+    pass
+
+
+class _SourceReadBudget:
+    def __init__(self, limit_bytes: int):
+        self.limit_bytes = max(0, int(limit_bytes))
+        self.bytes_read = 0
+
+    @property
+    def remaining(self) -> int:
+        return self.limit_bytes - self.bytes_read
+
+    def record(self, size: int) -> None:
+        self.bytes_read += size
+
+
+def _sha256_file(
+    path: str,
+    *,
+    max_bytes: Optional[int] = None,
+    read_budget: Optional[_SourceReadBudget] = None,
+    source_root: Optional[str] = None,
+) -> str:
+    if max_bytes is None:
+        is_text = os.path.splitext(path)[1].lower() in {".csv", ".txt"}
+        max_bytes = MAX_TEXT_DOCUMENT_BYTES if is_text else MAX_SOURCE_DOCUMENT_BYTES
+    max_bytes = max(1, int(max_bytes))
+    if source_root is not None:
+        path = os.path.realpath(_normalize_path(path))
+        root = os.path.realpath(_normalize_path(source_root))
+        normalized_root = os.path.normcase(root)
+        normalized_path = os.path.normcase(path)
+        root_prefix = normalized_root if normalized_root.endswith(os.sep) else normalized_root + os.sep
+        if not normalized_path.startswith(root_prefix):
+            raise OSError("source_path_outside_root")
+    before = os.stat(path, follow_symlinks=False)
+    if not stat_module.S_ISREG(before.st_mode):
+        raise OSError("source_not_regular_file")
+    if source_root is not None:
+        _ensure_path_within_root(path, source_root)
+    if read_budget is not None and before.st_size > read_budget.remaining:
+        raise DocumentSizeLimitError("scan_byte_limit_exceeded")
+    effective_limit = min(max_bytes, read_budget.remaining) if read_budget is not None else max_bytes
+    if before.st_size > effective_limit:
+        raise DocumentSizeLimitError("document_exceeds_limit")
     digest = hashlib.sha256()
-    with open(path, "rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+    bytes_read = 0
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
+    with os.fdopen(descriptor, "rb") as handle:
+        opened = os.fstat(handle.fileno())
+        if not stat_module.S_ISREG(opened.st_mode) or not _same_file_identity(before, opened):
+            raise OSError("source_changed_before_hash")
+        if source_root is not None:
+            _ensure_path_within_root(path, source_root)
+        if opened.st_size > effective_limit:
+            reason = "scan_byte_limit_exceeded" if read_budget is not None else "document_exceeds_limit"
+            raise DocumentSizeLimitError(reason)
+        while bytes_read < opened.st_size:
+            read_size = min(1024 * 1024, opened.st_size - bytes_read)
+            chunk = handle.read(read_size)
+            if not chunk:
+                break
+            bytes_read += len(chunk)
+            if read_budget is not None:
+                read_budget.record(len(chunk))
             digest.update(chunk)
+        if bytes_read != opened.st_size:
+            raise OSError("source_short_read")
+        after = os.fstat(handle.fileno())
+    current = os.stat(path, follow_symlinks=False)
+    if not _same_file_identity(opened, after) or not _same_file_identity(after, current):
+        raise OSError("source_changed_during_hash")
     return digest.hexdigest()
 
 
-def _document_content_hash(document: Dict[str, Any]) -> str:
+def _ensure_path_within_root(path: str, source_root: str) -> None:
+    resolved_root = os.path.realpath(_normalize_path(source_root))
+    resolved_path = os.path.realpath(_normalize_path(path))
+    normalized_root = os.path.normcase(resolved_root)
+    normalized_path = os.path.normcase(resolved_path)
+    root_prefix = normalized_root if normalized_root.endswith(os.sep) else normalized_root + os.sep
+    if not normalized_path.startswith(root_prefix):
+        raise OSError("source_path_outside_root")
+
+
+def _same_file_identity(left, right) -> bool:
+    return (
+        left.st_dev == right.st_dev
+        and left.st_ino == right.st_ino
+        and left.st_size == right.st_size
+        and getattr(left, "st_mtime_ns", int(left.st_mtime * 1_000_000_000))
+        == getattr(right, "st_mtime_ns", int(right.st_mtime * 1_000_000_000))
+    )
+
+
+def _document_content_hash(
+    document: Dict[str, Any],
+    *,
+    read_budget: Optional[_SourceReadBudget] = None,
+) -> str:
     direct = str(document.get("content_sha256") or "").strip().lower()
     if direct:
         return direct
@@ -549,7 +896,11 @@ def _document_content_hash(document: Dict[str, Any]) -> str:
     storage_path = str(document.get("storage_path") or "").strip()
     if storage_path and os.path.isfile(storage_path):
         try:
-            return _sha256_file(storage_path)
+            return _sha256_file(storage_path, read_budget=read_budget)
+        except DocumentSizeLimitError as exc:
+            if str(exc) == "scan_byte_limit_exceeded":
+                raise
+            return ""
         except OSError:
             return ""
     return ""

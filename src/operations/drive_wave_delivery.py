@@ -5,7 +5,6 @@ import json
 import math
 import os
 import re
-import threading
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -18,6 +17,7 @@ from src.operations.local_wave_receipt_executor import (
     wave_business_uuid,
 )
 from src.operations.local_wave_setup import LocalWaveSetupService
+from src.operations.runtime_lease import RuntimeLeaseHeartbeat
 from src.security.google_oauth_store import GoogleOAuthTokenStore
 
 if TYPE_CHECKING:
@@ -50,58 +50,6 @@ WAVE_RECEIPT_ALLOWED_MIME_TYPES = {
     "image/tiff",
 }
 ARCHIVE_LEASE_TTL_SECONDS = 300
-
-
-class _RuntimeLeaseHeartbeat:
-    def __init__(self, ledger: LocalOperationsLedger, lease_name: str, owner_token: str, ttl_seconds: float):
-        self.ledger = ledger
-        self.lease_name = lease_name
-        self.owner_token = owner_token
-        self.ttl_seconds = ttl_seconds
-        self.interval_seconds = max(0.01, min(float(ttl_seconds) / 3, 30.0))
-        self._stop = threading.Event()
-        self._lost = threading.Event()
-        self._thread = threading.Thread(
-            target=self._run,
-            name="fab-drive-archive-lease-heartbeat",
-            daemon=True,
-        )
-
-    def __enter__(self):
-        self._thread.start()
-        return self
-
-    def __exit__(self, *_exc_info):
-        self._stop.set()
-        self._thread.join()
-
-    def _renew(self) -> bool:
-        acquired = self.ledger.heartbeat_runtime_lease(
-            self.lease_name,
-            self.owner_token,
-            ttl_seconds=self.ttl_seconds,
-        )
-        if not acquired:
-            self._lost.set()
-        return acquired
-
-    def _run(self) -> None:
-        while not self._stop.wait(self.interval_seconds):
-            try:
-                if not self._renew():
-                    return
-            except Exception:
-                continue
-
-    def assert_owned(self) -> None:
-        if self._lost.is_set():
-            raise RuntimeError("archive_lease_lost")
-        try:
-            if self._renew():
-                return
-        except Exception as exc:
-            raise RuntimeError("archive_lease_heartbeat_failed") from exc
-        raise RuntimeError("archive_lease_lost")
 
 
 class DriveWaveDeliveryService:
@@ -739,29 +687,30 @@ class DriveWaveDeliveryService:
             "verificationMethod": verification_method,
             "verifiedAt": _now(),
         })
-        audit_event_id = self.ledger.record_audit_event({
-            "action": EVIDENCE_ACTION,
-            "entityType": "bookkeeping_document",
-            "entityId": str(document_id),
-            "details": normalized,
-        })
-        metadata = dict(document.get("metadata") or {})
-        lifecycle = dict(metadata.get("driveWaveLifecycle") or {})
-        lifecycle.update({
-            "status": "attachment_verified",
-            "verifiedAt": normalized["verifiedAt"],
-            "verificationMethod": verification_method,
-            "evidenceDigest": evidence_digest,
-            "externalTransactionId": normalized["externalTransactionId"],
-            "attachmentObjectId": normalized["attachmentObjectId"],
-            "attachmentTransactionId": normalized["attachmentTransactionId"],
-            "transactionStatus": normalized["transactionStatus"],
-            "waveObservedAt": normalized["waveObservedAt"],
-        })
-        metadata["driveWaveLifecycle"] = lifecycle
-        metadata["waveDeliveryLifecycle"] = lifecycle
-        self.ledger.update_document(int(document_id), {"metadata": metadata})
-        self._resolve_archive_review_items(int(document_id), actor, evidence_digest)
+        with self.ledger.write_transaction():
+            audit_event_id = self.ledger.record_audit_event({
+                "action": EVIDENCE_ACTION,
+                "entityType": "bookkeeping_document",
+                "entityId": str(document_id),
+                "details": normalized,
+            })
+            metadata = dict(document.get("metadata") or {})
+            lifecycle = dict(metadata.get("driveWaveLifecycle") or {})
+            lifecycle.update({
+                "status": "attachment_verified",
+                "verifiedAt": normalized["verifiedAt"],
+                "verificationMethod": verification_method,
+                "evidenceDigest": evidence_digest,
+                "externalTransactionId": normalized["externalTransactionId"],
+                "attachmentObjectId": normalized["attachmentObjectId"],
+                "attachmentTransactionId": normalized["attachmentTransactionId"],
+                "transactionStatus": normalized["transactionStatus"],
+                "waveObservedAt": normalized["waveObservedAt"],
+            })
+            metadata["driveWaveLifecycle"] = lifecycle
+            metadata["waveDeliveryLifecycle"] = lifecycle
+            self.ledger.update_document(int(document_id), {"metadata": metadata})
+            self._resolve_archive_review_items(int(document_id), actor, evidence_digest)
         return {
             "success": True,
             "status": "verified",
@@ -871,11 +820,14 @@ class DriveWaveDeliveryService:
                 "externalSubmission": "not_executed",
             }
         try:
-            with _RuntimeLeaseHeartbeat(
+            with RuntimeLeaseHeartbeat(
                 self.ledger,
                 lease_name,
                 owner_token,
                 lease_ttl_seconds,
+                thread_name="fab-drive-archive-lease-heartbeat",
+                lost_error="archive_lease_lost",
+                heartbeat_error="archive_lease_heartbeat_failed",
             ) as heartbeat:
                 return self._archive_document_with_lease(document_id, actor, heartbeat)
         finally:
@@ -885,7 +837,7 @@ class DriveWaveDeliveryService:
         self,
         document_id: int,
         actor: str,
-        heartbeat: _RuntimeLeaseHeartbeat,
+        heartbeat: RuntimeLeaseHeartbeat,
     ) -> Dict[str, Any]:
         plan = self.plan_archive(document_id)
         if plan.get("status") == "not_applicable":
@@ -905,6 +857,7 @@ class DriveWaveDeliveryService:
             self.drive_archiver = DriveArchiveClient(self.config)
         archiver = self.drive_archiver
         move_result = None
+        move_started = False
         try:
             current = archiver.inspect_file(provider_id)
             current_sha256 = archiver.download_sha256(provider_id)
@@ -919,6 +872,7 @@ class DriveWaveDeliveryService:
                 return {"success": False, **final_plan, "externalSubmission": "not_executed"}
             plan = final_plan
             heartbeat.assert_owned()
+            move_started = True
             move_result = archiver.move_file(
                 provider_id,
                 str(plan["sourceFolderId"]),
@@ -938,7 +892,7 @@ class DriveWaveDeliveryService:
         except Exception as exc:
             reason = _safe_reason(exc)
             rollback = None
-            if move_result is not None and hasattr(archiver, "restore_file"):
+            if move_started and hasattr(archiver, "restore_file"):
                 try:
                     rollback = archiver.restore_file(
                         provider_id,
@@ -947,7 +901,21 @@ class DriveWaveDeliveryService:
                     )
                 except Exception as rollback_exc:
                     rollback = {"status": "failed", "reason": _safe_reason(rollback_exc)}
-            self._ensure_review_item(document_id, [reason])
+            rollback_status = (
+                str(rollback.get("status") or "").lower()
+                if isinstance(rollback, dict)
+                else ""
+            )
+            rollback_confirmed = rollback_status in {
+                "restored", "already_restored", "moved", "ok", "success"
+            }
+            external_submission = (
+                "unknown" if move_started and not rollback_confirmed else "not_executed"
+            )
+            reasons = [reason]
+            if move_started and not rollback_confirmed:
+                reasons.append("archive_source_restore_failed")
+            self._ensure_review_item(document_id, reasons)
             audit_event_id = self.ledger.record_audit_event({
                 "action": "drive_wave.archive_failed",
                 "entityType": "bookkeeping_document",
@@ -955,17 +923,18 @@ class DriveWaveDeliveryService:
                 "details": {
                     "actor": actor,
                     "reason": reason,
-                    "moveStarted": move_result is not None,
+                    "moveStarted": move_started,
                     "rollback": rollback,
-                    "externalSubmission": "not_executed",
+                    "externalSubmission": external_submission,
                 },
             })
             return {
                 "success": False,
                 "status": "blocked",
-                "reasons": [reason],
+                "reasons": reasons,
+                "rollback": rollback,
                 "auditEventId": audit_event_id,
-                "externalSubmission": "not_executed",
+                "externalSubmission": external_submission,
             }
 
         evidence = (
@@ -994,18 +963,71 @@ class DriveWaveDeliveryService:
         })
         metadata["driveWaveLifecycle"] = lifecycle
         metadata["waveDeliveryLifecycle"] = lifecycle
-        self.ledger.update_document(document_id, {"metadata": metadata})
-        audit_event_id = self.ledger.record_audit_event({
-            "action": ARCHIVE_ACTION,
-            "entityType": "bookkeeping_document",
-            "entityId": str(document_id),
-            "details": {
-                "actor": actor,
-                **lifecycle,
-                "externalSubmission": "executed",
-                "deletion": "not_performed",
-            },
-        })
+        try:
+            with self.ledger.write_transaction():
+                self.ledger.update_document(document_id, {"metadata": metadata})
+                audit_event_id = self.ledger.record_audit_event({
+                    "action": ARCHIVE_ACTION,
+                    "entityType": "bookkeeping_document",
+                    "entityId": str(document_id),
+                    "details": {
+                        "actor": actor,
+                        **lifecycle,
+                        "externalSubmission": "executed",
+                        "deletion": "not_performed",
+                    },
+                })
+        except Exception:
+            reason = "archive_ledger_commit_failed"
+            rollback = None
+            if hasattr(archiver, "restore_file"):
+                try:
+                    rollback = archiver.restore_file(
+                        provider_id,
+                        str(plan["sourceFolderId"]),
+                        str(plan["archiveFolderId"]),
+                    )
+                except Exception as rollback_exc:
+                    rollback = {"status": "failed", "reason": _safe_reason(rollback_exc)}
+            rollback_status = (
+                str(rollback.get("status") or "").lower()
+                if isinstance(rollback, dict)
+                else ""
+            )
+            rollback_confirmed = rollback_status in {
+                "restored", "already_restored", "moved", "ok", "success"
+            }
+            external_submission = "not_executed" if rollback_confirmed else "unknown"
+            reasons = [reason]
+            if not rollback_confirmed:
+                reasons.append("archive_source_restore_failed")
+            failure_audit_id = None
+            try:
+                with self.ledger.write_transaction():
+                    self._ensure_review_item(document_id, reasons)
+                    failure_audit_id = self.ledger.record_audit_event({
+                        "action": "drive_wave.archive_failed",
+                        "entityType": "bookkeeping_document",
+                        "entityId": str(document_id),
+                        "details": {
+                            "actor": actor,
+                            "reason": reason,
+                            "moveStarted": True,
+                            "rollback": rollback,
+                            "externalSubmission": external_submission,
+                        },
+                    })
+            except Exception:
+                pass
+            return {
+                "success": False,
+                "status": "blocked",
+                "documentId": int(document_id),
+                "reasons": reasons,
+                "rollback": rollback,
+                "auditEventId": failure_audit_id,
+                "externalSubmission": external_submission,
+            }
         return {
             "success": True,
             "status": move_result.get("status") or "archived",
@@ -1331,7 +1353,7 @@ class DriveWaveDeliveryService:
         self.ledger.create_review_item({
             "documentId": document_id,
             "reason": "drive_wave_archive_blocked",
-            "details": "Drive source retained because Wave attachment proof did not meet policy: " + ", ".join(reasons),
+            "details": "Drive source was not confirmed as safely archived; operator reconciliation is required: " + ", ".join(reasons),
             "correctedData": {"reasons": reasons, "sourceAction": "retain_in_drive"},
         })
 

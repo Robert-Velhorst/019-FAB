@@ -95,6 +95,7 @@ class FabWorker:
             self.config.get("worker_interval_seconds"),
             default=300,
             maximum=86400,
+            minimum=10,
         )
         self.run_once = _as_bool(self.config.get("worker_run_once", False))
         self.process_postings = _as_bool(self.config.get("worker_process_approved_postings", True))
@@ -718,12 +719,17 @@ def _as_bool(value: Any) -> bool:
     return bool(value)
 
 
-def _bounded_positive_int(value: Any, default: int, maximum: int) -> int:
+def _bounded_positive_int(
+    value: Any,
+    default: int,
+    maximum: int,
+    minimum: int = 1,
+) -> int:
     try:
         parsed = int(value)
     except (TypeError, ValueError, OverflowError):
         parsed = default
-    return max(1, min(parsed, maximum))
+    return max(minimum, min(parsed, maximum))
 
 
 def _safe_worker_error(error: Any, config: Dict[str, Any]) -> str:

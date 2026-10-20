@@ -21,6 +21,8 @@ Audit date: 2026-08-13
 
 ## Remediated in this audit
 
+- Replaced eager `os.walk` directory enumeration in local intake with a deterministic `scandir` traversal capped at 120,000 filesystem entries per source scan. This bounds memory spent listing irrelevant files and directories before the existing document, byte, and directory limits apply; overflow fails closed as `attention_required` without importing a partial manifest.
+
 - Replaced repeated export-attempt list scans and no-op updates with indexed identity lookups, route-without-export queries, explicit changed-state results, and no-op batch behavior.
 - Made master-ledger projection and Wave daily planning due-based, preventing identical checksum projections and same-day plans from running every five minutes.
 - Reduced recurring workflow persistence to runnable steps while preserving complete failure and emergency-stop boundaries; coalesced unchanged worker summaries with bounded daily heartbeats.
@@ -122,6 +124,10 @@ Audit date: 2026-08-13
   CSV, JSON, CAMT/XML, and MT940 files are limited to 4 MB; binary content,
   mismatched extensions, malformed XML/JSON/base64, and CSV files without a
   recognizable transaction date plus amount/debit/credit header fail closed.
+- CAMT entries containing multiple transaction details are split only when
+  every detail has a parseable amount in the entry currency and the signed
+  detail amounts exactly reconcile to the entry total; otherwise FAB retains
+  the original entry-level amount rather than inventing a transaction split.
 - Corrected Dutch bank-export normalization for `Datum`, `Boekingsdatum`,
   `Valutadatum`, `Valuta`, and counterparty-name headers. Invalid dates or
   missing amounts can no longer create ledger rows or false completed imports.
@@ -131,6 +137,23 @@ Audit date: 2026-08-13
 - Corrected the dashboard's unreconciled-value read: it no longer sends the
   invalid `status=unreconciled` filter and excludes only finalized
   reconciliation states from the local amount projection.
+
+## Verification snapshot (2026-10-17)
+
+- Fresh complete Python suite on the canonical working tree passed 1,982 tests, 6 skipped, and 219 subtests in 1,270.51 seconds; the filesystem-entry cap regression passed. Python lock verification and its regression test also passed.
+- PR #125 head `cd5889f` passed hosted Linux/Windows backend, web, isolated MySQL, both container-build, and four-language CodeQL checks. The bounded folder traversal is a newer change and needs a fresh hosted run.
+
+- Latest full Python suite on the current worktree: 1,976 passed, 6 skipped, and 219 subtests passed in 748.66 seconds. The changed API, Drive archive, autonomy, processing, report-export, and anomaly-analysis areas were covered by this run.
+- Python lock regeneration/verification passed for all four hash-locked sets. `pip-audit` reported no known vulnerabilities for the production, local, ML, and test locks.
+- Web TypeScript check passed. The latest Vitest run: 39 files passed, 1 skipped; 471 tests passed, 5 skipped. The Vite production build and production asset budget check passed, as did both web-server bundles (general and standalone).
+- The `pnpm check` wrapper attempted dependency installation and hit `EPERM` writing pnpm's generated `web/node_modules/.package-map.json`; the already-installed TypeScript, Vitest, Vite, and esbuild binaries were invoked directly. No tracked dependency manifests were changed.
+- Codex Security diff review completed for 27 changed code files with zero reportable findings. Coverage is partial: no live Google/Wave account, public ngrok deployment, external HAI peer, production-sized restore, or independent penetration test was exercised. Report: `C:\Users\NO\.codex\state\plugins\codex-security\scans\019-FAB\dbe3a8a6383c88ad926a707ff7d8975561c99327_20261016T115022Z_5npeimmp\report.md`.
+- Fresh synthetic 2,000-bank-row x 400-document reconciliation benchmark: 1.395 seconds unprepared versus 19.78 ms indexed, with identical results. Traced Python peak was 651,704 versus 848,007 bytes; this matcher-only allocation metric is not process RAM or an application-wide resource result.
+- A controlled service-level anomaly comparison used identical 400-row synthetic input and interleaved 15-run measurements against the original checkout implementation. Results were identical; median decreased from 42.022 ms to 9.719 ms and max from 64.491 ms to 11.207 ms. For 100 below-threshold rows, amount-parser calls fell from 20,000 to 200. This does not measure control-center throughput or process CPU/RSS.
+- A separate 40-request/16-client synthetic warm-cache dashboard rehearsal passed at 125.49 ms median and 139.01 ms p95 with a 57,768-byte JSON body. This fixture and concurrency differ from the prior 30-request/6-client run, so the results are not a controlled speed comparison and do not measure CPU/RSS.
+- Local Bandit scan reported 0 high, 29 medium, and 16 low heuristic findings across `src`. All 26 B608 findings are in `local_ledger.py`; manual source tracing found fixed query templates, internally built filters, identifier validation, and bound values rather than request/document data used as SQL syntax. The legacy `ReportingService` CSV export now selects from fixed SQL statements, with regression tests rejecting hostile table names before database access. The two B104 findings are the explicitly configured VM/container wildcard-bind paths; remote binding requires a strong API token in deployment preflight. The B113 finding is a Photos download request with `timeout=self._request_timeout()`. These were manually reviewed as bounded heuristic matches, not automatically suppressed. The managed Codex Security Deep Scan could not start because this session lacks its required filesystem permission profile. Do not treat these checks as a clean penetration-test result.
+- Unexpected Flask route exceptions now record `externalSubmission: unknown`; the regression test simulates a provider-side effect before a route throws and verifies the audit does not falsely assert `not_executed`.
+- The fresh Windows production-stack rehearsal passed 30 concurrent authenticated warm-cache `fab.controlCenter` reads at concurrency 6. Removing the unused HAI manifest projection reduced the uncompressed response from 67,105 to 56,750 bytes (15.4%); post-change latency was 31.20 ms median and 37.26 ms p95 on a one-document synthetic ledger. Largest remaining projected fields were `autonomy` (12,081 bytes) and `health` (5,213 bytes). The direct HAI manifest endpoint remains available and passed the rehearsal. The latest 30-request run measured 49.56 ms median / 66.27 ms p95 and 57,768 response bytes on its fixture. Its 50 ms sampler captured six process samples: peak sampled combined API/dashboard working set 189,747,200 bytes (76,197,888 / 113,549,312), dashboard CPU 0.359375 seconds, and API CPU 0.0 seconds at reported precision. The one-document warm-cache, six-sample measurement is diagnostic only and does not measure cold refreshes, scaled-ledger behavior, sustained load, or a representative whole-app resource baseline. The 80-request burst was rate-limited by the existing tRPC policy; the combined rehearsal CLI is now bounded to 30 requests.
 
 ## Remaining risks
 
@@ -156,8 +179,8 @@ Audit date: 2026-08-13
 | Priority | Item | Required action |
 | --- | --- | --- |
 | High | Live provider acceptance | Reauthorize Google, validate the Wave business/token/mapping, and run a synthetic receipt through attachment readback before enabling archival. |
-| Medium | Image optimization | The OCR/PDF-capable API image is 1.52 GB; consider a separate lightweight API image and an OCR worker image if registry transfer or cold-start cost becomes material. |
-| Medium | Performance baseline | Run sustained idle-host and concurrent-refresh tests, and track cold backup-integrity scan time separately from warm bounded-health latency and payload size. |
+| Medium | Image optimization | Removed unused OpenCV and its NumPy dependency from the core lock after confirming no source imports. A fresh current dirty-checkout image measured 140,805,983 bytes with ML disabled, versus 242,575,002 bytes for tagged revision `3e74dbcf5bb4158888ef550797c79bc564e5d291` (about 42% smaller). This is not a controlled comparison because the source revisions and Python base versions differ; clean-release, registry-transfer, and process CPU/RSS measurements remain. |
+| Medium | Performance baseline | Initial synthetic concurrent hot-cache dashboard timings are now recorded. Still measure cold refresh, sustained idle/concurrent host load, process CPU/RSS, and cold backup-integrity duration separately; the current one-document fixture is not representative of a populated production ledger. |
 | Medium | Recovery rehearsal | Exercise the documented schema rollback and full source-evidence recovery process on a production-sized copy before unattended upgrades. |
 | Medium | Legacy compatibility retirement | External and internal duplicate workflow entrypoints and placeholder helpers are retired. Continue removing retained `posting_attempts` compatibility only after any deployed pre-ledger database has been migrated. |
 | Medium | Privacy governance | Complete a signed DPIA and data-processing inventory before multi-user production use. |

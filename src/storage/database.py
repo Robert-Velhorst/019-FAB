@@ -189,6 +189,13 @@ class Database:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS dashboard_sessions (
+                    session_hash TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    revoked_at TEXT
+                );
                 """
             )
 
@@ -324,3 +331,28 @@ class Database:
         with self.connect() as connection:
             row = connection.execute(query, tuple(parameters)).fetchone()
             return dict(row) if row else None
+
+    def register_dashboard_session(self, session_hash: str, expires_at: str) -> None:
+        now = self.now()
+        with self.connect() as connection:
+            connection.execute(
+                "DELETE FROM dashboard_sessions WHERE expires_at <= ? OR revoked_at IS NOT NULL",
+                (now,),
+            )
+            connection.execute(
+                "INSERT INTO dashboard_sessions (session_hash, created_at, expires_at) VALUES (?, ?, ?)",
+                (session_hash, now, expires_at),
+            )
+
+    def dashboard_session_is_active(self, session_hash: str, now: Optional[str] = None) -> bool:
+        return self.fetch_one(
+            "SELECT 1 AS active FROM dashboard_sessions WHERE session_hash = ? AND revoked_at IS NULL AND expires_at > ?",
+            (session_hash, now or self.now()),
+        ) is not None
+
+    def revoke_dashboard_session(self, session_hash: str) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                "UPDATE dashboard_sessions SET revoked_at = ? WHERE session_hash = ? AND revoked_at IS NULL",
+                (self.now(), session_hash),
+            )

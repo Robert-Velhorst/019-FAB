@@ -78,10 +78,10 @@ Local operating ledger and optional web operations API settings.
 
 *   `local_ledger_enabled`: Set to `true` to persist workflow runs and ordered step evidence, document status, normalized bookkeeping records and line items, review items, routing attempts, export attempts, bank statement imports, bank transactions, reconciliation matches, and audit events to local SQLite.
 *   `ledger_path`: Path to the SQLite ledger file. On Windows, prefer a private folder such as `C:\Users\<you>\AppData\Local\FAB\fab_operations.sqlite3`.
-*   `api_host`: Host for the optional local operations API. Use `127.0.0.1` unless you intentionally expose FAB through a protected tunnel.
+*   `api_host`: Host for the optional local operations API. Keep FAB on loopback for local use; production hosting is targeted to Hetzner.
 *   `api_port`: Port for the optional local operations API. Default: `5001`.
-*   `api_base_url`: Trusted public origin for an authenticated reverse proxy or tunnel. Leave blank for local use; FAB does not trust forwarded host headers implicitly.
-*   `api_token`: Bearer token required by the optional local operations API and optional web operations API. Configure this before using ngrok or any non-loopback host.
+*   `api_base_url`: Trusted public origin for an authenticated reverse proxy. Leave blank for local use; FAB does not trust forwarded host headers implicitly.
+*   `api_token`: Bearer token required by the optional local operations API and optional web operations API. Configure this before any non-loopback exposure.
 *   `local_intake_paths`: Comma- or semicolon-separated local folders to scan from the dashboard, such as a Google Drive-synced `sort out` folder.
 *   `local_intake_extensions`: File extensions accepted by local intake. Default document types include PDF, image, text, and CSV files.
 *   `backup_dir`: Folder where the local dashboard/API stores recovery packages. Keep this outside Git-tracked folders for real financial metadata.
@@ -148,6 +148,8 @@ Configuration for fetching documents from Gmail.
 *   `scanner_mode`: Enables strict scanner-mailbox intake. In this mode FAB accepts only PDF filenames with an allowed PDF MIME type and a verified `%PDF-` file signature.
 *   `trusted_senders`: Comma-separated exact sender addresses accepted in scanner mode. The Noodzakelijk Online HP ePrint profile uses `eprintcenter@hp8.us`.
 *   `max_attachment_bytes`: Rejects oversized scanner attachments before writing them to the intake cache.
+*   `max_run_bytes`: Caps combined attachment bytes in one scan; reaching it marks the intake partial and prevents checkpoint advancement. Defaults to 250 MiB.
+*   `max_run_attachments`: Caps accepted attachments per scan; reaching it marks the intake partial and prevents checkpoint advancement. Defaults to 5,000.
 *   `incremental_overlap_seconds`: Rechecks this many seconds before the durable last-successful checkpoint. The overlap prevents boundary loss while stable provider IDs keep repeated results idempotent.
 
 Use the **Gmail scanner** activation step in the operator dashboard to install a desktop OAuth client and complete user-owned, read-only Gmail consent. FAB reads matching attachments directly into its durable ledger; it does not stage them through Drive, mark messages read, add labels, or delete source email. The worker then runs OCR, field extraction, validation, duplicate detection, learned vendor categorization, routing, and the existing Wave approval/readback gates. Disable the older Apps Script trigger after activation so it cannot create a second, racing Drive copy.
@@ -185,7 +187,8 @@ Configuration for fetching documents from Freshdesk.
 *   `ticket_statuses`: Freshdesk status IDs searched by the profile; defaults to open and pending (`2,3`).
 *   `include_ticket_description`: Retains normalized ticket text as non-posting supporting evidence.
 *   `pdf_only`: Requires attachment filename, MIME type, and binary signature to identify a PDF.
-*   `require_https_attachments`: Rejects non-HTTPS attachment URLs for the financial profile.
+*   `require_https_attachments`: Retained for configuration compatibility; attachment downloads always require HTTPS.
+*   `attachment_allowed_hosts`: Optional comma-separated exact hostnames for Freshdesk attachment CDNs. The configured API hostname is allowed automatically; redirects and IP-literal URLs are rejected.
 
 The Freshdesk connector is read-only. It never closes tickets and does not copy
 files to Drive; matched evidence enters FAB's immutable local ledger directly.
@@ -310,7 +313,7 @@ Settings for backup and restore.
 
 The local operations dashboard has a recovery flow under `[operations] backup_dir`. Version 2 recovery packages contain a SQLite snapshot plus content-addressed copies of every safe source document, with manifest counts and SHA-256 verification for the ledger and each unique source file. `worker_create_scheduled_backups=true` checks the schedule during each worker cycle; `backup_schedule_interval_hours` defaults to 24. Keep `backup_require_complete_source_evidence=true` so missing, unsafe, or checksum-drifted evidence fails closed instead of producing a false-complete package. The React operator dashboard shows redacted package and recovery readiness without exposing filesystem paths or confirmation phrases.
 
-On Windows, stop normal operation and launch `Start-FAB-Maintenance.cmd`. Maintenance mode is local-only: the worker does not start, ngrok and HAI execution are disabled, and every normal mutation is locked. Open **Advanced recovery**. Ledger-only recovery requires `RESTORE FAB LOCAL LEDGER`. A source-complete version 2 package also offers full recovery with `RESTORE FAB LEDGER AND SOURCE EVIDENCE`; FAB restores source bytes without overwriting an existing tree, rewrites recovered ledger paths, validates the live ledger and each file, and rolls the ledger back if validation fails. When finished, run `Stop-FAB.cmd` and then `Start-FAB.cmd` to resume automation. Rehearse this procedure on a copy before relying on it for production disaster recovery.
+On Windows, stop normal operation and launch `Start-FAB-Maintenance.cmd`. Maintenance mode is local-only: the worker does not start, HAI execution is disabled, and every normal mutation is locked. Open **Advanced recovery**. Ledger-only recovery requires `RESTORE FAB LOCAL LEDGER`. A source-complete version 2 package also offers full recovery with `RESTORE FAB LEDGER AND SOURCE EVIDENCE`; FAB restores source bytes without overwriting an existing tree, rewrites recovered ledger paths, validates the live ledger and each file, and rolls the ledger back if validation fails. When finished, run `Stop-FAB.cmd` and then `Start-FAB.cmd` to resume automation. Rehearse this procedure on a copy before relying on it for production disaster recovery.
 
 ### 4.17. `[error_handling]` Section
 

@@ -18,7 +18,7 @@ from src.data_entry.waveapps_transaction import (
     MONEY_TRANSACTION_CREATE_MUTATION,
     WAVE_GRAPHQL_URL,
     build_expense_transaction_input,
-    wave_error_messages,
+    wave_request_failure,
 )
 
 
@@ -89,8 +89,15 @@ class WaveappsPersonalHandler(BaseDataEntryHandler):
             )
             response.raise_for_status()
             result = response.json()
-        except requests.exceptions.RequestException as exc:
-            return _failure(destination, action_id, action_payload, f"Waveapps Personal API request failed: {exc}")
+        except (requests.exceptions.RequestException, ValueError) as exc:
+            failure = wave_request_failure(exc)
+            if failure.get("status") == "outcome_unknown":
+                failure["provider_external_id"] = transaction["input"]["externalId"]
+            return {
+                **failure,
+                "target_surface": destination["fallback_surface"],
+                "action_plan": plan_wave_action(destination["target_surface"], action_id, action_payload),
+            }
 
         operation = (result.get("data") or {}).get("moneyTransactionCreate") or {}
         if operation.get("didSucceed") and (operation.get("transaction") or {}).get("id"):
@@ -102,7 +109,17 @@ class WaveappsPersonalHandler(BaseDataEntryHandler):
                 "target_surface": destination["target_surface"],
                 "action_plan": plan_wave_action(destination["target_surface"], action_id, action_payload, allow_write=True),
             }
-        return _failure(destination, action_id, action_payload, f"Waveapps Personal API error: {wave_error_messages(result)}")
+        if operation.get("didSucceed") is False:
+            return _failure(destination, action_id, action_payload, "Wave rejected the transaction. Review the provider response in Wave before retrying.")
+        return {
+            "status": "outcome_unknown",
+            "message": "Wave did not return a verifiable transaction result. Check Wave before taking further action.",
+            "requires_manual_review": True,
+            "review_reason": "wave_api_outcome_unknown",
+            "provider_external_id": transaction["input"]["externalId"],
+            "target_surface": destination["fallback_surface"],
+            "action_plan": plan_wave_action(destination["target_surface"], action_id, action_payload),
+        }
 
     def _generate_csv_fallback(self, data: Dict[str, Any], filename: str) -> str:
         csv_dir = self.config.get("temp_dir") or tempfile.gettempdir()

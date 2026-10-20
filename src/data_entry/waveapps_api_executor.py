@@ -89,14 +89,17 @@ class WaveappsApiExecutor:
         handler = self.handlers.get(target) or self._build_handler(target)
         try:
             result = handler.enter_data(categorized_data)
-        except Exception as exc:
+        except Exception:
             return {
-                "status": "failure",
-                "message": f"Wave API executor failed before a verified result was recorded: {exc}",
+                "status": "outcome_unknown",
+                "message": "Wave did not return a verifiable result. Check Wave for this transaction before taking further action.",
                 "requires_manual_review": True,
-                "review_reason": "wave_api_execution_failed",
+                "review_reason": "wave_api_outcome_unknown",
                 "target_system": target,
                 "action_id": normalized_action,
+                "provider_external_id": _fab_external_id(
+                    categorized_data.get("idempotency_key") or categorized_data.get("document_id")
+                ),
             }
 
         public_result = dict(result or {})
@@ -105,6 +108,11 @@ class WaveappsApiExecutor:
             "action_id": normalized_action,
             "idempotency_key": str(idempotency_key or ""),
         })
+        if public_result.get("status") == "outcome_unknown":
+            public_result.setdefault(
+                "provider_external_id",
+                _fab_external_id(categorized_data.get("idempotency_key") or categorized_data.get("document_id")),
+            )
         if public_result.get("status") == "csv_generated":
             public_result.update({
                 "status": "needs_review",
@@ -192,3 +200,8 @@ def _first_config_value(config: Dict[str, Any], *keys: str) -> Any:
         if value not in (None, ""):
             return value
     return None
+
+
+def _fab_external_id(idempotency_key: Any) -> str:
+    value = str(idempotency_key or "").strip()
+    return f"fab:{value}" if value else "fab:unidentified"

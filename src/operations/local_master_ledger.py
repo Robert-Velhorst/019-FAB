@@ -26,12 +26,14 @@ class LocalMasterLedgerService:
         limit: int = 500,
     ) -> Dict[str, Any]:
         records = self.ledger.list_bookkeeping_records(target_system=target_system, limit=limit)
-        attempts = self.ledger.list_export_attempts(target_system=target_system, limit=max(limit * 4, 100))
-        attempt_index = _latest_attempt_index(attempts)
+        attempts_by_record = self.ledger.latest_export_attempts_for_records(
+            records,
+            target_system=target_system,
+        )
 
         rows = []
         for record in records:
-            attempt = _attempt_for_record(record, attempt_index)
+            attempt = attempts_by_record.get(int(record["id"]))
             row = self._project_record(record, attempt)
             row["rowChecksum"] = _checksum({
                 key: value for key, value in row.items()
@@ -202,28 +204,6 @@ class LocalMasterLedgerService:
             key: value for key, value in freshness.items()
             if key != "currentDraft"
         }
-
-
-def _latest_attempt_index(attempts: list) -> Dict[str, Dict[Any, Dict[str, Any]]]:
-    index = {"record": {}, "document": {}}
-    for attempt in attempts or []:
-        record_id = attempt.get("bookkeeping_record_id")
-        document_id = attempt.get("document_id")
-        if record_id is not None and record_id not in index["record"]:
-            index["record"][record_id] = attempt
-        if document_id is not None and document_id not in index["document"]:
-            index["document"][document_id] = attempt
-    return index
-
-
-def _attempt_for_record(record: Dict[str, Any], index: Dict[str, Dict[Any, Dict[str, Any]]]) -> Optional[Dict[str, Any]]:
-    record_id = record.get("id")
-    document_id = record.get("document_id")
-    if record_id in index.get("record", {}):
-        return index["record"][record_id]
-    if document_id in index.get("document", {}):
-        return index["document"][document_id]
-    return None
 
 
 def _downstream_status(

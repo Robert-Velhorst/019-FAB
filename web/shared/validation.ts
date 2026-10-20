@@ -216,7 +216,29 @@ export const bookkeepingDocumentRegisterSchema = z.object({
   metadata: jsonObjectSchema.optional(),
 });
 
-export const bookkeepingDocumentUpdateSchema = bookkeepingDocumentRegisterSchema.partial().extend({
+const bookkeepingDocumentUpdateFieldsSchema = bookkeepingDocumentRegisterSchema
+  .omit({ documentType: true, processingStatus: true })
+  .partial()
+  .extend({
+    sourceDocumentId: z.string().max(255).nullable().optional(),
+    mimeType: z.string().max(120).nullable().optional(),
+    storagePath: z.string().max(1000).nullable().optional(),
+    duplicateFingerprint: z.string().max(128).nullable().optional(),
+    duplicateOfDocumentId: z.number().int().positive().nullable().optional(),
+    vendorName: z.string().max(255).nullable().optional(),
+    category: z.string().max(255).nullable().optional(),
+    transactionDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+    totalAmount: z.number().finite().nullable().optional(),
+    vatAmount: z.number().finite().nullable().optional(),
+    confidenceScore: z.number().min(0).max(1).nullable().optional(),
+    ocrText: z.string().nullable().optional(),
+    extractedData: jsonObjectSchema.nullable().optional(),
+    metadata: jsonObjectSchema.nullable().optional(),
+    documentType: documentTypeSchema.optional(),
+    processingStatus: processingStatusSchema.optional(),
+  });
+
+export const bookkeepingDocumentUpdateSchema = bookkeepingDocumentUpdateFieldsSchema.extend({
   id: z.number().int().positive(),
 });
 
@@ -240,9 +262,9 @@ export const workflowRunUpdateSchema = z.object({
   documentsImported: z.number().int().min(0).optional(),
   documentsProcessed: z.number().int().min(0).optional(),
   documentsNeedingReview: z.number().int().min(0).optional(),
-  errorMessage: z.string().max(10000).optional(),
-  startedAt: z.date().optional(),
-  finishedAt: z.date().optional(),
+  errorMessage: z.string().max(10000).nullable().optional(),
+  startedAt: z.union([z.null(), z.coerce.date()]).optional(),
+  finishedAt: z.union([z.null(), z.coerce.date()]).optional(),
 });
 
 export const routingAttemptCreateSchema = z.object({

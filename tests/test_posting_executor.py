@@ -20,6 +20,15 @@ class DummyFailureHandler:
         return {"status": "failure", "message": "failed", "requires_manual_review": True}
 
 
+class UnknownOutcomeHandler:
+    def enter_data(self, categorized_data):
+        return {
+            "status": "outcome_unknown",
+            "message": "Wave did not return a verifiable result.",
+            "review_reason": "wave_api_outcome_unknown",
+        }
+
+
 class DeferredRateLimitHandler:
     def enter_data(self, categorized_data):
         return {
@@ -102,6 +111,36 @@ class TestPostingExecutor(unittest.TestCase):
         self.assertEqual(result["status"], "posting_failed")
         review = self.database.fetch_one("SELECT * FROM manual_review_items WHERE document_id = ?", ("doc-1",))
         self.assertEqual(review["reason"], "posting_execution_failed")
+
+    def test_unknown_wave_outcome_is_not_retried_and_requires_reconciliation(self):
+        attempt_id = self._create_approved_attempt(target_system="waveapps_business")
+        executor = PostingExecutor(self.config, handlers={"waveapps_business": UnknownOutcomeHandler()})
+        executor.retry_manager.schedule_retry(
+            "posting_attempt",
+            str(attempt_id),
+            "execute_posting",
+            "Previously scheduled retry",
+        )
+
+        result = executor.execute_attempt(attempt_id)
+
+        self.assertEqual(result["status"], "outcome_unknown")
+        attempt = self.database.fetch_one("SELECT * FROM posting_attempts WHERE id = ?", (attempt_id,))
+        document = self.database.fetch_one("SELECT * FROM documents WHERE id = ?", ("doc-1",))
+        retry = self.database.fetch_one(
+            "SELECT * FROM retry_queue WHERE entity_type = ? AND entity_id = ? AND operation = ?",
+            ("posting_attempt", str(attempt_id), "execute_posting"),
+        )
+        review = self.database.fetch_one(
+            "SELECT * FROM manual_review_items WHERE document_id = ? AND reason = ?",
+            ("doc-1", "wave_api_outcome_unknown"),
+        )
+        self.assertEqual(attempt["status"], "outcome_unknown")
+        self.assertEqual(document["current_state"], "awaiting_reconciliation")
+        self.assertEqual(retry["status"], "completed")
+        self.assertEqual(review["severity"], "high")
+        self.assertEqual(executor.execute_attempt(attempt_id, force=True)["status"], "not_approved")
+        self.assertEqual(executor.process_due_retries()["count"], 0)
 
     def test_execution_respects_disabled_flag(self):
         disabled_config = dict(self.config)

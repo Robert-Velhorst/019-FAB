@@ -119,9 +119,10 @@ class LocalRoutingService:
                 workflow_run_id=workflow_run_id,
             )
 
-        document_data = _document_data(document)
-        destination = classify_wave_destination(document_data)
-        action_id = resolve_wave_action_for_document(document_data)
+        wave_inputs = build_wave_operation_inputs(document=document, config=self.config)
+        document_data = wave_inputs["sourceData"]
+        destination = wave_inputs["destination"]
+        action_id = wave_inputs["actionId"]
         missing_fields = _missing_source_fields(document_data, action_id)
         if missing_fields:
             details = "Missing fields for Wave draft preparation: " + ", ".join(missing_fields)
@@ -149,17 +150,7 @@ class LocalRoutingService:
                 workflow_run_id=workflow_run_id,
             )
 
-        payload = build_wave_action_payload(
-            document_data,
-            document_data["category"],
-            default_account=_config_value(
-                self.config,
-                "fab_waveapps_default_account",
-                "operations_waveapps_default_account",
-                "waveapps_default_account",
-                default="Uncategorized",
-            ),
-        )
+        payload = wave_inputs["payload"]
         operation = self.operator.prepare_operation(
             action_id,
             payload,
@@ -360,9 +351,10 @@ class LocalRoutingService:
                 workflow_run_id=workflow_run_id,
             )
 
-        record_data = _bookkeeping_record_data(record)
-        destination = classify_wave_destination(record_data)
-        action_id = resolve_wave_action_for_document(record_data)
+        wave_inputs = build_wave_operation_inputs(record=record, config=self.config)
+        record_data = wave_inputs["sourceData"]
+        destination = wave_inputs["destination"]
+        action_id = wave_inputs["actionId"]
         missing_fields = _missing_source_fields(record_data, action_id)
         if missing_fields:
             return self._record_blocked_record_attempt(
@@ -378,17 +370,7 @@ class LocalRoutingService:
                 workflow_run_id=workflow_run_id,
             )
 
-        payload = build_wave_action_payload(
-            record_data,
-            record_data["category"],
-            default_account=_config_value(
-                self.config,
-                "fab_waveapps_default_account",
-                "operations_waveapps_default_account",
-                "waveapps_default_account",
-                default="Uncategorized",
-            ),
-        )
+        payload = wave_inputs["payload"]
         operation = self.operator.prepare_operation(
             action_id,
             payload,
@@ -1230,6 +1212,42 @@ def _bookkeeping_record_data(record: Dict[str, Any]) -> Dict[str, Any]:
         "description": record.get("description"),
         "line_items": extracted["line_items"],
         "extracted_data": extracted,
+    }
+
+
+def build_wave_operation_inputs(
+    *,
+    config: Optional[Dict[str, Any]] = None,
+    document: Optional[Dict[str, Any]] = None,
+    record: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Build the same canonical Wave action inputs for routing and freshness checks."""
+    if document is not None:
+        source_data = _document_data(document)
+    elif record is not None:
+        source_data = _bookkeeping_record_data(record)
+    else:
+        raise ValueError("A document or bookkeeping record is required to build a Wave operation")
+
+    settings = config or {}
+    destination = classify_wave_destination(source_data)
+    action_id = resolve_wave_action_for_document(source_data)
+    payload = build_wave_action_payload(
+        source_data,
+        source_data["category"],
+        default_account=_config_value(
+            settings,
+            "fab_waveapps_default_account",
+            "operations_waveapps_default_account",
+            "waveapps_default_account",
+            default="Uncategorized",
+        ),
+    )
+    return {
+        "sourceData": source_data,
+        "destination": destination,
+        "actionId": action_id,
+        "payload": payload,
     }
 
 

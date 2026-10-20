@@ -4,8 +4,11 @@ import requests
 
 from src.banking.bank_transaction_importer import BankTransactionImporter
 
+
 class BankingAPI:
     """Fetches bank transactions from local exports first, with API fallback support."""
+
+    REQUEST_TIMEOUT = (5, 20)
 
     def __init__(self, config: Dict[str, Any]):
         self.config = config or {}
@@ -40,7 +43,12 @@ class BankingAPI:
             access_token = self._authenticate()
             headers = {"Authorization": f"Bearer {access_token}"}
             params = {"start_date": start_date, "end_date": end_date}
-            response = requests.get(f"{self.api_endpoint}/transactions", headers=headers, params=params)
+            response = requests.get(
+                f"{self.api_endpoint}/transactions",
+                headers=headers,
+                params=params,
+                timeout=self.REQUEST_TIMEOUT,
+            )
             response.raise_for_status()
             payload = response.json()
             if isinstance(payload, dict) and isinstance(payload.get("transactions"), list):
@@ -61,7 +69,11 @@ class BankingAPI:
         try:
             access_token = self._authenticate()
             headers = {"Authorization": f"Bearer {access_token}"}
-            response = requests.get(f"{self.api_endpoint}/balance", headers=headers)
+            response = requests.get(
+                f"{self.api_endpoint}/balance",
+                headers=headers,
+                timeout=self.REQUEST_TIMEOUT,
+            )
             response.raise_for_status()
             return response.json()
         except Exception as exc:

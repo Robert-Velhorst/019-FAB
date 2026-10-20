@@ -135,3 +135,43 @@ def test_renderer_timeout_reaches_ledger_review_and_blocks_export(tmp_path):
     assert not document.get("ocr_text")
     assert any(item["reason"] == "processing_failed" for item in document["review_items"])
     assert document["bookkeeping_record"]["export_status"] == "blocked_processing"
+
+
+def test_oversized_image_reaches_ledger_review_and_blocks_export(tmp_path):
+    import hashlib
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from src.document_processors.processor_pipeline import ProcessorPipeline
+    from src.operations.local_ledger import LocalOperationsLedger
+    from src.operations.local_processing import LocalDocumentProcessor
+
+    source = tmp_path / "oversized.png"
+    original = b"synthetic-image-payload"
+    source.write_bytes(original)
+    ledger = LocalOperationsLedger(str(tmp_path / "ledger.sqlite3"))
+    document_id = ledger.register_document({
+        "source": "local_folder", "sourceDocumentId": "oversized-image-test",
+        "originalFilename": source.name, "storagePath": str(source),
+        "contentSha256": hashlib.sha256(original).hexdigest(),
+        "mimeType": "image/png", "documentType": "receipt",
+        "processingStatus": "imported",
+    })
+    config = {"enable_enhanced_preprocessing": False, "enable_template_matching": False,
+              "enable_line_item_extraction": False, "primary_ocr_method": "tesseract"}
+    image = SimpleNamespace(size=(5001, 5000), n_frames=1, close=Mock())
+    with patch("src.document_processors.tesseract_processor.resolve_tesseract_command",
+               return_value="tesseract"), \
+            patch("src.document_processors.tesseract_processor.Image.open", return_value=image), \
+            patch("src.document_processors.tesseract_processor.pytesseract.image_to_string") as ocr:
+        pipeline = ProcessorPipeline(config)
+        result = LocalDocumentProcessor(ledger, config, processor_pipeline=pipeline,
+            categorizer=Mock(), validator=Mock()).process_document(document_id)
+
+    document = ledger.get_document(document_id)
+    assert result["status"] == "failed"
+    assert source.read_bytes() == original
+    assert not document.get("ocr_text")
+    assert any(item["reason"] == "processing_failed" for item in document["review_items"])
+    assert document["bookkeeping_record"]["export_status"] == "blocked_processing"
+    image.close.assert_called_once()
+    ocr.assert_not_called()

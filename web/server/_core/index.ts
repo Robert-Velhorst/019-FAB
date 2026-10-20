@@ -7,7 +7,8 @@ import { registerOAuthRoutes } from "./oauth";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic } from "./static";
-import { webhookLimiter, relaxedLimiter } from "../lib/rateLimiter";
+import { webhookLimiter, relaxedLimiter, standardLimiter } from "../lib/rateLimiter";
+import { createPublicFormRateLimitMiddleware } from "../lib/publicFormRateLimit";
 import { createLogger } from "../lib/logger";
 import { registerFabOperationsRoutes } from "../fabOperations";
 import { registerFabRuntimeRoute } from "../fabRuntime";
@@ -18,6 +19,7 @@ import { ENV } from "./env";
 import { createFabSecurityMiddleware } from "./security";
 import { configureFabProxyTrust } from "./deployment";
 import { createFabServerLifecycle, listenFabServer } from "./lifecycle";
+import { closeDb } from "../db";
 
 const log = createLogger("Server");
 
@@ -30,7 +32,7 @@ async function startServer() {
 
   app.use(...createFabSecurityMiddleware(ENV.isProduction));
 
-  // Compress JSON and static responses for remote/ngrok clients. Small
+  // Compress JSON and static responses for remote clients. Small
   // responses stay uncompressed to avoid spending CPU for negligible savings.
   app.use(compression({ threshold: 1_024 }));
   registerFabManagedAuthRoutes(app);
@@ -53,6 +55,19 @@ async function startServer() {
 
   // ── Body parsers ──────────────────────────────────────────────
   // 10mb limit is generous for form data; file uploads go to S3
+  const parsePublicFormBody: express.RequestHandler = (req, res, next) => {
+    express.json({ limit: "64kb" })(req, res, (jsonError?: unknown) => {
+      if (jsonError) {
+        next(jsonError);
+        return;
+      }
+      express.urlencoded({ limit: "64kb", extended: true })(req, res, next);
+    });
+  };
+  app.use(
+    "/api/trpc",
+    createPublicFormRateLimitMiddleware(standardLimiter, parsePublicFormBody),
+  );
   app.use(express.json({ limit: "10mb" }));
   app.use(express.urlencoded({ limit: "10mb", extended: true }));
 
@@ -102,7 +117,14 @@ async function startServer() {
     port: preferredPort,
     allowPortFallback: ENV.fabAllowPortFallback,
   });
-  lifecycle.installSignalHandlers();
+  lifecycle.installSignalHandlers(process, undefined, async () => {
+    try {
+      await closeDb();
+    } catch (error) {
+      log.error("Database pool shutdown failed", {}, error instanceof Error ? error : new Error(String(error)));
+      throw error;
+    }
+  });
 
   if (port !== preferredPort) {
     log.info(`Port ${preferredPort} is busy, using port ${port} instead`);

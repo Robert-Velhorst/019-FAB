@@ -43,6 +43,19 @@ describe("FAB local API gateway", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
+  it("preserves the FAB Operations message-only error envelope", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      success: false,
+      status: "error",
+      errorCode: "workflow_run_not_found",
+      message: "Workflow run was not found.",
+      requestId: "request-123",
+    }), { status: 404 })));
+
+    await expect(fabLocalRequest("/api/test"))
+      .rejects.toMatchObject({ code: "NOT_FOUND", message: "Workflow run was not found." });
+  });
+
   it("preserves a rejected review as a conflict without replaying it", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       success: false, status: "stale_evidence", error: "Reconciliation evidence changed; refresh before approval.",
@@ -521,19 +534,15 @@ describe("FAB local API gateway", () => {
       "/api/reconciliation": { reconciliationMatches: [{ id: 3, status: "needs_review" }] },
       "/api/audit": { auditEvents: [{ id: 2, action: "local_api.source.upsert" }] },
       "/api/close-readiness": { status: "blocked", canClose: false, blockingCount: 2 },
-      "/api/hai/status": { status: "ready", enabled: true, allowedCommandIds: ["run_safe_cycle", "refresh_notifications"] },
-      "/api/hai/manifest": { version: "fab-hai-connector-v1", commands: [] },
-      "/api/cloud/status": {
-        service: "fab-ngrok-cloud-access",
-        status: "active",
-        active: true,
-        configured: true,
-        publicUrl: "https://fab.example.test",
-        authMode: "bearer_token",
-        haiManifestUrl: "https://fab.example.test/api/hai/manifest",
-        verifiedAt: "2026-07-25T09:30:00Z",
-        externalSubmission: "not_executed",
+      "/api/hai/status": {
+        status: "ready",
+        enabled: true,
+        allowedCommandIds: ["run_safe_cycle", "refresh_notifications"],
+        haiAuthentication: "dedicated_bearer_token",
+        dedicatedHaiTokenConfigured: true,
+        remoteAuthenticationConfigured: true,
       },
+      "/api/hai/manifest": { version: "fab-hai-connector-v1", commands: [] },
       "/api/drive-wave/status": { status: "ready", archiveEnabled: true, driveTokenPresent: true },
       "/api/drive-wave/work-orders": {
         count: 1,
@@ -754,15 +763,10 @@ describe("FAB local API gateway", () => {
         id: "hai",
         status: "ready",
         allowedCommandIds: ["run_safe_cycle", "refresh_notifications"],
-        details: "Governed machine control is enabled for 2 allowlisted commands.",
-      }),
-      expect.objectContaining({
-        id: "ngrok_cloud",
-        status: "active",
-        configured: true,
-        ready: true,
-        publicUrl: "https://fab.example.test",
-        authMode: "bearer_token",
+        haiAuthentication: "dedicated_bearer_token",
+        dedicatedHaiTokenConfigured: true,
+        remoteAuthenticationConfigured: true,
+        details: "Governed machine control is enabled for 2 allowlisted commands; a separate HAI credential is configured.",
       }),
     ]));
     expect(result.recovery).toMatchObject({ dueCount: 1 });
@@ -919,11 +923,6 @@ describe("FAB local API gateway", () => {
       enabled: true,
       ready: false,
     });
-    expect(result.cloudAccess).toMatchObject({
-      status: "active",
-      active: true,
-      externalSubmission: "not_executed",
-    });
     expect(fetchMock.mock.calls.some(([input]) => {
       const url = new URL(String(input));
       return url.pathname === "/api/review"
@@ -1001,7 +1000,7 @@ describe("FAB local API gateway", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     const result = await getFabControlCenter();
-    expect(paths.sort()).toEqual(["/api/backups", "/api/cloud/status", "/api/control-center/resources"].sort());
+    expect(paths.sort()).toEqual(["/api/backups", "/api/control-center/resources"].sort());
     expect(result.connection.connected).toBe(false);
     expect(result.metrics.documents).toBeNull();
     expect(result.resourceStates.metrics).toMatchObject({ state: "error", updatedAt: null });
@@ -1021,7 +1020,7 @@ describe("FAB local API gateway", () => {
     expect(result.connection.connected).toBe(true);
     expect(paths).toContain("/api/live");
     expect(paths.filter(path => path === "/api/control-center/resources")).toHaveLength(1);
-    expect(paths.length).toBe(30);
+    expect(paths.length).toBe(28);
   });
 
   it("does not fan out after a real HTTP service-unavailable response", async () => {
@@ -1044,7 +1043,7 @@ describe("FAB local API gateway", () => {
         });
       });
       const result = await getFabControlCenter();
-      expect(paths.sort()).toEqual(["/api/backups", "/api/cloud/status", "/api/control-center/resources"].sort());
+      expect(paths.sort()).toEqual(["/api/backups", "/api/control-center/resources"].sort());
       expect(result.connection.connected).toBe(false);
       expect(result.metrics.documents).toBeNull();
     } finally {
@@ -1091,7 +1090,7 @@ describe("FAB local API gateway", () => {
       "workflows", "masterLedger", "metrics", "notifications", "settings",
       "bankTransactions", "reconciliation", "activity", "sources",
       "waveReceiptExecutor", "sourceReadiness", "driveAuthorization",
-      "haiStatus", "haiManifest", "gmailAuthorization",
+      "haiStatus", "gmailAuthorization",
     ];
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const path = new URL(String(input)).pathname;
@@ -1115,12 +1114,14 @@ describe("FAB local API gateway", () => {
     const requestedPaths = fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname);
 
     expect(result.connection.connected).toBe(true);
+    expect(result).not.toHaveProperty("hai");
+    expect(result.connections.some((connection) => connection.id === "hai")).toBe(true);
     expect(requestedPaths).toContain("/api/control-center/resources");
     expect(requestedPaths).not.toContain("/api/dashboard");
     expect(requestedPaths).not.toContain("/api/health");
     expect(requestedPaths).not.toContain("/api/autonomy/plan");
     expect(requestedPaths).not.toContain("/api/drive-wave/work-orders");
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("coalesces duplicate snapshots and invalidates them after a mutation", async () => {

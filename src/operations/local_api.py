@@ -31,6 +31,7 @@ from src.operations.local_autonomy import LocalAutonomousService
 from src.operations.local_autonomy_control import LocalAutonomyControlService
 from src.operations.local_backup import (
     BACKUP_FORMAT_V2,
+    BACKUP_FORMAT_V3,
     FULL_RESTORE_CONFIRMATION_PHRASE,
     RESTORE_CONFIRMATION_PHRASE,
     RESTORE_MODE_FULL,
@@ -49,7 +50,6 @@ from src.operations.local_bookkeeping_records import (
 )
 from src.operations.local_close_readiness import LocalCloseReadinessService
 from src.operations.local_close_pack import LocalClosePackService
-from src.operations.local_cloud_access import LocalCloudAccessService
 from src.operations.local_categories import fab_category_intents, fab_category_options
 from src.operations.local_category_suggestions import suggest_category_intent
 from src.operations.local_compliance import LocalComplianceService, OPEN_FINDING_STATUSES
@@ -158,17 +158,27 @@ LOCAL_SOURCE_PREVIEW_MIME_TYPES = {
     "text/xml",
 }
 LOCAL_FORM_SESSION_KEY = "fab_local_form_session"
+LOGIN_FAILURE_WINDOW_SECONDS = 15 * 60
+MAX_LOGIN_FAILURES_PER_CLIENT = 5
+MAX_TRACKED_LOGIN_CLIENTS = 4096
 REVIEW_RESOLUTION_STATUSES = {"approved", "rejected", "resolved", "ignored"}
 RECONCILIATION_RESOLUTION_STATUSES = {"approved", "reconciled", "rejected", "resolved", "ignored", "needs_review"}
 RULE_RESOLUTION_STATUSES = VENDOR_CATEGORY_RULE_STATUSES - {"learned"}
+VENDOR_RULE_CONFLICT_MESSAGE = (
+    "Conflicting approved vendor category rule already exists for this target"
+)
 API_REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{8,64}$")
+INTERNAL_DIAGNOSTIC_PATTERN = re.compile(
+    r"(?im)(?:traceback \(most recent call last\):|^\s*File [\"'][^\r\n]+[\"'], line \d+|"
+    r"[A-Z]:[\\/]|\\\\[^\\\s]+\\|/(?:Users|home|root|tmp|var|etc|opt|srv|mnt|private|app)/)"
+)
 HAI_ROUTE_RULES = (
     ("GET", re.compile(r"^/api/hai/(?:manifest|status)$")),
     ("POST", re.compile(r"^/api/hai/commands/(?:plan|execute)$")),
     ("GET", re.compile(r"^/api/backups$")),
     ("POST", re.compile(r"^/api/connectors/google-drive/relay$")),
     ("GET", re.compile(r"^/api/drive-wave/work-orders$")),
-    ("POST", re.compile(r"^/api/drive-wave/documents/[1-9][0-9]*/attachment-readback$")),
+    # Binary Wave readback is operator-only; HAI cannot self-attest archival evidence.
     ("GET", re.compile(r"^/api/wave/receipt-executor/status$")),
     ("POST", re.compile(r"^/api/wave/receipt-executor/(?:session|claim|release)$")),
 )
@@ -198,7 +208,6 @@ CONTROL_CENTER_BATCH_PATHS = {
     "sourceReadiness": "/api/sources/readiness",
     "driveAuthorization": "/api/connectors/google-drive/authorization",
     "haiStatus": "/api/hai/status",
-    "haiManifest": "/api/hai/manifest",
     "gmailAuthorization": "/api/connectors/gmail/authorization",
 }
 
@@ -213,9 +222,19 @@ def _hai_request_allowed(method: str, path: str) -> bool:
 
 
 def _request_audit_actor(requested_actor: Any, default_actor: str) -> str:
-    if getattr(g, "fab_api_principal", None) == "hai":
+    principal = getattr(g, "fab_api_principal", None)
+    if principal == "hai":
         return "fab_hai_api:hai"
-    return str(requested_actor or default_actor)[:200]
+    bound_actor = getattr(g, "fab_request_audit_actor", None)
+    if bound_actor:
+        return bound_actor
+    raw_label = str(requested_actor or default_actor)
+    actor_label = " ".join(
+        "".join(char if char.isprintable() else " " for char in raw_label).split()
+    )[:200] or default_actor
+    if principal == "operator":
+        return f"fab_local_api:operator_claim:{actor_label}"
+    return f"fab_local_api:unverified_claim:{actor_label}"
 
 
 def _hai_backup_status_projection(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -343,6 +362,37 @@ def _api_error_code(status_code: int) -> str:
         502: "upstream_error",
         503: "service_unavailable",
     }.get(status_code, "internal_error" if status_code >= 500 else "request_failed")
+
+
+def _public_api_diagnostic(value: str) -> str:
+    message = LocalOperationsLedger._redact_error_message(value) or "Request failed"
+    if INTERNAL_DIAGNOSTIC_PATTERN.search(message):
+        return "The operation could not be completed. Internal details were withheld."
+    return message[:2_000]
+
+
+def _sanitize_public_diagnostics(value: Any) -> Any:
+    if isinstance(value, dict):
+        sanitized = {}
+        for key, item in value.items():
+            if isinstance(item, str) and str(key).casefold() in {
+                "error", "message", "reason", "error_message", "errormessage",
+            }:
+                sanitized[key] = _public_api_diagnostic(item)
+            elif isinstance(item, list) and str(key).casefold() == "reasons":
+                sanitized[key] = [
+                    _public_api_diagnostic(value) if isinstance(value, str)
+                    else _sanitize_public_diagnostics(value)
+                    for value in item
+                ]
+            else:
+                sanitized[key] = _sanitize_public_diagnostics(item)
+        return sanitized
+    if isinstance(value, list):
+        return [_sanitize_public_diagnostics(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_sanitize_public_diagnostics(item) for item in value)
+    return value
 
 
 def _file_matches_content(path: str, content: bytes) -> bool:
@@ -585,6 +635,19 @@ DASHBOARD_TEMPLATE = """
       margin: 0 0 7px;
     }
     .export-actions form.table-actions input { min-width: 0; }
+    .export-actions form.wave-observation-form {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 7px;
+    }
+    .export-actions form.wave-observation-form label {
+      display: flex;
+      align-items: flex-start;
+      gap: 7px;
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
     input[type="text"], textarea, select {
       width: 100%;
       min-height: 36px;
@@ -2273,6 +2336,9 @@ DASHBOARD_TEMPLATE = """
                 {% if export.external_id %}
                 <div class="muted">Wave ID</div>
                 <div class="muted mono">{{ export.external_id }}</div>
+                {% elif export.metadata and export.metadata.lastExecution and export.metadata.lastExecution.providerExternalId %}
+                <div class="muted">FAB external reference (not confirmation)</div>
+                <div class="muted mono">{{ export.metadata.lastExecution.providerExternalId }}</div>
                 {% endif %}
                 {% if export.metadata and export.metadata.masterLedgerDraft %}
                 <div class="muted">Master ledger {{ export.metadata.masterLedgerDraft.draftType }}</div>
@@ -2323,16 +2389,6 @@ DASHBOARD_TEMPLATE = """
                   <input type="text" name="confirmation" placeholder="{{ export_rejection_phrase }}">
                   <button class="compact secondary" type="submit">Cancel approval</button>
                 </form>
-                <form class="review-actions" method="post" action="{{ url_for('record_export_attempt_result_form', export_attempt_id=export.id) }}">
-                  <select name="status" aria-label="Export result">
-                    <option value="executed">Executed</option>
-                    <option value="queued">Queued</option>
-                    <option value="failed">Failed</option>
-                  </select>
-                  <input type="text" name="externalId" placeholder="External ID">
-                  <input type="text" name="confirmation" placeholder="{{ export_result_confirmation_phrase }}">
-                  <button class="compact secondary" type="submit">Record result</button>
-                </form>
                 {% elif export.status == "supervision_required" %}
                 <div class="muted">Complete the stored artifact import in your MijnGeldzaken session.</div>
                 <form class="review-actions" method="post" action="{{ url_for('record_export_attempt_result_form', export_attempt_id=export.id) }}">
@@ -2341,10 +2397,32 @@ DASHBOARD_TEMPLATE = """
                     <option value="submitted">Submitted</option>
                     <option value="failed">Failed</option>
                   </select>
+                  <input type="hidden" name="artifactSha256" value="{{ export.metadata.supervisedArtifact.sha256 }}">
                   <input type="text" name="externalId" placeholder="Receipt reference">
                   <input type="text" name="confirmation" placeholder="{{ export_result_confirmation_phrase }}">
                   <button class="compact secondary" type="submit">Record supervised result</button>
                 </form>
+                {% elif export.status == "failed" and export.external_submission == "unknown" %}
+                {% if export.metadata and export.metadata.operatorReconciliation %}
+                <div class="muted">Wave UI observation recorded for {{ export.metadata.operatorReconciliation.externalId }}; API readback remains unverified and archival is blocked.</div>
+                {% endif %}
+                <details>
+                  <summary>Record Wave check</summary>
+                  <p class="muted">Observation only. This will not retry the export, resolve the review, or authorize Drive archival.</p>
+                  <form class="table-actions wave-observation-form" method="post" action="{{ url_for('record_unknown_wave_observation_form', export_attempt_id=export.id) }}">
+                    <input type="text" name="externalId" maxlength="200" placeholder="Wave transaction reference" required>
+                    <label><input type="checkbox" name="verifiedFields" value="target" required> Correct Wave account</label>
+                    <label><input type="checkbox" name="verifiedFields" value="vendor" required> Vendor or description</label>
+                    <label><input type="checkbox" name="verifiedFields" value="date" required> Date</label>
+                    <label><input type="checkbox" name="verifiedFields" value="amount" required> Amount</label>
+                    <label><input type="checkbox" name="verifiedFields" value="currency" required> Currency</label>
+                    {% if export.document_id %}
+                    <label><input type="checkbox" name="verifiedFields" value="attachment" required> Original attachment opens and matches</label>
+                    {% endif %}
+                    <input type="text" name="confirmation" placeholder="RECORD FAB WAVE OBSERVATION #{{ export.id }}" required>
+                    <button class="compact secondary" type="submit">Record observation</button>
+                  </form>
+                </details>
                 {% else %}
                 -
                 {% endif %}
@@ -3217,14 +3295,14 @@ DASHBOARD_TEMPLATE = """
                 <form method="post" action="{{ url_for('restore_backup_form') }}">
                   <input type="hidden" name="backupPath" value="{{ backup.backupPath }}">
                   <input type="hidden" name="restoreMode" value="{{ ledger_restore_mode }}">
-                  <input type="text" name="confirmation" placeholder="{{ backups.restoreConfirmationPhrase }}">
+                  <input type="text" name="confirmation" placeholder="{{ backup.restoreConfirmationPhrase }}">
                   <button class="compact secondary" type="submit">Restore ledger</button>
                 </form>
-                {% if backup.format == recovery_package_format and backup.sourceEvidenceStatus == "complete" and (backup.sourceEvidenceGaps or 0) == 0 %}
+                {% if backup.format in recovery_package_formats and backup.sourceEvidenceStatus == "complete" and (backup.sourceEvidenceGaps or 0) == 0 %}
                 <form method="post" action="{{ url_for('restore_backup_form') }}">
                   <input type="hidden" name="backupPath" value="{{ backup.backupPath }}">
                   <input type="hidden" name="restoreMode" value="{{ full_restore_mode }}">
-                  <input type="text" name="confirmation" placeholder="{{ backups.fullRestoreConfirmationPhrase }}">
+                  <input type="text" name="confirmation" placeholder="{{ backup.fullRestoreConfirmationPhrase }}">
                   <button class="compact" type="submit">Restore ledger and files</button>
                 </form>
                 {% endif %}
@@ -3262,7 +3340,6 @@ DASHBOARD_TEMPLATE = """
         <div class="setting"><span>Dashboard URL</span><strong class="mono">{{ readiness.localAccess.dashboardUrl }}</strong></div>
         <div class="setting"><span>API base URL</span><strong class="mono">{{ readiness.localAccess.apiBaseUrl }}</strong></div>
         <div class="setting"><span>Auth mode</span><strong>{{ readiness.localAccess.authMode }}</strong></div>
-        <div class="setting"><span>Ngrok safety</span><strong>{{ readiness.localAccess.ngrokSafety }}</strong></div>
       </div>
       <details>
         <summary>Windows Local Runbook</summary>
@@ -4116,6 +4193,17 @@ def _ascii_credential_matches(supplied: str, expected: str) -> bool:
             and supplied.isascii() and hmac.compare_digest(supplied, expected))
 
 
+def _log_unexpected_api_error(app: Flask, operation: str, error: Exception) -> str:
+    request_id = getattr(g, "fab_request_id", "unavailable")
+    app.logger.error(
+        "FAB API operation failed (operation=%s request_id=%s error_type=%s)",
+        operation,
+        request_id,
+        type(error).__name__,
+    )
+    return f"Unexpected error [REDACTED]. Reference {request_id}."
+
+
 def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
     config = config or {}
     require_deployment_ready(config)
@@ -4214,11 +4302,9 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
     app.config["SESSION_COOKIE_SECURE"] = urlsplit(configured_base_url).scheme == "https"
-    app.secret_key = (
-        hashlib.sha256(token.encode("utf-8")).hexdigest()
-        if token
-        else secrets.token_hex(32)
-    )
+    # Flask sessions are intentionally invalidated on API restart. Do not derive
+    # a browser-signing key from the API credential or reuse it across purposes.
+    app.secret_key = secrets.token_bytes(32)
     health_cache_ttl_value = None
     for key in (
         "fab_health_cache_ttl_seconds",
@@ -4238,6 +4324,30 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
     health_cache_lock = threading.Lock()
     consumed_operator_session_nonces: Dict[str, int] = {}
     operator_session_nonce_lock = threading.Lock()
+    login_failures: OrderedDict[str, tuple[int, float]] = OrderedDict()
+    login_failures_lock = threading.Lock()
+
+    def login_lockout_seconds(client_key: str, now: float) -> int:
+        with login_failures_lock:
+            state = login_failures.get(client_key)
+            if state is None:
+                return 0
+            attempts, expires_at = state
+            if expires_at <= now:
+                login_failures.pop(client_key, None)
+                return 0
+            login_failures.move_to_end(client_key)
+            return max(1, int(expires_at - now + 0.999)) if attempts >= MAX_LOGIN_FAILURES_PER_CLIENT else 0
+
+    def record_login_failure(client_key: str, now: float) -> None:
+        with login_failures_lock:
+            attempts, expires_at = login_failures.get(client_key, (0, now + LOGIN_FAILURE_WINDOW_SECONDS))
+            if expires_at <= now:
+                attempts, expires_at = 0, now + LOGIN_FAILURE_WINDOW_SECONDS
+            login_failures[client_key] = (attempts + 1, expires_at)
+            login_failures.move_to_end(client_key)
+            while len(login_failures) > MAX_TRACKED_LOGIN_CLIENTS:
+                login_failures.popitem(last=False)
 
     @app.before_request
     def assign_request_id():
@@ -4342,6 +4452,18 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         return None
 
     @app.before_request
+    def bind_json_audit_actor():
+        if request.method not in {"POST", "PUT", "PATCH", "DELETE"} or not request.is_json:
+            return None
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict) or "actor" not in payload:
+            return None
+        actor = _request_audit_actor(payload.get("actor"), request.endpoint or "local_api")
+        g.fab_request_audit_actor = actor
+        payload["actor"] = actor
+        return None
+
+    @app.before_request
     def enforce_maintenance_boundary():
         if not maintenance_mode or request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
             return None
@@ -4368,12 +4490,23 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         if not token:
             return redirect(url_for("dashboard_page"))
         if request.method == "POST":
+            client_key = request.remote_addr or "unknown"
+            retry_after = login_lockout_seconds(client_key, time.monotonic())
+            if retry_after:
+                response = jsonify({"error": "Too many failed login attempts. Try again later."})
+                response.status_code = 429
+                response.headers["Retry-After"] = str(retry_after)
+                response.headers["Cache-Control"] = "no-store"
+                return response
             submitted = request.form.get("token", "")
             if _ascii_credential_matches(submitted, token):
+                with login_failures_lock:
+                    login_failures.pop(client_key, None)
                 session.clear()
                 session["fab_local_api_authenticated"] = True
                 session["fab_local_api_auth_method"] = "token"
                 return redirect(url_for("dashboard_page"))
+            record_login_failure(client_key, time.monotonic())
             return render_template_string(LOGIN_TEMPLATE, error="Invalid token."), 401
         return render_template_string(LOGIN_TEMPLATE, error=None)
 
@@ -4476,11 +4609,9 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         if request.path.startswith("/api/") and response.status_code >= 400 and response.is_json:
             payload = response.get_json(silent=True)
             if isinstance(payload, dict):
-                payload = LocalOperationsLedger._redact_sensitive(payload)
-                for diagnostic_key in ("error", "message"):
-                    diagnostic_value = payload.get(diagnostic_key)
-                    if isinstance(diagnostic_value, str):
-                        payload[diagnostic_key] = diagnostic_value[:2000]
+                payload = _sanitize_public_diagnostics(
+                    LocalOperationsLedger._redact_sensitive(payload)
+                )
                 error_value = payload.get("error")
                 message_value = payload.get("message")
                 if not isinstance(message_value, str) or not message_value.strip():
@@ -4527,7 +4658,9 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
                     "method": request.method,
                     "endpoint": request.endpoint or "unmatched",
                     "errorType": type(exc).__name__,
-                    "externalSubmission": "not_executed",
+                    # A route may have reached a provider before an unexpected
+                    # exception prevented it from recording its own outcome.
+                    "externalSubmission": "unknown",
                 },
             })
         except Exception:
@@ -4764,6 +4897,29 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         last_connector_sync = session.pop("fab_last_connector_sync", None)
         last_photos_picker_action = session.pop("fab_last_photos_picker_action", None)
         last_workflow_recovery = session.pop("fab_last_workflow_recovery", None)
+        last_intake_summary = _sanitize_public_diagnostics(last_intake_summary)
+        last_processing_summary = _sanitize_public_diagnostics(last_processing_summary)
+        last_routing_summary = _sanitize_public_diagnostics(last_routing_summary)
+        last_export_summary = _sanitize_public_diagnostics(last_export_summary)
+        last_mijngeldzaken_plan = _sanitize_public_diagnostics(last_mijngeldzaken_plan)
+        last_wave_plan = _sanitize_public_diagnostics(last_wave_plan)
+        last_wave_entity_sync = _sanitize_public_diagnostics(last_wave_entity_sync)
+        last_reconciliation_summary = _sanitize_public_diagnostics(last_reconciliation_summary)
+        last_bank_import_summary = _sanitize_public_diagnostics(last_bank_import_summary)
+        last_record_refresh_summary = _sanitize_public_diagnostics(last_record_refresh_summary)
+        last_autonomy_summary = _sanitize_public_diagnostics(last_autonomy_summary)
+        last_backup_summary = _sanitize_public_diagnostics(last_backup_summary)
+        last_close_pack_summary = _sanitize_public_diagnostics(last_close_pack_summary)
+        last_scheduled_report_summary = _sanitize_public_diagnostics(last_scheduled_report_summary)
+        last_notification_refresh_summary = _sanitize_public_diagnostics(last_notification_refresh_summary)
+        last_compliance_summary = _sanitize_public_diagnostics(last_compliance_summary)
+        last_connector_sync = _sanitize_public_diagnostics(last_connector_sync)
+        last_photos_picker_action = _sanitize_public_diagnostics(last_photos_picker_action)
+        last_workflow_recovery = _sanitize_public_diagnostics(last_workflow_recovery)
+        last_grouping_summary = _sanitize_public_diagnostics(
+            session.pop("fab_last_grouping_summary", None)
+        )
+        report_schedule_status = _sanitize_public_diagnostics(report_schedule_status)
         health_payload = {
             "status": operations_health["status"],
             "ledger_path": app.config["FAB_LOCAL_LEDGER_PATH"],
@@ -4826,7 +4982,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             "health": health_payload,
             "lastIntakeSummary": last_intake_summary,
             "lastProcessingSummary": last_processing_summary,
-            "lastGroupingSummary": session.get("fab_last_grouping_summary"),
+            "lastGroupingSummary": last_grouping_summary,
             "lastRoutingSummary": last_routing_summary,
             "lastExportSummary": last_export_summary,
             "lastMijngeldzakenPlan": last_mijngeldzaken_plan,
@@ -4855,7 +5011,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             maintenance_mode=maintenance_mode,
             ledger_restore_mode=RESTORE_MODE_LEDGER_ONLY,
             full_restore_mode=RESTORE_MODE_FULL,
-            recovery_package_format=BACKUP_FORMAT_V2,
+            recovery_package_formats=(BACKUP_FORMAT_V2, BACKUP_FORMAT_V3),
             bank_import_summary=last_bank_import_summary,
             bank_statement_imports=bank_statement_imports,
             bank_transactions=bank_transactions,
@@ -4883,7 +5039,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             financial_report_runs=financial_report_runs,
             format_confidence=_format_confidence,
             format_money=_format_money,
-            grouping_summary=session.pop("fab_last_grouping_summary", None),
+            grouping_summary=last_grouping_summary,
             health=health_payload,
             intake_extensions=app.config["FAB_LOCAL_INTAKE_EXTENSIONS"],
             intake_paths=app.config["FAB_LOCAL_INTAKE_PATHS"],
@@ -5106,32 +5262,6 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
     def hai_status_api():
         return jsonify(hai_connector().status())
 
-    @app.get("/api/cloud/status")
-    def cloud_status_api():
-        runtime_path = config.get("fab_ngrok_runtime_path")
-        result = LocalCloudAccessService(
-            project_root=Path(__file__).resolve().parents[2],
-            runtime_path=Path(str(runtime_path)) if runtime_path else None,
-            api_token_configured=bool(token),
-            shared_inspector_url=config.get("fab_ngrok_shared_inspector_url"),
-        ).summarize()
-        if maintenance_mode:
-            result.update({
-                "status": "disabled_for_maintenance",
-                "active": False,
-                "publicUrl": None,
-                "haiManifestUrl": None,
-                "maintenanceMode": True,
-                "nextAction": (
-                    "Complete or cancel local recovery and restart FAB in standard mode "
-                    "before enabling cloud access."
-                ),
-                "externalSubmission": "not_executed",
-            })
-        else:
-            result["maintenanceMode"] = False
-        return jsonify(result)
-
     @app.post("/api/hai/commands/plan")
     def hai_command_plan_api():
         payload = request.get_json(silent=True) or {}
@@ -5169,6 +5299,8 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             "execution_indeterminate",
             "idempotency_conflict",
             "previously_failed",
+            "blocked",
+            "needs_review",
         }:
             status_code = 409
         else:
@@ -5345,7 +5477,29 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             document_id,
             actor=str(payload.get("actor") or "local_api"),
         )
-        return jsonify(result), 200 if result.get("success") else 409
+        if result.get("success"):
+            response = {
+                "success": True,
+                "status": "archived",
+                "documentId": document_id,
+                "postMoveVerified": True,
+                "externalSubmission": "executed",
+                "deletion": "not_performed",
+            }
+            audit_event_id = result.get("auditEventId")
+            if isinstance(audit_event_id, int) and not isinstance(audit_event_id, bool):
+                response["auditEventId"] = audit_event_id
+            return jsonify(response), 200
+        external_submission = result.get("externalSubmission")
+        if external_submission not in {"not_executed", "unknown"}:
+            external_submission = "unknown"
+        return jsonify({
+            "success": False,
+            "status": "blocked",
+            "documentId": document_id,
+            "reasons": ["Archive did not complete. Review the audit record."],
+            "externalSubmission": external_submission,
+        }), 409
 
     @app.get("/api/workflows")
     def workflow_runs_api():
@@ -5578,8 +5732,15 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         close_pack_path = request.args.get("closePackPath") or request.args.get("closePackFilename")
         try:
             return jsonify(LocalClosePackService(ledger, config).inspect_pack(str(close_pack_path or "")))
+        except ValueError:
+            return jsonify({
+                "success": False,
+                "status": "invalid",
+                "error": "The close pack could not be inspected. Verify the selected file and try again.",
+            }), 400
         except Exception as exc:
-            return jsonify({"success": False, "status": "invalid", "error": str(exc)}), 400
+            error = _log_unexpected_api_error(app, "inspect_close_pack", exc)
+            return jsonify({"success": False, "status": "failed", "error": error}), 500
 
     @app.post("/close-packs/prepare")
     def prepare_close_pack_form():
@@ -5721,8 +5882,8 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
                 sources=payload.get("sources"),
                 actor=payload.get("actor") or "api",
             )
-        except ValueError as exc:
-            return jsonify({"error": str(exc)}), 400
+        except ValueError:
+            return jsonify({"error": VENDOR_RULE_CONFLICT_MESSAGE}), 400
         return jsonify(result)
 
     @app.post("/sources/sync")
@@ -7333,7 +7494,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         payload = request.get_json(silent=True) or {}
         result = LocalExportAttemptService(ledger, config).prepare_from_routing_attempt(
             routing_attempt_id,
-            actor=payload.get("actor") or "api",
+            actor=_request_audit_actor(payload.get("actor"), "api"),
         )
         status_code = 404 if result.get("status") == "not_found" else 200
         return jsonify(result), status_code
@@ -7354,7 +7515,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         payload = request.get_json(silent=True) or {}
         result = LocalExportAttemptService(ledger, config).approve_attempt(
             export_attempt_id,
-            actor=payload.get("actor") or "api",
+            actor=_request_audit_actor(payload.get("actor"), "api"),
             confirmation=payload.get("confirmation"),
             resolution=payload.get("resolution"),
         )
@@ -7378,7 +7539,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         payload = request.get_json(silent=True) or {}
         result = LocalExportAttemptService(ledger, config).reject_attempt(
             export_attempt_id,
-            actor=payload.get("actor") or "api",
+            actor=_request_audit_actor(payload.get("actor"), "api"),
             confirmation=payload.get("confirmation"),
             resolution=payload.get("resolution"),
         )
@@ -7402,7 +7563,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         payload = request.get_json(silent=True) or {}
         result = LocalExportAttemptService(ledger, config).regenerate_attempt(
             export_attempt_id,
-            actor=payload.get("actor") or "api",
+            actor=_request_audit_actor(payload.get("actor"), "api"),
         )
         status_code = 200 if result.get("success") else 400
         if result.get("status") == "not_found":
@@ -7444,7 +7605,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             status=payload.get("status"),
             external_id=payload.get("externalId") or payload.get("external_id"),
             result=payload.get("result"),
-            actor=payload.get("actor") or "api",
+            actor=_request_audit_actor(payload.get("actor"), "api"),
             confirmation=payload.get("confirmation"),
         )
         status_code = 200 if result.get("success") else 400
@@ -7458,7 +7619,33 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             export_attempt_id,
             status=request.form.get("status") or "executed",
             external_id=request.form.get("externalId") or None,
-            result={"source": "dashboard"},
+            result={"artifactSha256": request.form.get("artifactSha256")},
+            actor="dashboard",
+            confirmation=request.form.get("confirmation"),
+        )
+        return redirect(url_for("dashboard_page", _anchor="exports"))
+
+    @app.post("/api/export-attempts/<int:export_attempt_id>/wave-observation")
+    def record_unknown_wave_observation(export_attempt_id: int):
+        payload = request.get_json(silent=True) or {}
+        result = LocalExportAttemptService(ledger, config).record_unknown_wave_observation(
+            export_attempt_id,
+            external_id=payload.get("externalId") or payload.get("external_id"),
+            verified_fields=payload.get("verifiedFields") or payload.get("verified_fields"),
+            actor=_request_audit_actor(payload.get("actor"), "api"),
+            confirmation=payload.get("confirmation"),
+        )
+        status_code = 200 if result.get("success") else 400
+        if result.get("status") == "not_found":
+            status_code = 404
+        return jsonify(result), status_code
+
+    @app.post("/export-attempts/<int:export_attempt_id>/wave-observation")
+    def record_unknown_wave_observation_form(export_attempt_id: int):
+        session["fab_last_export_summary"] = LocalExportAttemptService(ledger, config).record_unknown_wave_observation(
+            export_attempt_id,
+            external_id=request.form.get("externalId"),
+            verified_fields=request.form.getlist("verifiedFields"),
             actor="dashboard",
             confirmation=request.form.get("confirmation"),
         )
@@ -7611,11 +7798,23 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
                 source=request.form.get("source") or "manual_upload",
                 filename=request.form.get("filename") or None,
             )
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            session["fab_last_bank_import_summary"] = {
+                "success": False,
+                "status": "invalid",
+                "error": f"Could not import bank transactions: {exc}",
+                "rowsSeen": 0,
+                "rowsImported": 0,
+                "duplicates": 0,
+                "skipped": 0,
+                "externalSubmission": "not_executed",
+            }
         except Exception as exc:
+            error = _log_unexpected_api_error(app, "import_bank_transactions_form", exc)
             session["fab_last_bank_import_summary"] = {
                 "success": False,
                 "status": "failed",
-                "error": f"Could not import bank transactions: {exc}",
+                "error": f"Could not import bank transactions. {error}",
                 "rowsSeen": 0,
                 "rowsImported": 0,
                 "duplicates": 0,
@@ -7712,6 +7911,12 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             reconciliation_match_id,
             status=status,
             resolution=payload.get("resolution"),
+            actor=(
+                f"local_{g.fab_api_principal}"
+                if getattr(g, "fab_api_principal", None) in {"operator", "hai"}
+                else "local_operator_session"
+            ),
+            request_id=getattr(g, "fab_request_id", None),
         )
         status_code = 404 if result.get("status") == "not_found" else 200
         if result.get("status") == "invalid_status":
@@ -7729,6 +7934,12 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             reconciliation_match_id,
             status=status,
             resolution=f"Resolved from FAB dashboard as {status}.",
+            actor=(
+                f"local_{g.fab_api_principal}"
+                if getattr(g, "fab_api_principal", None) in {"operator", "hai"}
+                else "local_operator_session"
+            ),
+            request_id=getattr(g, "fab_request_id", None),
         )
         if not result.get("success"):
             return jsonify(result), {"not_found": 404, "invalid_status": 400}.get(result.get("status"), 409)
@@ -7763,7 +7974,8 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         except ValueError as exc:
             return jsonify({"success": False, "status": "blocked", "error": str(exc)}), 409
         except Exception as exc:
-            return jsonify({"success": False, "status": "failed", "error": str(exc)}), 500
+            error = _log_unexpected_api_error(app, "create_backup", exc)
+            return jsonify({"success": False, "status": "failed", "error": error}), 500
 
     @app.post("/backups/create")
     def create_backup_form():
@@ -7773,11 +7985,18 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
                 require_complete_source_evidence=True,
                 actor="fab_local_dashboard",
             )
+        except ValueError as exc:
+            session["fab_last_backup_summary"] = {
+                "success": False,
+                "status": "blocked",
+                "error": str(exc),
+            }
         except Exception as exc:
+            error = _log_unexpected_api_error(app, "create_backup_form", exc)
             session["fab_last_backup_summary"] = {
                 "success": False,
                 "status": "failed",
-                "error": str(exc),
+                "error": error,
             }
         return redirect(url_for("dashboard_page", _anchor="backups"))
 
@@ -7786,8 +8005,15 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         backup_path = request.args.get("backupPath") or request.args.get("backupFilename")
         try:
             return jsonify(LocalBackupService(ledger, config).inspect_backup(str(backup_path or "")))
+        except ValueError:
+            return jsonify({
+                "success": False,
+                "status": "invalid",
+                "error": "The backup could not be inspected. Verify that it is listed and try again.",
+            }), 400
         except Exception as exc:
-            return jsonify({"success": False, "status": "invalid", "error": str(exc)}), 400
+            error = _log_unexpected_api_error(app, "inspect_backup", exc)
+            return jsonify({"success": False, "status": "failed", "error": error}), 500
 
     @app.get("/api/backups/restore-plan")
     def plan_backup_restore():
@@ -7797,13 +8023,21 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
                 str(backup_path or ""),
                 restore_mode=str(request.args.get("restoreMode") or RESTORE_MODE_LEDGER_ONLY),
             ))
-        except Exception as exc:
+        except ValueError:
             return jsonify({
                 "success": False,
                 "status": "invalid",
-                "error": str(exc),
+                "error": "The restore plan could not be prepared. Verify the selected backup and try again.",
                 "externalSubmission": "not_executed",
             }), 400
+        except Exception as exc:
+            error = _log_unexpected_api_error(app, "plan_backup_restore", exc)
+            return jsonify({
+                "success": False,
+                "status": "failed",
+                "error": error,
+                "externalSubmission": "not_executed",
+            }), 500
 
     @app.post("/api/backups/restore")
     def restore_backup():
@@ -7815,8 +8049,15 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
                 restore_mode=str(payload.get("restoreMode") or RESTORE_MODE_LEDGER_ONLY),
                 actor=str(payload.get("actor") or "fab_local_api")[:200],
             )
+        except ValueError:
+            return jsonify({
+                "success": False,
+                "status": "failed",
+                "error": "The restore request was rejected. Check the restore plan and confirmation, then try again.",
+            }), 400
         except Exception as exc:
-            return jsonify({"success": False, "status": "failed", "error": str(exc)}), 400
+            error = _log_unexpected_api_error(app, "restore_backup", exc)
+            return jsonify({"success": False, "status": "failed", "error": error}), 500
         status_code = 200 if result.get("success") else (
             423 if result.get("status") in {"blocked", "worker_active"} else 400
         )
@@ -7831,11 +8072,18 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
                 restore_mode=str(request.form.get("restoreMode") or RESTORE_MODE_LEDGER_ONLY),
                 actor="fab_local_dashboard",
             )
-        except Exception as exc:
+        except ValueError as exc:
             session["fab_last_backup_summary"] = {
                 "success": False,
                 "status": "failed",
                 "error": str(exc),
+            }
+        except Exception as exc:
+            error = _log_unexpected_api_error(app, "restore_backup_form", exc)
+            session["fab_last_backup_summary"] = {
+                "success": False,
+                "status": "failed",
+                "error": error,
             }
         return redirect(url_for("dashboard_page", _anchor="backups"))
 
@@ -8300,12 +8548,15 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         status = str(request.form.get("status") or "").strip()
         if status not in RULE_RESOLUTION_STATUSES:
             status = "suggested"
-        rule = ledger.update_vendor_category_rule_status(
-            rule_id,
-            status,
-            resolution=request.form.get("resolution") or None,
-            actor="local_dashboard",
-        )
+        try:
+            rule = ledger.update_vendor_category_rule_status(
+                rule_id,
+                status,
+                resolution=request.form.get("resolution") or None,
+                actor="local_dashboard",
+            )
+        except ValueError:
+            return jsonify({"success": False, "error": VENDOR_RULE_CONFLICT_MESSAGE}), 400
         if rule:
             ledger.record_audit_event({
                 "action": "local_dashboard.vendor_category_rule.status_changed",
@@ -8445,6 +8696,10 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
                     "Shared compliance control-center projection failed (%s)",
                     type(exc).__name__,
                 )
+                resources["compliance"] = {
+                    "ok": False,
+                    "error": "FAB resource could not be read",
+                }
             try:
                 shared_category_intents = fab_category_intents(
                     ledger,

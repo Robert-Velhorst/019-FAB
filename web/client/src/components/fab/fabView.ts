@@ -52,6 +52,36 @@ export function humanize(value: unknown): string {
   return raw.replace(/[._-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+export function commandOutcome(value: unknown): "success" | "attention" | "failure" {
+  const result = asRecord(value);
+  const nested = asRecord(result.result);
+  if (result.success === false || nested.success === false) return "failure";
+
+  const status = text(result.status, text(nested.status, "")).toLowerCase();
+  if (["failed", "failure", "error", "blocked", "unsupported", "invalid", "cancelled", "canceled"].includes(status)) {
+    return "failure";
+  }
+  if ([
+    "already_running",
+    "already_generated",
+    "attention_required",
+    "completed_with_errors",
+    "deferred",
+    "disabled",
+    "needs_review",
+    "prepared_needs_review",
+    "retry_deferred",
+  ].includes(status)) {
+    return "attention";
+  }
+  return "success";
+}
+
+export function commandDetails(value: unknown): FabRecord {
+  const result = asRecord(value);
+  return { ...result, ...asRecord(result.result) };
+}
+
 export function compactHumanize(value: unknown): string {
   const raw = text(value, "Unknown");
   return raw.replace(/[._-]+/g, " ").replace(/^\w/, (letter) => letter.toUpperCase());
@@ -107,7 +137,7 @@ export function statusTone(value: unknown): "good" | "warn" | "bad" | "neutral" 
   const status = text(value, "").toLowerCase();
   if (["ready", "ready_to_archive", "ok", "healthy", "completed", "connected", "reconciled", "idle", "current", "valid", "complete", "created", "active"].includes(status)) return "good";
   if (["blocked", "blocked_by_review", "source_file_unavailable", "failed", "error", "disconnected", "high", "unavailable", "invalid", "invalid_state", "invalid_runtime", "wrong_business", "incompatible"].includes(status)) return "bad";
-  if (["attention", "needs_attention", "needs_auth", "needs_authorization", "needs_receipt_executor", "authentication_required", "not_connected", "not_running", "stale", "needs_processing", "needs_review", "refresh_wave_readback", "medium", "due", "deferred", "prepared_disabled", "not_configured", "supervision_required", "incomplete", "legacy_ledger_only"].includes(status)) return "warn";
+  if (["attention", "needs_attention", "needs_auth", "needs_authorization", "needs_receipt_executor", "authentication_required", "not_connected", "not_running", "stale", "needs_processing", "needs_review", "refresh_wave_readback", "medium", "due", "deferred", "prepared_disabled", "not_configured", "supervision_required", "outcome_unknown", "incomplete", "legacy_ledger_only"].includes(status)) return "warn";
   if (["running", "syncing", "candidate", "pending", "manifest_valid", "locate_or_create_transaction", "upload_and_verify_attachment"].includes(status)) return "info";
   return "neutral";
 }
