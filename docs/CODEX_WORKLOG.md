@@ -1280,3 +1280,5 @@ describe Ngrok document the former implementation and its verification only.
 - Preserved concurrent remote HAI replay-classification commit 3d58a92 through
   a non-force rebase; the only conflict was adjacent work-log entries, both
   retained. The combined HAI/summary check then passed 29 tests and 17 subtests.
+
+- Hosted Linux validation of bank exposure aggregation found SQLite returning NULL for an overflowing SUM. Treat a non-numeric aggregate as incomplete before calling `math.isfinite`; amounts remain undisclosed in that case. The existing real-database overflow regression passes locally (two tests and two subtests); fresh Linux CI remains the platform-specific acceptance gate.

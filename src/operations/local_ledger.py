@@ -5843,7 +5843,9 @@ class LocalOperationsLedger:
         with self._connection() as connection:
             rows = connection.execute(query, params).fetchall()
         complete = all(
-            not row["missing_amount_count"] and math.isfinite(row["unreconciled_amount"])
+            not row["missing_amount_count"]
+            and isinstance(row["unreconciled_amount"], (int, float))
+            and math.isfinite(row["unreconciled_amount"])
             for row in rows
         )
         return {
