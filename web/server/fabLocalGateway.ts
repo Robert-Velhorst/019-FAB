@@ -154,7 +154,7 @@ const READ_PATHS = {
   metrics: "/api/dashboard",
   notifications: "/api/notifications?limit=10",
   settings: "/api/settings",
-  bankTransactions: "/api/bank-transactions?limit=250",
+  bankTransactions: "/api/bank-transactions?view=summary",
   reconciliation: "/api/reconciliation?limit=10",
   activity: "/api/audit?limit=12",
   sources: "/api/sources?limit=50",
@@ -501,12 +501,6 @@ async function buildFabControlCenter(generation: number): Promise<FabControlCent
   const registeredSources = arrayValue(resources.sources?.sources);
   const workflowRuns = arrayValue(resources.workflows?.workflowRuns);
   const reviewWorkItems = arrayValue(resources.reviewQueue?.workItems);
-  const bankTransactions = arrayValue(resources.bankTransactions?.bankTransactions);
-  const unreconciledBankTransactions = bankTransactions.filter((item) => ![
-    "approved",
-    "reconciled",
-    "ignored",
-  ].includes(stringValue(item.reconciliation_status || item.reconciliationStatus).toLowerCase()));
   const bankStatementImports = arrayValue(resources.bankTransactions?.bankStatementImports);
   const haiAllowedCommandIds = stringArray(resources.haiStatus?.allowedCommandIds);
   const sourceConnections = arrayValue(settings.sources).map((source) => {
@@ -588,7 +582,7 @@ async function buildFabControlCenter(generation: number): Promise<FabControlCent
         ? latestDate(registeredSources.map((source) => source.last_sync_at || source.lastSyncAt || source.updated_at || source.updatedAt))
         : null,
       unreconciledAmountByCurrency: resourceStates.bankTransactions.state === "live" || resourceStates.bankTransactions.state === "stale"
-        ? amountByCurrency(unreconciledBankTransactions)
+        ? completeBankAmounts(resources.bankTransactions?.summary)
         : null,
       oldestReviewAgeHours: resourceStates.reviewQueue.state === "live" || resourceStates.reviewQueue.state === "stale"
         ? reviewSummaryAgeHours(reviewSummary, checkedAt) ?? oldestReviewAgeHours(reviewWorkItems, checkedAt)
@@ -1349,14 +1343,15 @@ function latestDate(values: unknown[]): string | null {
   return valid[0]?.raw || null;
 }
 
-function amountByCurrency(transactions: JsonRecord[]): Record<string, number> {
-  return transactions.reduce<Record<string, number>>((totals, transaction) => {
-    const amount = nullableNumber(transaction.amount);
-    if (amount === null) return totals;
-    const currency = stringValue(transaction.currency, "UNKNOWN").toUpperCase();
-    totals[currency] = Number(((totals[currency] || 0) + Math.abs(amount)).toFixed(2));
-    return totals;
-  }, {});
+function completeBankAmounts(value: unknown): Record<string, number> | null {
+  const summary = asRecord(value);
+  const amounts = asRecord(summary?.unreconciledAmountByCurrency);
+  if (summary?.complete !== true || !amounts) return null;
+  if (Object.keys(amounts).some(currency => !/^(?:[A-Z]{3}|UNKNOWN)$/.test(currency))) return null;
+  if (Object.values(amounts).some(amount => typeof amount !== "number" || !Number.isFinite(amount) || amount < 0)) {
+    return null;
+  }
+  return Object.fromEntries(Object.entries(amounts)) as Record<string, number>;
 }
 
 function oldestReviewAgeHours(workItems: JsonRecord[], checkedAt: string): number | null {

@@ -1,3 +1,5 @@
+import json
+import math
 from typing import Any, Dict, Optional
 
 import requests
@@ -5,6 +7,13 @@ import requests
 from src.document_handling.source_identity import source_document_id
 from src.operations.local_ledger import LocalOperationsLedger
 from src.operations.local_runtime import build_local_operations_ledger
+
+
+def _finite_json_number(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ValueError("FAB operations response numbers must be finite")
+    return parsed
 
 
 class OperationsClient:
@@ -23,6 +32,7 @@ class OperationsClient:
         "reconciliation_matches": "/api/fab/operations/reconciliation-matches",
         "audit_events": "/api/fab/operations/audit-events",
     }
+    MAX_RESPONSE_BYTES = 1024 * 1024
 
     def __init__(self, config: Dict[str, Any], logger=None):
         self.config = config or {}
@@ -72,9 +82,9 @@ class OperationsClient:
     def _positive_float(value: Any, default: float) -> float:
         try:
             parsed = float(value)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return default
-        return parsed if parsed > 0 else default
+        return min(parsed, 120.0) if math.isfinite(parsed) and parsed > 0 else default
 
     def _build_local_ledger(self) -> Optional[LocalOperationsLedger]:
         return build_local_operations_ledger(self.config, on_error=self._log_warning)
@@ -104,6 +114,7 @@ class OperationsClient:
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
 
+        response = None
         try:
             response = self.session.request(
                 method,
@@ -111,19 +122,40 @@ class OperationsClient:
                 json=payload,
                 headers=headers,
                 timeout=self.timeout,
+                allow_redirects=False,
+                stream=True,
             )
+            if 300 <= response.status_code < 400:
+                raise ValueError("FAB operations redirects are not allowed")
             response.raise_for_status()
-            data = response.json() if response.content else {"success": True}
+            content = bytearray()
+            for chunk in response.iter_content(chunk_size=64 * 1024):
+                if len(content) + len(chunk) > self.MAX_RESPONSE_BYTES:
+                    raise ValueError("FAB operations response exceeds the 1 MiB limit")
+                content.extend(chunk)
+            data = json.loads(content, parse_float=_finite_json_number, parse_constant=_finite_json_number) if content else {"success": True}
+            if not isinstance(data, dict):
+                raise ValueError("FAB operations response must be a JSON object")
+            if "success" in data:
+                if not isinstance(data["success"], bool):
+                    raise ValueError("FAB operations response success must be a boolean")
+                if not data["success"]:
+                    raise ValueError("FAB operations service reported an unsuccessful operation")
+            if "id" in data and self._result_id({"data": data}) is None:
+                raise ValueError("FAB operations response id must be a positive signed 64-bit integer")
             return {"enabled": True, "status": "success", "data": data}
         except requests.RequestException as exc:
             self._log_warning(f"FAB operations request failed for {endpoint_key}: {exc}")
             return {"enabled": True, "status": "failed", "error": str(exc)}
-        except ValueError as exc:
-            self._log_warning(f"FAB operations response was not JSON for {endpoint_key}: {exc}")
+        except (ValueError, RecursionError) as exc:
+            self._log_warning(f"FAB operations response was invalid for {endpoint_key}: {exc}")
             return {"enabled": True, "status": "failed", "error": str(exc)}
         except (TypeError, OverflowError) as exc:
             self._log_warning(f"FAB operations payload was not JSON serializable for {endpoint_key}: {exc}")
             return {"enabled": True, "status": "failed", "error": str(exc)}
+        finally:
+            if response is not None:
+                response.close()
 
     def _create_locally(
         self,
@@ -160,12 +192,17 @@ class OperationsClient:
     @staticmethod
     def _result_id(result: Dict[str, Any]) -> Optional[int]:
         data = result.get("data") if isinstance(result, dict) else None
-        if isinstance(data, dict) and data.get("id") is not None:
-            try:
-                return int(data["id"])
-            except (TypeError, ValueError):
+        if not isinstance(data, dict):
+            return None
+        value = data.get("id")
+        if isinstance(value, str):
+            value = value.strip()
+            if not 1 <= len(value) <= 19 or not value.isascii() or not value.isdecimal():
                 return None
-        return None
+            value = int(value)
+        if type(value) is not int or not 0 < value <= 2 ** 63 - 1:
+            return None
+        return value
 
     def create_workflow_run(self, trigger_source: str, metadata: Optional[Dict[str, Any]] = None) -> Optional[int]:
         result = self._request(

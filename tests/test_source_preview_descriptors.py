@@ -158,3 +158,67 @@ def test_binary_source_bytes_survive_windows_descriptor_opening(tmp_path):
     assert response.status_code == 200
     assert response.data == data
     assert response.headers["X-FAB-Source-SHA256"] == hashlib.sha256(data).hexdigest()
+
+
+def test_detail_preview_rejects_unhashed_or_changed_text(tmp_path):
+    source = tmp_path / "receipt.txt"
+    original = b"original financial evidence"
+    source.write_bytes(original)
+    document = {"storage_path": str(source), "mime_type": "text/plain"}
+    assert local_api._document_source_preview(document)["text"] is None
+    document["content_sha256"] = hashlib.sha256(original).hexdigest()
+    source.write_bytes(b"altered financial evidence")
+    preview = local_api._document_source_preview(document)
+    assert preview["text"] is None
+    assert "integrity check" in preview["status"]
+
+
+def test_rendered_detail_page_never_exposes_changed_source_bytes(retained_source):
+    client, route, source, data = retained_source
+    detail_route = "/documents/" + route.split("/")[-2]
+    original = client.get(detail_route)
+    assert original.status_code == 200
+    assert data.strip() in original.data
+    source.write_bytes(b"TAMPERED-PRIVATE-SOURCE-BYTES")
+    changed = client.get(detail_route)
+    assert changed.status_code == 200
+    assert b"TAMPERED-PRIVATE-SOURCE-BYTES" not in changed.data
+    assert b"failed its integrity check" in changed.data
+
+
+def test_detail_preview_hashes_beyond_the_excerpt_and_preserves_unicode(tmp_path):
+    source = tmp_path / "receipt.txt"
+    original = ("\u20ac" * 40 + "TAIL").encode("utf-8")
+    source.write_bytes(original)
+    document = {
+        "storage_path": str(source), "mime_type": "text/plain",
+        "content_sha256": hashlib.sha256(original).hexdigest(),
+    }
+    preview = local_api._document_source_preview(document, character_limit=20)
+    assert preview["text"] == "\u20ac" * 20 + "\n... truncated ..."
+    assert "verified" in preview["status"].lower()
+    source.write_bytes(original[:-1] + b"X")
+    assert local_api._document_source_preview(document, character_limit=20)["text"] is None
+
+
+def test_api_returns_verified_chunks_without_joining_the_entire_file(tmp_path):
+    data = b"x" * (1024 * 1024) + b"end"
+    source = tmp_path / "large.txt"
+    source.write_bytes(data)
+    path = str(tmp_path / "ledger.sqlite3")
+    ledger = LocalOperationsLedger(path)
+    document_id = ledger.register_document({
+        "source": "manual", "sourceDocumentId": "chunked-preview", "storagePath": str(source),
+        "mimeType": "text/plain", "contentSha256": hashlib.sha256(data).hexdigest(),
+    })
+    app = local_api.create_app({"fab_local_ledger_path": path})
+    response = app.test_client().get(f"/api/documents/{document_id}/source", buffered=False)
+    try:
+        assert response.status_code == 200
+        assert response.is_streamed
+        assert response.content_length == len(data)
+        chunks = list(response.response)
+        assert [len(chunk) for chunk in chunks] == [1024 * 1024, 3]
+        assert b"".join(chunks) == data
+    finally:
+        response.close()

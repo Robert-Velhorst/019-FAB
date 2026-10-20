@@ -289,6 +289,11 @@ class LocalHaiConnector:
             "idempotencyField": "requestId",
             "idempotencyPolicy": "single_execution_fail_closed",
             "executionPolicy": "explicit_allowlist",
+            "resultLimits": {
+                "maxJsonBytes": MAX_HAI_PAYLOAD_BYTES,
+                "maxDepth": MAX_HAI_PAYLOAD_DEPTH,
+                "maxValues": MAX_HAI_PAYLOAD_VALUES,
+            },
             "commands": [
                 command.as_dict(
                     self.enabled and command.command_id in self.allowed_command_ids
@@ -409,6 +414,17 @@ class LocalHaiConnector:
             )
         except ValueError as exc:
             return self._blocked_plan(command.command_id, "invalid", str(exc), command=command)
+        return self._plan_normalized(
+            command, normalized_payload, require_executor=require_executor,
+        )
+
+    def _plan_normalized(
+        self,
+        command: HaiCommand,
+        normalized_payload: Dict[str, Any],
+        *,
+        require_executor: bool = True,
+    ) -> Dict[str, Any]:
         if self.maintenance_mode:
             return self._blocked_plan(
                 command.command_id,
@@ -482,7 +498,7 @@ class LocalHaiConnector:
                 "requestId": request_id,
             }
 
-        plan = self.plan(command_id, normalized_payload, require_executor=False)
+        plan = self._plan_normalized(command, normalized_payload, require_executor=False)
         if plan.get("status") != "ready":
             return {
                 **plan,
@@ -493,7 +509,7 @@ class LocalHaiConnector:
         if previous:
             return previous
 
-        plan = self.plan(command_id, normalized_payload)
+        plan = self._plan_normalized(command, normalized_payload)
         if plan.get("status") != "ready":
             return {
                 **plan,
@@ -589,7 +605,17 @@ class LocalHaiConnector:
                     "externalSubmission": external_submission,
                 }
 
-            if not isinstance(result, dict):
+            try:
+                if not isinstance(result, dict):
+                    raise ValueError("Executor result must be an object.")
+                if "success" in result and not isinstance(result["success"], bool):
+                    raise ValueError("Executor success must be a boolean.")
+                if "status" in result and (
+                    not isinstance(result["status"], str) or not result["status"].strip()
+                ):
+                    raise ValueError("Executor status must be a non-empty string.")
+                result = _capture_hai_payload(result)
+            except ValueError:
                 external_submission = _indeterminate_external_submission(command)
                 audit_event_id = self.ledger.record_audit_event({
                     "action": "hai.command.failed",
@@ -601,6 +627,7 @@ class LocalHaiConnector:
                         "actor": actor,
                         "payload": normalized_payload,
                         "errorType": "invalid_executor_result",
+                        "errorCode": "invalid_executor_result",
                         "externalSubmission": external_submission,
                     },
                 })
@@ -717,7 +744,11 @@ class LocalHaiConnector:
             "requestId": request_id,
             "commandId": details.get("commandId") or command_id,
             "error": "This requestId already has a failed execution outcome.",
-            "errorCode": "executor_failed",
+            "errorCode": details.get("errorCode") or (
+                "invalid_executor_result"
+                if details.get("errorType") == "invalid_executor_result"
+                else "executor_failed"
+            ),
             "errorType": details.get("errorType"),
             "auditEventId": failed.get("id"),
             "externalSubmission": _valid_external_submission(

@@ -156,6 +156,37 @@ Local deployment is suitable for development, testing, and running the solution 
     sudo systemctl status bookkeeping.service
     ```
 
+### Optional Full Web Server: MySQL Upgrades
+
+The standalone Windows and VM bookkeeping profiles use the authoritative
+SQLite ledger; they do not need a MySQL service. These steps apply only when
+the optional full web server is deliberately configured with `DATABASE_URL`.
+
+1. Stop all processes writing to that MySQL database. Confirm the target host
+   and database name without logging the credential-bearing URL.
+2. Back up the complete database and verify restoration into an isolated test
+   database. Keep the compatible application version and recovery instructions.
+3. Review the checked-in SQL and journal under `web/drizzle/`. Test the upgrade
+   against a restored copy before applying it to the real database.
+4. Supply `DATABASE_URL` securely to the migration process and run
+   `pnpm --dir web run db:migrate` from the repository root. The matching Windows
+   executable is `pnpm.cmd`. This command applies tracked migrations only.
+5. Confirm the migration completed, the schema/journal agree, and the application
+   can read/write its expected records before resuming normal traffic.
+
+`db:generate` produces candidate SQL for developer review. The legacy `db:push`
+still generates and applies SQL and is development-only, not a deployment
+command. Do not run generation against a production checkout during deployment.
+MySQL DDL can commit outside a transaction; a failed migration is not proof of
+rollback. Keep writers stopped, investigate the actual schema and migration
+journal, and reconcile or restore the verified backup before retrying. FAB does
+not provide an automatic down-migration command.
+
+CI uses an isolated MySQL 8.4 database named `fab_test`, applies tracked
+migrations twice to check rerun behavior, then runs the MySQL persistence and
+transaction integration suite. That evidence does not replace backup/restore
+and upgrade acceptance for an operator's populated database.
+
 ## 2. Docker Deployment
 
 The supported container deployment is the repository's three-service Compose stack: authenticated API, worker, and production dashboard. It uses named data/output volumes, mounts intake read-only, runs both images as non-root users, and publishes only to host loopback.
