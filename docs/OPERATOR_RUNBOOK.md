@@ -1,5 +1,37 @@
 # Operator Runbook
 
+## Optional Remote Telemetry Identity Safety
+
+Standalone bookkeeping keeps SQLite authoritative; the optional web operations
+mirror is disabled by default. Schema v3 adds destination-scoped remote identity
+links. Existing ledgers receive a verified pre-upgrade snapshot through the
+normal schema-upgrade flow. Preserve that snapshot and the compatible release
+before upgrading a real installation.
+
+Local IDs are never treated as remote IDs merely because their numbers match.
+Missing links defer remote updates and related-record writes, while local work
+continues and the audit trail records the deferral. Conflicting links are
+quarantined and require investigation; FAB does not automatically reassign them.
+Historical rows have no inferred links. Document re-registration can establish
+a link through the remote service's source-identity deduplication, but workflow
+and other legacy records require an explicit verified reconciliation plan.
+
+If the remote database is replaced or reset at the same address, change the
+non-secret `[operations] identity_scope` generation label before re-enabling
+mirroring. This prevents old links being used for a different database; FAB
+does not detect such a replacement automatically. Keep mirroring disabled
+until remote identity/readback and recovery have been verified. An unknown
+create outcome must be reconciled before replaying a non-idempotent operation.
+There is no automatic historical-backfill or exactly-once delivery guarantee.
+
+Developers can run `python scripts/rehearse_operations_identity.py --run` after
+building the web server. It requires an already-cached `mysql:8.4` image and
+creates a uniquely named, loopback-only, memory-limited disposable container,
+temporary SQLite ledger, fresh synthetic credentials, and a temporary full web
+server. It checks real HTTP updates and MySQL review/routing references across
+deliberately colliding local/remote IDs and a client restart. It does not use
+configured accounts, provider data, persistent Docker volumes, or a live ledger.
+
 ## Start and inspect
 
 ```powershell

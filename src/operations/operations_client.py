@@ -1,5 +1,7 @@
+import hashlib
 import json
 import math
+import sqlite3
 from typing import Any, Dict, Optional
 
 import requests
@@ -33,6 +35,19 @@ class OperationsClient:
         "audit_events": "/api/fab/operations/audit-events",
     }
     MAX_RESPONSE_BYTES = 1024 * 1024
+    REFERENCE_RESOURCES = {
+        "documentId": "documents",
+        "duplicateOfDocumentId": "documents",
+        "workflowRunId": "workflow_runs",
+        "routingAttemptId": "routing_attempts",
+        "bookkeepingRecordId": "bookkeeping_records",
+    }
+    AUDIT_RESOURCES = {
+        "bookkeeping_document": "documents", "document": "documents",
+        "workflow_run": "workflow_runs", "review_item": "review_items",
+        "routing_attempt": "routing_attempts", "export_attempt": "export_attempts",
+        "reconciliation_match": "reconciliation_matches", "bookkeeping_record": "bookkeeping_records",
+    }
 
     def __init__(self, config: Dict[str, Any], logger=None):
         self.config = config or {}
@@ -69,6 +84,15 @@ class OperationsClient:
             self.endpoints.update(configured_endpoints)
         self.session = requests.Session()
         self.local_ledger = self._build_local_ledger()
+        local_enabled = self.config.get("fab_local_ledger_enabled", self.config.get("operations_local_ledger_enabled"))
+        self.local_required = (
+            bool(self.config.get("fab_local_ledger_path") or self.config.get("operations_ledger_path"))
+            if local_enabled is None else self._as_bool(local_enabled)
+        )
+        self.destination_key = hashlib.sha256(json.dumps(
+            {"baseUrl": self.base_url, "endpoints": self.endpoints,
+             "instanceScope": str(self.config.get("fab_operations_identity_scope") or self.config.get("operations_identity_scope") or "")}, sort_keys=True,
+        ).encode("utf-8")).hexdigest()
 
     @staticmethod
     def _as_bool(value: Any) -> bool:
@@ -105,6 +129,25 @@ class OperationsClient:
     ) -> Dict[str, Any]:
         if not self.enabled:
             return self._disabled()
+
+        try:
+            payload = dict(payload)
+            if self.local_required and not self.local_ledger:
+                raise ValueError("The authoritative local ledger is unavailable")
+            if self.local_ledger:
+                if resource_id is not None:
+                    resource_id = self._remote_identity(endpoint_key, resource_id)
+                for field, resource in self.REFERENCE_RESOURCES.items():
+                    if payload.get(field) is not None:
+                        payload[field] = self._remote_identity(resource, payload[field])
+                if endpoint_key == "audit_events":
+                    resource = self.AUDIT_RESOURCES.get(str(payload.get("entityType")))
+                    if resource and payload.get("entityId") is not None:
+                        payload["entityId"] = str(self._remote_identity(resource, payload["entityId"]))
+                    payload["details"] = {"localEvidence": payload.get("details") or {}, "localReferenceScope": self.destination_key}
+        except (ValueError, sqlite3.Error):
+            return {"enabled": True, "status": "deferred", "errorCode": "remote_identity_unavailable",
+                    "error": "Remote telemetry requires a verified identity link; local evidence is retained."}
 
         path = self.endpoints[endpoint_key]
         if resource_id is not None:
@@ -157,35 +200,101 @@ class OperationsClient:
             if response is not None:
                 response.close()
 
-    def _create_locally(
+    def _remote_identity(self, resource: str, local_id: Any) -> int:
+        normalized_id = self._result_id({"data": {"id": local_id}})
+        if normalized_id is None:
+            raise ValueError("Invalid local identity")
+        remote_id = self.local_ledger.get_remote_identity(self.destination_key, resource, normalized_id)
+        if remote_id is None:
+            raise ValueError("Remote identity is not established")
+        return remote_id
+
+    def _create_and_mirror(
         self,
+        endpoint_key: str,
         method_name: str,
         payload: Dict[str, Any],
-        preferred_id: Optional[int],
     ) -> Optional[int]:
         if not self.local_ledger:
+            if self.local_required:
+                self._log_warning("FAB authoritative local ledger is unavailable; telemetry was not submitted")
+                return None
+            return self._result_id(self._request("POST", endpoint_key, payload))
+        if any(payload.get(field) is not None and self._result_id({"data": {"id": payload[field]}}) is None
+               for field in self.REFERENCE_RESOURCES):
+            self._log_warning("FAB local telemetry reference is invalid; no record was created")
             return None
         try:
-            return getattr(self.local_ledger, method_name)(payload, preferred_id=preferred_id)
+            local_id = getattr(self.local_ledger, method_name)(payload)
         except Exception as exc:
             self._log_warning(f"FAB local operations ledger create failed for {method_name}: {exc}")
             return None
+        if not self.enabled:
+            return local_id
+        try:
+            link = self.local_ledger.get_remote_identity_link(self.destination_key, endpoint_key, local_id)
+            if link and link["status"] != "verified":
+                self._record_mirror_outcome(endpoint_key, local_id, {"status": "deferred", "errorCode": "remote_identity_conflict"})
+                return local_id
+            if link and endpoint_key != "documents":
+                return local_id
+            result = self._request("POST", endpoint_key, payload)
+            remote_id = self._result_id(result)
+            if remote_id is not None:
+                self.local_ledger.bind_remote_identity(self.destination_key, endpoint_key, local_id, remote_id)
+            elif result.get("status") == "success":
+                result = {"status": "failed", "errorCode": "remote_identity_missing_from_response"}
+            self._record_mirror_outcome(endpoint_key, local_id, result)
+        except (ValueError, sqlite3.Error):
+            self._log_warning("FAB remote identity could not be retained; local evidence remains authoritative")
+            self._record_mirror_outcome(endpoint_key, local_id, {"status": "failed", "errorCode": "remote_identity_conflict"})
+        return local_id
+
+    def _record_mirror_outcome(self, resource: str, local_id: int, result: Dict[str, Any]) -> None:
+        if not self.local_ledger or result.get("status") not in {"failed", "deferred"}:
+            return
+        try:
+            self.local_ledger.record_audit_event({
+                "action": "operations.remote." + result["status"],
+                "entityType": next((name for name, value in self.AUDIT_RESOURCES.items() if value == resource), resource),
+                "entityId": str(local_id),
+                "details": {"destinationKey": self.destination_key, "errorCode": result.get("errorCode", "remote_request_failed"),
+                            "externalSubmission": "not_executed" if result["status"] == "deferred" else "unknown"},
+            })
+        except (ValueError, sqlite3.Error):
+            self._log_warning("FAB remote telemetry failure audit could not be retained")
 
     def _update_locally(self, method_name: str, resource_id: int, payload: Dict[str, Any]) -> bool:
         if not self.local_ledger:
             return False
         try:
+            getter = "get_document_core" if method_name == "update_document" else "get_workflow_run"
+            if not getattr(self.local_ledger, getter)(resource_id):
+                return False
             getattr(self.local_ledger, method_name)(resource_id, payload)
             return True
         except Exception as exc:
             self._log_warning(f"FAB local operations ledger update failed for {method_name}: {exc}")
             return False
 
+    def _update_and_mirror(self, resource: str, method: str, local_id: int, payload: Dict[str, Any]) -> Dict[str, Any]:
+        if (self._result_id({"data": {"id": local_id}}) is None
+                or any(payload.get(field) is not None and self._result_id({"data": {"id": payload[field]}}) is None
+                       for field in self.REFERENCE_RESOURCES)):
+            return {"enabled": self.enabled, "status": "failed", "errorCode": "invalid_local_identity"}
+        local_persisted = self._update_locally(method, local_id, payload)
+        if (self.local_required or self.local_ledger is not None) and not local_persisted:
+            return {"enabled": self.enabled, "status": "failed", "localLedger": False,
+                    "errorCode": "local_persistence_failed", "error": "Authoritative local update could not be retained."}
+        result = self._request("PATCH", resource, payload, local_id)
+        self._record_mirror_outcome(resource, local_id, result)
+        return self._local_result(local_persisted, result)
+
     @staticmethod
     def _local_result(local_persisted: bool, remote_result: Dict[str, Any]) -> Dict[str, Any]:
         if local_persisted and remote_result.get("status") == "skipped":
             return {"enabled": False, "status": "persisted_local", "localLedger": True}
-        if local_persisted and remote_result.get("status") == "failed":
+        if local_persisted and remote_result.get("status") in {"failed", "deferred", "success"}:
             return {**remote_result, "localLedger": True}
         return remote_result
 
@@ -205,34 +314,20 @@ class OperationsClient:
         return value
 
     def create_workflow_run(self, trigger_source: str, metadata: Optional[Dict[str, Any]] = None) -> Optional[int]:
-        result = self._request(
-            "POST",
-            "workflow_runs",
+        return self._create_and_mirror(
+            "workflow_runs", "create_workflow_run",
             {
                 "status": "running",
                 "triggerSource": trigger_source or "manual",
                 "metadata": metadata or {},
             },
         )
-        remote_id = self._result_id(result)
-        local_id = self._create_locally(
-            "create_workflow_run",
-            {
-                "status": "running",
-                "triggerSource": trigger_source or "manual",
-                "metadata": metadata or {},
-            },
-            remote_id,
-        )
-        return local_id or remote_id
 
     def update_workflow_run(self, workflow_run_id: Optional[int], **fields: Any) -> Dict[str, Any]:
         if workflow_run_id is None:
             return self._disabled()
         payload = {key: value for key, value in fields.items() if value is not None}
-        result = self._request("PATCH", "workflow_runs", payload, workflow_run_id)
-        local_persisted = self._update_locally("update_workflow_run", workflow_run_id, payload)
-        return self._local_result(local_persisted, result)
+        return self._update_and_mirror("workflow_runs", "update_workflow_run", workflow_run_id, payload)
 
     def register_document(
         self,
@@ -252,6 +347,7 @@ class OperationsClient:
             "processingStatus": processing_status,
             "duplicateFingerprint": (processed_data or {}).get("duplicate_fingerprint") or document.get("duplicate_fingerprint"),
             "duplicateOfDocumentId": (processed_data or {}).get("duplicate_of_document_id") or document.get("duplicate_of_document_id"),
+            "contentSha256": document.get("content_sha256") or document.get("contentSha256"),
             "vendorName": extracted.get("vendor_name") or (processed_data or {}).get("vendor_name"),
             "category": (processed_data or {}).get("category") or extracted.get("category"),
             "transactionDate": extracted.get("transaction_date"),
@@ -269,10 +365,7 @@ class OperationsClient:
             },
         }
         payload = {key: value for key, value in payload.items() if value is not None}
-        result = self._request("POST", "documents", payload)
-        remote_id = self._result_id(result)
-        local_id = self._create_locally("register_document", payload, remote_id)
-        return local_id or remote_id
+        return self._create_and_mirror("documents", "register_document", payload)
 
     def update_document(
         self,
@@ -302,9 +395,7 @@ class OperationsClient:
             "metadata": metadata,
         }
         payload = {key: value for key, value in payload.items() if value is not None}
-        result = self._request("PATCH", "documents", payload, document_id)
-        local_persisted = self._update_locally("update_document", document_id, payload)
-        return self._local_result(local_persisted, result)
+        return self._update_and_mirror("documents", "update_document", document_id, payload)
 
     def create_review_item(
         self,
@@ -320,10 +411,7 @@ class OperationsClient:
             "status": status,
         }
         payload = {key: value for key, value in payload.items() if value is not None}
-        result = self._request("POST", "review_items", payload)
-        remote_id = self._result_id(result)
-        local_id = self._create_locally("create_review_item", payload, remote_id)
-        return local_id or remote_id
+        return self._create_and_mirror("review_items", "create_review_item", payload)
 
     def create_routing_attempt(
         self,
@@ -349,10 +437,7 @@ class OperationsClient:
             "metadata": metadata or {},
         }
         payload = {key: value for key, value in payload.items() if value is not None}
-        result = self._request("POST", "routing_attempts", payload)
-        remote_id = self._result_id(result)
-        local_id = self._create_locally("create_routing_attempt", payload, remote_id)
-        return local_id or remote_id
+        return self._create_and_mirror("routing_attempts", "create_routing_attempt", payload)
 
     def upsert_export_attempt(
         self,
@@ -394,10 +479,7 @@ class OperationsClient:
             "metadata": metadata or {},
         }
         payload = {key: value for key, value in payload.items() if value is not None}
-        result_payload = self._request("POST", "export_attempts", payload)
-        remote_id = self._result_id(result_payload)
-        local_id = self._create_locally("upsert_export_attempt", payload, remote_id)
-        return local_id or remote_id
+        return self._create_and_mirror("export_attempts", "upsert_export_attempt", payload)
 
     def create_reconciliation_match(
         self,
@@ -417,10 +499,7 @@ class OperationsClient:
             "metadata": metadata or {},
         }
         payload = {key: value for key, value in payload.items() if value is not None}
-        result = self._request("POST", "reconciliation_matches", payload)
-        remote_id = self._result_id(result)
-        local_id = self._create_locally("create_reconciliation_match", payload, remote_id)
-        return local_id or remote_id
+        return self._create_and_mirror("reconciliation_matches", "create_reconciliation_match", payload)
 
     def record_audit_event(
         self,
@@ -436,7 +515,4 @@ class OperationsClient:
             "details": details or {},
         }
         payload = {key: value for key, value in payload.items() if value is not None}
-        result = self._request("POST", "audit_events", payload)
-        remote_id = self._result_id(result)
-        local_id = self._create_locally("record_audit_event", payload, remote_id)
-        return local_id or remote_id
+        return self._create_and_mirror("audit_events", "record_audit_event", payload)

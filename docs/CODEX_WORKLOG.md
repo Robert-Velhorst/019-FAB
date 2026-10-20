@@ -1363,3 +1363,39 @@ describe Ngrok document the former implementation and its verification only.
   debt: durable cross-store mapping and foreign-key/update translation are not
   implemented by strict type validation. Do not call dual-store synchronization
   production-ready on this evidence. No real data or external service was used.
+
+## 2026-10-20 - Durable local/remote telemetry identities
+
+- Replaced remote-ID-as-local-ID mirroring with local-first persistence and
+  destination-scoped links. Local IDs remain canonical; update URLs and typed
+  document/workflow/routing/duplicate/audit references use verified remote links.
+  Failed local persistence no longer falls through to an unrelated remote ID.
+- Schema v3 adds unique, immutable identity links. Conflicts quarantine the
+  affected links and stop further remote creates/updates. Missing links defer
+  writes while retaining local data and scoped audit diagnostics. Disabled
+  mirroring skips identity lookups entirely. Non-document local upserts with
+  known links do not create additional remote rows.
+- Added a non-secret operations identity_scope generation label for replacing
+  a remote database at the same URL. Historical unmapped records, lost create
+  acknowledgements, remote database resets without scope rotation, and exactly-
+  once/backfill protocols remain explicit recovery/acceptance boundaries.
+- Document telemetry now carries a supplied content checksum, and registration
+  preserves an existing intake checksum when a refresh omits that field.
+- Focused ledger/client checks passed: 71 tests and 32 subtests. The latest
+  identity-map contract suite passed 12 tests, including destination isolation,
+  restart, related references, local-authority failure, conflict quarantine,
+  offline fast path, checksum preservation, and verified v2-to-v3 backup.
+- Added an opt-in real HTTP/MySQL rehearsal with fresh synthetic credentials,
+  temporary SQLite, loopback-only cached MySQL 8.4, memory limits, no persistent
+  volumes, and the built full web server. An earlier run succeeded with local
+  document/workflow IDs 2 mapping to remote IDs 1, translated review/routing
+  references, restart updates, and unchanged unrelated local evidence. Temporary
+  services and data were cleaned up. A repeat after the tool-host reset could
+  not start because Docker Desktop's Linux engine is stopped; it is not claimed
+  as a fresh final-tree integration pass. The script now checks that prerequisite
+  before starting anything.
+- The previous unlogged full-suite process was lost during the tool-host reset.
+  A new full suite is running with durable XML output under ignored
+  data/verification/identity-full-suite.xml. Its completion is not yet claimed.
+  The original dirty checkout remains untouched. No provider or live database
+  was changed; the broader production goal remains incomplete.
