@@ -21,6 +21,20 @@ Audit date: 2026-08-13
 
 ## Remediated in this audit
 
+- Category candidate discovery no longer takes only the newest 5,000 global
+  reviews. SQL selects documents with open category gates, and a stable
+  timestamp/ID cursor traverses 100-document pages with complete open review
+  groups. This avoids unrelated payload hydration and duplicate/normalized
+  context loading while preserving existing category and posting eligibility.
+  A synthetic 2,000-document/2,000-review fixture with 20 category reviews and
+  8 KiB OCR/review payloads returned identical category context: median
+  624.82 ms / 18,046,561 peak traced Python bytes for the former global-window
+  reference versus 10.12 ms / 482,243 bytes for the filtered cursor, across five
+  interleaved warm samples. The reference covers this entire bounded fixture;
+  separate regressions prove discovery behind 5,001 unrelated reviews. These
+  are read-path measurements, not process RSS, cold-cache or whole-app claims.
+  Reproduce with `python scripts/benchmark_planning_reads.py --category-reviews`.
+
 - Replaced eager `os.walk` directory enumeration in local intake with a deterministic `scandir` traversal capped at 120,000 filesystem entries per source scan. This bounds memory spent listing irrelevant files and directories before the existing document, byte, and directory limits apply; overflow fails closed as `attention_required` without importing a partial manifest.
 
 - Replaced repeated export-attempt list scans and no-op updates with indexed identity lookups, route-without-export queries, explicit changed-state results, and no-op batch behavior.

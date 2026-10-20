@@ -137,6 +137,13 @@ candidates wait for another backed-up batch. All accepted category, extracted
 field, review, normalized-record, and audit changes commit together or roll back.
 Non-category review gates and external approval requirements remain in place.
 
+Category candidate discovery no longer stops at the newest 5,000 open review
+rows. It filters for open category reviews in SQLite and traverses matching
+documents in 100-document cursor pages, retaining their full open review groups.
+The existing maximum returned candidate batch still applies; unrelated newer
+exceptions cannot hide an older eligible category document. Unsupported vendors
+and posting/duplicate restrictions continue to require review.
+
 ```powershell
 python -m pytest -q -p no:cacheprovider -p no:stepwise
 pnpm.cmd --dir web check

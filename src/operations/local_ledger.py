@@ -5391,6 +5391,46 @@ class LocalOperationsLedger:
         with self._connection() as connection:
             return int(connection.execute("SELECT COUNT(*) FROM (" + query + " LIMIT ?)", params).fetchone()[0])
 
+    def iter_category_review_context(self):
+        """Page category-review documents without a global review-history cutoff."""
+        before = None
+        while True:
+            query = """
+                SELECT d.* FROM bookkeeping_documents d
+                WHERE d.id IN (
+                    SELECT document_id FROM review_items
+                    WHERE status IN ('pending', 'in_review')
+                      AND reason IN ('low_confidence_categorization', 'manual_review_category')
+                )
+            """
+            params = []
+            if before is not None:
+                query += " AND (d.updated_at < ? OR (d.updated_at = ? AND d.id < ?))"
+                params.extend((before[0], before[0], before[1]))
+            query += " ORDER BY d.updated_at DESC, d.id DESC LIMIT 100"
+            with self._connection() as connection:
+                documents = connection.execute(query, params).fetchall()
+                if not documents:
+                    return
+                ids = [int(row["id"]) for row in documents]
+                placeholders = ", ".join("?" for _ in ids)
+                reviews = connection.execute(
+                    f"SELECT * FROM review_items WHERE document_id IN ({placeholders}) "
+                    "AND status IN ('pending', 'in_review') ORDER BY created_at DESC, id DESC",
+                    ids,
+                ).fetchall()
+            reviews_by_document = {}
+            for review in reviews:
+                reviews_by_document.setdefault(int(review["document_id"]), []).append(self._row_to_dict(review))
+            before = (documents[-1]["updated_at"], int(documents[-1]["id"]))
+            for document in documents:
+                yield {
+                    "document": self._row_to_dict(document),
+                    "reviewItems": reviews_by_document.get(int(document["id"]), []),
+                }
+            if len(documents) < 100:
+                return
+
     def list_review_items(
         self,
         status: Optional[Any] = None,

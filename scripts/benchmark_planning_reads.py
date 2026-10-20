@@ -23,6 +23,7 @@ def parse_args(argv=None):
     parser.add_argument("--samples", type=int, default=5)
     parser.add_argument("--batch-limit", type=int, default=500)
     parser.add_argument("--confirmed-cycle", action="store_true", help="seed a synthetic cycle spanning all documents")
+    parser.add_argument("--category-reviews", action="store_true", help="compare sparse category-review context reads")
     args = parser.parse_args(argv)
     if not 1 <= args.documents <= 5000:
         parser.error("--documents must be between 1 and 5000")
@@ -34,6 +35,8 @@ def parse_args(argv=None):
         parser.error("--samples must be between 1 and 10")
     if not 1 <= args.batch_limit <= 500:
         parser.error("--batch-limit must be between 1 and 500")
+    if args.category_reviews and args.confirmed_cycle:
+        parser.error("category context and confirmed cycle workloads must be measured separately")
     return args
 
 
@@ -81,7 +84,8 @@ def run(args):
                 })
                 first_id = identifier if first_id is None else first_id
                 previous_id = identifier
-                ledger.create_review_item({"documentId": identifier, "reason": "synthetic",
+                reason = "manual_review_category" if args.category_reviews and index % 100 == 0 else "synthetic"
+                ledger.create_review_item({"documentId": identifier, "reason": reason,
                                            "status": "pending", "details": payload})
             if args.confirmed_cycle:
                 ledger.update_document(first_id, {"duplicateOfDocumentId": previous_id})
@@ -104,14 +108,41 @@ def run(args):
             lambda: duplicate_link_cycles(ledger),
             args.samples, reference_name="boundedDiagnosticWindow", optimized_name="fullHistory",
         )
+        category_context = None
+        if args.category_reviews:
+            def global_review_reference():
+                reviews = []
+                while len(reviews) < 5000:
+                    page = ledger.list_review_items(status=("pending", "in_review"), limit=500, offset=len(reviews))
+                    reviews.extend(page)
+                    if len(page) < 500:
+                        break
+                ids = {int(row["document_id"]) for row in reviews
+                       if row["reason"] in {"manual_review_category", "low_confidence_categorization"}}
+                documents = {}
+                for start in range(0, len(ids), 500):
+                    documents.update(ledger.get_review_work_item_context(sorted(ids)[start:start + 500])["documents"])
+                groups = {identifier: [] for identifier in ids}
+                for review in reviews:
+                    if review["document_id"] in groups:
+                        groups[review["document_id"]].append(review)
+                return [{"document": row, "reviewItems": groups[int(row["id"])]}
+                        for row in sorted(documents.values(), key=lambda row: (row["updated_at"], row["id"]), reverse=True)]
+
+            category_context = compare(
+                global_review_reference, lambda: list(ledger.iter_category_review_context()), args.samples,
+                reference_name="globalReviewWindow", optimized_name="filteredCategoryCursor",
+            )
     return {
         "syntheticOnly": True, "providerWrites": False, "temporaryDataRemoved": True,
         "pythonVersion": platform.python_version(),
         "workload": {"documents": args.documents, "reviews": args.documents,
                      "ocrAndReviewPayloadBytesEach": args.payload_bytes, "batchLimit": limit,
                      "samplesPerRead": args.samples, "cacheState": "warm",
+                     "categoryReviews": (args.documents + 99) // 100 if args.category_reviews else 0,
                      "confirmedDuplicateLinks": args.documents if args.confirmed_cycle else 0},
         "boundedCounters": counters, "duplicateGraphProjection": graph, "fullHistoryCycleScan": full_history,
+        "categoryReviewContext": category_context,
         "measurementScope": "planning read paths only; traced Python allocations, not process RSS or whole-app resource usage",
     }
 

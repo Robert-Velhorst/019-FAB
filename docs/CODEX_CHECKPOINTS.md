@@ -1,5 +1,16 @@
 # Codex Checkpoints
 
+Latest continuation: category-review discovery now uses filtered SQL and
+100-document timestamp/ID cursor pages instead of the newest 5,000 global
+reviews. Complete open review groups and all prior eligibility gates remain.
+Expanded ledger/processing/autonomy/API/records/health/benchmark checks passed
+305 tests and 8 subtests; the synthetic built dashboard/API/SQLite/HAI rehearsal
+passed with no provider writes and owned children stopped. Sparse 2,000-row
+category-context measurements are in the technical audit; they do not describe
+whole-app resource consumption. Prior 1c75fec CI (all nine jobs) and CodeQL are
+green. This new change still needs fresh exact-head hosted checks. Ngrok stays
+retired; live provider/cloud/HAI-peer acceptance remains unverified.
+
 Latest continuation: trusted-vendor category automation now fingerprints its
 original candidates, releases that snapshot before backup, revalidates under
 the writer lock, and defers changed documents. Accepted category/field/review/

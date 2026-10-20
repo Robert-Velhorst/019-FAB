@@ -1635,3 +1635,33 @@ describe Ngrok document the former implementation and its verification only.
   findings; it was not independent and does not cover this newer diff. Fresh
   exact-head hosted checks remain required. Ngrok stays retired; live host,
   provider and external HAI-peer acceptance remain separate unresolved gates.
+
+## 2026-10-20 - Category backlog discovery and filtered context reads
+
+- A red regression proved an eligible receipt was invisible behind 5,001 newer
+  unrelated open reviews. Discovery capped all review history before filtering
+  category reasons, so repeated autonomous passes could not reach that receipt.
+- Replace that global-window hydration with category-filtered SQL and stable
+  100-document timestamp/ID cursor pages. Each selected document retains its
+  complete open review group. Existing returned-candidate limits, vendor policy,
+  duplicate/posting guards, backup and locked revalidation remain unchanged.
+  Duplicate/normalized context is no longer loaded just to plan categories.
+- Tests cover beyond-window discovery, 205 equal-timestamp documents across
+  pages, an eligible document behind unsupported vendors, a 503-review group,
+  closed/orphaned review exclusion, and no unrelated payload hydration.
+  The initial full-group fixture was corrected to use distinct review reasons:
+  the ledger intentionally coalesces repeated open reasons on one document.
+- Added opt-in `--category-reviews` to the existing bounded synthetic benchmark;
+  incompatible cycle workloads fail before data creation. Default, cycle and
+  category cases verify equivalent output and preserve operator-path sentinels.
+  On 2,000 documents/reviews, 20 category reviews and 8 KiB OCR/review payloads,
+  five interleaved warm samples measured category-context median 624.82 ms and
+  18,046,561 peak traced Python bytes for the former global-window reference,
+  versus 10.12 ms and 482,243 bytes for the filtered cursor. Both cover the full
+  fixture. These are not process RSS, cold-cache or whole-app measurements.
+- Final expanded checks passed 305 tests and 8 subtests in 158.19 seconds;
+  the focused backlog/category/benchmark group passed 23 tests. The synthetic
+  built dashboard/API/SQLite/HAI rehearsal passed, made no provider writes and
+  stopped its owned children. No live ledger, credentials, schema or deployment
+  changed. Prior 1c75fec completed all nine hosted jobs and CodeQL; this follow-up
+  needs fresh exact-head CI, not a transferred production/security clearance.
