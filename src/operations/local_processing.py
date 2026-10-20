@@ -1,4 +1,5 @@
 import hashlib
+import json
 import os
 import re
 import stat
@@ -320,6 +321,14 @@ def duplicate_candidate_reassessment_plan(
     return plans
 
 
+def _duplicate_reassessment_plan_signature(plan: Dict[str, Any]) -> str:
+    digest = hashlib.sha256()
+    encoder = json.JSONEncoder(sort_keys=True, separators=(",", ":"), allow_nan=False, default=str)
+    for chunk in encoder.iterencode(plan):
+        digest.update(chunk.encode("utf-8"))
+    return digest.hexdigest()
+
+
 class LocalDocumentProcessor:
     """Run local ledger documents through FAB's processing interfaces."""
 
@@ -518,6 +527,7 @@ class LocalDocumentProcessor:
         )
         summary = {
             "candidatePairs": len(plans),
+            "deferredPairs": 0,
             "rejectedPairs": 0,
             "retainedPairs": 0,
             "candidateRowsClosed": 0,
@@ -533,6 +543,9 @@ class LocalDocumentProcessor:
         }
         if not plans:
             return summary
+        signatures = {tuple(plan["pair"]): _duplicate_reassessment_plan_signature(plan) for plan in plans}
+        # Do not retain a second OCR/evidence snapshot while revalidating later.
+        del plans
         if create_backup:
             backup = LocalBackupService(self.ledger, self.config).create_backup(
                 note="Automatic pre-repair backup before duplicate evidence reassessment"
@@ -553,6 +566,30 @@ class LocalDocumentProcessor:
                 "ledgerBytes": manifest.get("ledgerBytes"),
             }
 
+        with self.ledger.write_transaction():
+            current_plans = {
+                tuple(plan["pair"]): plan
+                for plan in duplicate_candidate_reassessment_plan(self.ledger, self.config, limit=limit)
+            }
+            validated_plans = []
+            for pair, signature in signatures.items():
+                current = current_plans.get(pair)
+                if current is not None and _duplicate_reassessment_plan_signature(current) == signature:
+                    validated_plans.append(current)
+                    continue
+                summary["deferredPairs"] += 1
+                self.ledger.record_audit_event({
+                    "action": "local_processing.duplicate_candidate_reassessment_deferred",
+                    "entityType": "bookkeeping_document", "entityId": str(pair[1]),
+                    "details": {"actor": actor, "pairDocumentIds": list(pair),
+                                "reason": "evidence_or_candidate_state_changed", "externalSubmission": "not_executed"},
+                })
+            return self._apply_duplicate_candidate_reassessment(validated_plans, actor, summary)
+
+    def _apply_duplicate_candidate_reassessment(
+        self, plans: list, actor: str, summary: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Apply revalidated decisions while the caller owns the writer transaction."""
         affected_document_ids = set()
         for plan in plans:
             subject = plan["subjectDocument"]
@@ -561,7 +598,7 @@ class LocalDocumentProcessor:
             closed_ids = []
             for row in plan["candidateRows"]:
                 row_id = int(row["id"])
-                if self.ledger.resolve_duplicate_candidate(
+                resolved = self.ledger.resolve_duplicate_candidate(
                     row_id,
                     "rejected",
                     (
@@ -579,8 +616,10 @@ class LocalDocumentProcessor:
                         },
                         "externalSubmission": "not_executed",
                     },
-                ):
-                    closed_ids.append(row_id)
+                )
+                if not resolved:
+                    raise RuntimeError("Duplicate candidate transition could not be retained during reassessment")
+                closed_ids.append(row_id)
                 summary["candidateRowsClosed"] += 1
 
             opened_candidate_id = None

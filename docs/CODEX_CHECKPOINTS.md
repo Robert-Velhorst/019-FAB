@@ -1,5 +1,12 @@
 # Codex Checkpoints
 
+Latest safety follow-up: duplicate-candidate reassessment now fingerprints and
+revalidates evidence under the writer lock, defers changed/operator-confirmed
+pairs, and commits accepted candidate/link/review/document/normalized-record/
+audit changes atomically. Expanded checks passed 264 tests and 5 subtests;
+nine focused cases include a real synthetic authenticated backup. Prior
+0052ef6 CI and CodeQL passed; this follow-up needs its own checks/review.
+
 Latest continuation: full-history confirmed-link cycle scans now replace the
 default recent-row window. Per-cycle writer transactions revalidate links and
 atomically retain review/normalization/audit changes, deferring intervening

@@ -119,6 +119,15 @@ rather than overwriting the correction. Each cycle's links, reviews, normalized
 records, and audit are changed atomically; a persistence failure rolls the cycle
 back. Source files are not changed and no downstream submission is authorized.
 
+Duplicate-candidate reassessment also revalidates its complete evidence and
+candidate/review state after taking the writer lock. A confirmation or evidence
+edit made during backup defers that pair with
+`evidence_or_candidate_state_changed`; unchanged pairs can still proceed.
+Accepted candidate, link, review, document, normalized-record, and audit changes
+commit as one batch or roll back. A failed candidate transition is not counted
+as a successful closure. Confirmed operator decisions are not reopened by an
+older machine plan.
+
 ```powershell
 python -m pytest -q -p no:cacheprovider -p no:stepwise
 pnpm.cmd --dir web check

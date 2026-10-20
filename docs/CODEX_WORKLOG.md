@@ -1580,3 +1580,29 @@ describe Ngrok document the former implementation and its verification only.
   frontend, MySQL, container builds, CodeQL, and three Windows shards when
   observed; the fourth Windows shard was still running, not treated as failed
   or restarted due to an observation timeout. Broader production gates remain.
+
+## 2026-10-20 - Revalidate and atomically retain duplicate reassessments
+
+- Red regressions reproduced a stale reassessment rejecting an operator-confirmed
+  candidate after backup, and candidate/link/review changes remaining committed
+  when normalization or the completion audit failed.
+- Initial decisions are now retained as compact SHA-256 fingerprints of canonical
+  structured plan data. The initial OCR/evidence snapshot is released before
+  backup and revalidation, rather than retaining two full payload snapshots.
+  Under the writer lock, current plans must match those fingerprints. Changed
+  evidence, candidate, or review state defers only that pair and records a
+  diagnostic; newly confirmed operator decisions remain untouched.
+- Accepted candidate closures/replacements, pending links, review gates,
+  document metadata/status, normalized records, and per-pair/completion audit
+  commit together or roll back as one batch. A false transition result aborts
+  instead of being counted as a successful closure. No schema change is needed.
+- Expanded processing/autonomy/ledger/API/health checks passed 264 tests and
+  5 subtests in 164.73 seconds. Nine final focused tests passed, covering manual
+  confirmation, same-timestamp source edits, mixed fresh/stale pairs, multi-pair
+  rollback, replacement candidate/review failure, and false transition results.
+  A real synthetic pre-mutation recovery package passed authenticated integrity
+  inspection. That fixture has missing source paths and is not represented as
+  a source-complete production restore. All data and credentials were synthetic.
+- Prior commit 0052ef6 passed all nine hosted verification jobs and four-language
+  CodeQL. This reassessment follow-up requires new exact-head checks and is not
+  yet a completed independent security review or live deployment acceptance.

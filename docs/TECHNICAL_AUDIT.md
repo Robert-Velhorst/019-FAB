@@ -173,6 +173,17 @@ correction. Document links/status, review gates, normalized bookkeeping records,
 and the per-cycle audit commit together or roll back. Backup happens before
 the writer transaction; checksum-bound backup and retained-source gates remain.
 
+Candidate reassessment uses compact canonical plan fingerprints and releases
+the initial payload snapshot before backup/revalidation. It recomputes evidence
+under the writer lock, defers changed pairs, and applies accepted changes and
+completion audit in one transaction. Regressions reproduce operator-confirmed
+candidates being rejected by a stale plan and partial writes after normalization
+or audit failure. Same-timestamp evidence edits, replacement candidate/review
+failures, false transition results, mixed fresh/deferred pairs, and a real
+authenticated pre-mutation recovery package are covered. Expanded checks passed
+264 tests and 5 subtests; nine final focused cases passed. No operator data or
+external provider records were used. This is not independent penetration testing.
+
 `python scripts/benchmark_planning_reads.py` uses only a new disposable synthetic
 SQLite ledger, never operator configuration or provider accounts. Its default
 fixture has 2,000 documents and 2,000 reviews, 8,192-byte OCR/review payloads,
