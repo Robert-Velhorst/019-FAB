@@ -23,6 +23,16 @@ verification must be refreshed after the follow-up is pushed. Historical
 unmapped telemetry and unknown write outcomes still require verified recovery;
 the broader production objective is not complete.
 
+The newer backup-publication follow-up passed 202 backup/recovery/API/health
+tests and 2 subtests, with 2 skips. Frozen-clock regressions reproduced old
+recovery points being overwritten on success or deleted on failure. New
+packages use unique names, exclusive publication, attempt-owned cleanup,
+streaming source-size limits, and pre-compression package budgets. See
+`CODEX_WORKLOG.md` for exact evidence boundaries. CI on prior commit `79cafdc`
+passed Linux, frontend, MySQL, containers, CodeQL, and three Windows shards;
+one Windows shard was still running when checked. The backup follow-up itself
+requires fresh exact-head hosted verification.
+
 ## Historical Checkpoint Table (2026-10-17)
 
 | Checkpoint | State | Resume evidence |

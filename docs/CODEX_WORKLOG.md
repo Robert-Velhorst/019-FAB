@@ -1454,3 +1454,30 @@ describe Ngrok document the former implementation and its verification only.
   This tiny synthetic run is not a scaled resource baseline or a comparable
   whole-app speed improvement. Full exact-head CI remains pending; live
   provider, cloud, production-sized restore, and operator acceptance remain.
+
+## 2026-10-20 - Preserve recovery points and bound backup creation
+
+- Reproduced two data-loss paths with a frozen synthetic clock: a second backup
+  replaced the first package, and a failed second snapshot removed the first
+  package during cleanup. Both regressions failed before this fix. No real
+  backup or source document was opened or changed in the reproduction.
+- Recovery package names now include a random identifier. A private exclusive
+  temporary file is published without replacement (Windows rename, otherwise
+  same-directory hard link). Even a forced timestamp/identifier collision fails
+  without replacing or deleting the old package. Failure cleanup removes only
+  this attempt's published package and temporary file; unsafe reparse-point
+  backup directories are rejected before package creation.
+- Source capture now checks the per-file byte limit during streaming, rather
+  than trusting only a pre-copy file size. Known archive file-count, manifest,
+  and total-uncompressed-size overruns fail before ZIP compression. Tests
+  verified that compression is not invoked for these rejected packages and
+  that earlier packages and their integrity checks remain intact.
+- Expanded backup, recovery, correction/backup integration, API, and health
+  checks passed 202 tests and 2 subtests, with 2 skips, in 78.57 seconds in the
+  isolated hash-locked environment. This is not a production-sized restore or
+  a whole-application resource-reduction claim. Fresh exact-head CI is needed
+  after publishing this follow-up.
+- Prior commit 79cafdc passed hosted Linux's full backend suite, dependency
+  audit, recovery rehearsal, and deployment-config validation. Frontend,
+  MySQL, both containers, CodeQL, and three Windows shards also passed; the
+  remaining Windows shard was still running at that observation.

@@ -80,16 +80,23 @@ class LocalBackupService:
         actor: str = "local_backup",
     ) -> Dict[str, Any]:
         timestamp = _timestamp()
-        backup_filename = f"fab-recovery-package_{timestamp}.zip"
+        backup_filename = f"fab-recovery-package_{timestamp}_{uuid.uuid4().hex}.zip"
         backup_path = os.path.join(self.backup_dir, backup_filename)
-        temporary_backup_path = f"{backup_path}.{os.getpid()}.tmp"
+        _assert_no_reparse_points(self.backup_dir)
+        descriptor, temporary_backup_path = tempfile.mkstemp(
+            prefix=".fab-recovery-", suffix=".tmp", dir=self.backup_dir,
+        )
+        os.close(descriptor)
+        published = False
 
         try:
             with tempfile.TemporaryDirectory() as temp_dir:
                 ledger_snapshot_path = os.path.join(temp_dir, BACKUP_LEDGER_NAME)
                 self._snapshot_ledger(ledger_snapshot_path)
-                ledger_sha256 = _sha256_file(ledger_snapshot_path)
                 ledger_bytes = os.path.getsize(ledger_snapshot_path)
+                if ledger_bytes > MAX_BACKUP_UNCOMPRESSED_BYTES:
+                    raise ValueError("Backup exceeds the maximum uncompressed size")
+                ledger_sha256 = _sha256_file(ledger_snapshot_path)
                 source_evidence, evidence_files = self._snapshot_source_evidence(
                     ledger_snapshot_path,
                     temp_dir,
@@ -116,6 +123,13 @@ class LocalBackupService:
                 with open(manifest_path, "w", encoding="utf-8") as handle:
                     json.dump(manifest, handle, sort_keys=True, indent=2, default=str)
 
+                self._validate_member_names([BACKUP_MANIFEST_NAME, BACKUP_LEDGER_NAME, *evidence_files])
+                manifest_bytes = os.path.getsize(manifest_path)
+                if manifest_bytes > MAX_BACKUP_MANIFEST_BYTES:
+                    raise ValueError("Backup manifest exceeds the maximum size")
+                if ledger_bytes + manifest_bytes + source_evidence["includedBytes"] > MAX_BACKUP_UNCOMPRESSED_BYTES:
+                    raise ValueError("Backup exceeds the maximum uncompressed size")
+
                 with zipfile.ZipFile(
                     temporary_backup_path,
                     "w",
@@ -126,11 +140,17 @@ class LocalBackupService:
                     archive.write(ledger_snapshot_path, BACKUP_LEDGER_NAME)
                     for archive_path, evidence_path in sorted(evidence_files.items()):
                         archive.write(evidence_path, archive_path)
-                os.replace(temporary_backup_path, backup_path)
+                # Publish the complete package atomically without replacing any
+                # existing recovery point, even if a name collision occurs.
+                if os.name == "nt":
+                    os.rename(temporary_backup_path, backup_path)
+                else:
+                    os.link(temporary_backup_path, backup_path)
+                published = True
                 inspected = self.inspect_backup(backup_path)
                 manifest = inspected["manifest"]
         except Exception:
-            if os.path.exists(backup_path):
+            if published and os.path.exists(backup_path):
                 os.remove(backup_path)
             raise
         finally:
@@ -1558,7 +1578,12 @@ def _copy_with_sha256(source_path: str, destination_path: str) -> Tuple[str, int
     digest = hashlib.sha256()
     byte_count = 0
     with open(source_path, "rb") as source, open(destination_path, "wb") as destination:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+        while True:
+            chunk = source.read(min(1024 * 1024, MAX_BACKUP_EVIDENCE_FILE_BYTES - byte_count + 1))
+            if not chunk:
+                break
+            if byte_count + len(chunk) > MAX_BACKUP_EVIDENCE_FILE_BYTES:
+                raise ValueError("Backup source evidence exceeds the maximum file size")
             digest.update(chunk)
             destination.write(chunk)
             byte_count += len(chunk)

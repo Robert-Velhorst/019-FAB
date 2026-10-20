@@ -86,7 +86,18 @@ Never archive a Drive source merely because a Wave record exists. FAB must verif
 
 Production deployment is targeted to Hetzner. Keep this Windows profile loopback-only; use the Hetzner deployment instructions for public HTTPS access.
 
-Create a verified recovery package from the dashboard. Restore only after starting `Start-FAB-Maintenance.cmd`; the worker, normal mutations, HAI execution are then locked. Inspect the package first. Ledger-only recovery requires `RESTORE FAB LOCAL LEDGER`; a source-complete version 2 package can also recover exact source bytes with `RESTORE FAB LEDGER AND SOURCE EVIDENCE`. FAB creates a pre-restore package, refuses source overwrite or checksum drift, verifies rewritten paths and bytes, and rolls the ledger back after a failed final check. When recovery is complete, run `Stop-FAB.cmd` and `Start-FAB.cmd`, then verify standard liveness and worker ownership.
+Create a verified recovery package from the dashboard. Restore only after starting `Start-FAB-Maintenance.cmd`; the worker, normal mutations, HAI execution are then locked. Inspect the package first. Ledger-only recovery requires `RESTORE FAB LOCAL LEDGER`; a source-complete recovery package can also recover exact source bytes with `RESTORE FAB LEDGER AND SOURCE EVIDENCE`. FAB creates a pre-restore package, refuses source overwrite or checksum drift, verifies rewritten paths and bytes, and rolls the ledger back after a failed final check. When recovery is complete, run `Stop-FAB.cmd` and `Start-FAB.cmd`, then verify standard liveness and worker ownership.
+
+New recovery package names include a random identifier as well as a timestamp.
+Publication cannot overwrite an existing package, and a failed attempt cleans
+up only its own files. Windows uses non-overwriting rename; other supported
+hosts require same-directory hard-link support. Unsupported storage fails
+without falling back to replacement. Existing timestamp-only packages remain
+readable. Creation checks file-count, manifest-size, and total-size budgets
+before compression; source capture enforces its per-file limit while streaming,
+even if a file grows after the initial size check. A rejected backup is not
+recorded as successfully created. These controls do not replace a production-
+sized restore rehearsal or verification of the backup storage device.
 
 ### Schema upgrades and rollback
 

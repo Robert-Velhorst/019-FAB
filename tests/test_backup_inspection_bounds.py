@@ -2,6 +2,7 @@ import hashlib
 import json
 import struct
 import zipfile
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -46,6 +47,69 @@ def record_opens(opened):
         return original(archive, name, *args, **kwargs)
 
     return patch.object(zipfile.ZipFile, "open", tracked)
+
+
+@pytest.mark.parametrize("second_attempt_fails", [False, True])
+def test_repeated_backup_timestamp_preserves_previous_package(tmp_path, second_attempt_fails):
+    ledger = LocalOperationsLedger(str(tmp_path / "ledger.sqlite3"))
+    service = backups.LocalBackupService(ledger, {"fab_local_backup_dir": str(tmp_path / "backups")})
+    with patch.object(backups, "_timestamp", return_value="same-clock-tick"):
+        first = service.create_backup(note="original recovery point")
+        with open(first["backupPath"], "rb") as retained:
+            original = retained.read()
+        if second_attempt_fails:
+            with patch.object(service, "_snapshot_ledger", side_effect=OSError("synthetic snapshot failure")):
+                with pytest.raises(OSError, match="snapshot failure"):
+                    service.create_backup(note="failed replacement")
+        else:
+            second = service.create_backup(note="new recovery point")
+            assert first["backupPath"] != second["backupPath"]
+        with open(first["backupPath"], "rb") as retained:
+            assert retained.read() == original
+    assert not list((tmp_path / "backups").glob("*.tmp"))
+
+
+def test_publication_collision_cannot_replace_or_remove_an_existing_backup(tmp_path):
+    ledger = LocalOperationsLedger(str(tmp_path / "ledger.sqlite3"))
+    service = backups.LocalBackupService(ledger, {"fab_local_backup_dir": str(tmp_path / "backups")})
+    with (patch.object(backups, "_timestamp", return_value="same-clock-tick"),
+          patch.object(backups.uuid, "uuid4") as identifier):
+        identifier.return_value.hex = "same-identifier"
+        first = service.create_backup(note="preserved")
+        with open(first["backupPath"], "rb") as retained:
+            original = retained.read()
+        with pytest.raises(FileExistsError):
+            service.create_backup(note="must not overwrite")
+        with open(first["backupPath"], "rb") as retained:
+            assert retained.read() == original
+    assert not list((tmp_path / "backups").glob("*.tmp"))
+    assert len([event for event in ledger.list_audit_events() if event["action"] == "local_backup.created"]) == 1
+
+
+def test_source_capture_enforces_limit_while_streaming(tmp_path):
+    source = tmp_path / "growing-receipt.pdf"
+    destination = tmp_path / "captured.bin"
+    source.write_bytes(b"expanded beyond the pre-copy size check")
+    with patch.object(backups, "MAX_BACKUP_EVIDENCE_FILE_BYTES", 8):
+        with pytest.raises(ValueError, match="source.*size|source.*large"):
+            backups._copy_with_sha256(str(source), str(destination))
+    assert destination.stat().st_size <= 8
+
+
+@pytest.mark.parametrize("setting,limit", [
+    ("MAX_BACKUP_ARCHIVE_FILES", 2),
+    ("MAX_BACKUP_MANIFEST_BYTES", 16),
+    ("MAX_BACKUP_UNCOMPRESSED_BYTES", 64),
+])
+def test_creation_rejects_known_budget_overrun_before_compression(package, setting, limit):
+    service, path, _ = package
+    with (patch.object(backups, setting, limit),
+          patch.object(backups.zipfile, "ZipFile") as compression):
+        with pytest.raises(ValueError):
+            service.create_backup(require_complete_source_evidence=True)
+        compression.assert_not_called()
+    assert len(list(Path(service.backup_dir).glob("*.zip"))) == 1
+    assert service.inspect_backup(path)["status"] == "valid"
 
 
 def force_zip64_end_record(path):
