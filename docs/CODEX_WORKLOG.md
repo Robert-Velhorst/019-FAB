@@ -1701,3 +1701,31 @@ describe Ngrok document the former implementation and its verification only.
 - Prior 9967ba0 completed all nine CI jobs and CodeQL. This follow-up still
   requires fresh hosted checks. This does not prove all browser/device races,
   whole-app resource percentages, production hosting or live provider acceptance.
+
+## 2026-10-20 - Superseded incremental review-page responses
+
+- Extended the previously approved temporary Chromium fallback harness to hold
+  an actual incremental-page response while the operator refreshes the queue.
+  The red run reset the queue to 25 loaded reviews, then incorrectly appended
+  the obsolete response and displayed 50. The component had no generation check
+  on incremental results and skipped effect invalidation on a first-page-only
+  refresh. This is a view/pagination race, not an external financial mutation.
+- Bind incremental fetches and deferred state updaters to their starting queue
+  generation. Superseded rows, offset tracking, pagination and error toasts are
+  discarded. All first-page effects now advance that generation and clean it
+  up, including the zero-additional-offset branch. A synchronous in-flight ref
+  serializes incremental requests without waiting for React to render a spinner.
+- The same browser loop now passes manual-refresh and background-first-page
+  supersession, preserving 25 loaded reviews after each delayed response. A
+  subsequent legitimate load advances to 50. The earlier seven-page/175-review
+  background test still observed six extra reads at peak logical concurrency
+  four with stable row order. No transport cancellation is claimed.
+- Full web suite: 490 passed, 7 skipped. TypeScript and production build/bundle
+  budgets passed. The actual disposable dashboard/API/SQLite/HAI rehearsal
+  passed and stopped its owned children. Chromium checks again passed identity,
+  meaningful content, no framework overlay/console errors, navigation and
+  document overflow at 1280x800 and 390x844; screenshots remain outside the repo.
+- Test fixtures, credentials and 350 seeded review documents were synthetic;
+  no operator ledger, provider account, production deployment or permissions
+  changed. Fresh exact-head CI and broader multi-tab/device/provider acceptance
+  remain necessary; this is not an error-free or production-complete claim.

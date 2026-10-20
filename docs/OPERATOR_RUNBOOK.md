@@ -144,6 +144,12 @@ The existing maximum returned candidate batch still applies; unrelated newer
 exceptions cannot hide an older eligible category document. Unsupported vendors
 and posting/duplicate restrictions continue to require review.
 
+Refreshing the review queue supersedes an in-progress "Load next" request.
+Its late response cannot append old rows or replace the new queue pagination.
+Only one incremental load runs at a time; after it settles, "Load next" can
+retrieve a fresh page normally. Background first-page updates have the same
+supersession behavior. This affects the operator view, not financial posting.
+
 ```powershell
 python -m pytest -q -p no:cacheprovider -p no:stepwise
 pnpm.cmd --dir web check

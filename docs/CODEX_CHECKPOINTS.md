@@ -1,5 +1,18 @@
 # Codex Checkpoints
 
+Latest queue race follow-up: incremental review loads now retain their starting
+queue generation and cannot append rows, offsets, pagination or stale errors
+after a newer manual/background refresh. Every first-page effect and cleanup
+invalidates old loads, including when no additional pages were previously
+loaded; a synchronous in-flight ref prevents duplicate incremental requests.
+An actual Chromium held-response regression failed before the fix (25 reset
+rows became 50), then passed for manual and background first-page refreshes.
+A fresh load still advanced 25 to 50. Full web suite: 490 passed, 7 skipped;
+TypeScript/build budgets and synthetic dashboard/API/HAI rehearsal passed.
+Desktop/mobile checks passed at 1280x800 and 390x844 using the previously approved
+Playwright fallback. No live financial/provider data changed. Exact-head CI,
+broader UI races and production/provider acceptance still require evidence.
+
 Latest dashboard follow-up: background review-page refreshes run at most four
 logical reads at a time, preserve offset order and stop queued dispatch after
 supersession or failure. The Operations effect passes its live sequence/cleanup
