@@ -104,6 +104,17 @@ def isolated_environment():
     return {key: value for key, value in os.environ.items() if key.upper() in allowed}
 
 
+def python_script_command(script, *arguments):
+    # Use the base process for reliable Windows shutdown, but process the active
+    # environment's .pth files so isolated uv/venv dependencies remain available.
+    bootstrap = (
+        "import json, runpy, site, sys; "
+        "[site.addsitedir(path) for path in json.loads(sys.argv[1])]; "
+        "sys.argv = sys.argv[2:]; runpy.run_path(sys.argv[0], run_name='__main__')"
+    )
+    return [sys._base_executable, "-c", bootstrap, json.dumps(site.getsitepackages()), str(script), *arguments]
+
+
 def stop_owned_child(child):
     if child.poll() is None:
         child.terminate()
@@ -303,11 +314,10 @@ def rehearse(node, bundle_dir=None, benchmark_requests=0, benchmark_concurrency=
         try:
             with (root / "api.log").open("wb") as api_log, (root / "web.log").open("wb") as web_log:
                 python_env = isolated_environment()
-                python_env["PYTHONPATH"] = os.pathsep.join([str(ROOT), *site.getsitepackages()])
-                api = subprocess.Popen([
-                    sys._base_executable, str(Path(__file__).resolve()), "--fixture-api", str(root),
+                api = subprocess.Popen(python_script_command(
+                    Path(__file__).resolve(), "--fixture-api", str(root),
                     "--web-port", str(web_port),
-                ], cwd=root, env=python_env, stdout=api_log, stderr=api_log,
+                ), cwd=root, env=python_env, stdout=api_log, stderr=api_log,
                     creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
                 children.append(api)
                 ready = wait_for_ready(api, root)

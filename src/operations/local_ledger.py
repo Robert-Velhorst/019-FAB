@@ -13,7 +13,7 @@ from typing import Any, Dict, Optional, Sequence
 
 VENDOR_CATEGORY_RULE_STATUSES = {"suggested", "approved", "rejected", "disabled", "learned"}
 GOVERNED_VENDOR_CATEGORY_RULE_STATUSES = {"approved", "rejected", "disabled"}
-LEDGER_SCHEMA_VERSION = 3
+LEDGER_SCHEMA_VERSION = 4
 MAX_ERROR_DIAGNOSTIC_INPUT_CHARS = 16_384
 MAX_ERROR_DIAGNOSTIC_OUTPUT_CHARS = 2_000
 MISSING_REVIEW_MATCH_REFERENCE_SQL = (
@@ -50,6 +50,12 @@ LEDGER_SCHEMA_MIGRATIONS = {
         "name": "remote_telemetry_identity_links_2026_10_20",
         "checksum": hashlib.sha256(
             b"FAB operations ledger schema v3: destination-scoped immutable remote identity links"
+        ).hexdigest(),
+    },
+    4: {
+        "name": "remote_telemetry_collision_quarantine_2026_10_20",
+        "checksum": hashlib.sha256(
+            b"FAB operations ledger schema v4: retain quarantine for unlinked collision participants"
         ).hexdigest(),
     },
 }
@@ -977,6 +983,15 @@ class LocalOperationsLedger:
                     UNIQUE (destination_key, resource_type, remote_id)
                 );
 
+                CREATE TABLE IF NOT EXISTS remote_identity_quarantines (
+                    destination_key TEXT NOT NULL,
+                    resource_type TEXT NOT NULL,
+                    local_id INTEGER NOT NULL CHECK(local_id > 0),
+                    remote_id INTEGER NOT NULL CHECK(remote_id > 0),
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (destination_key, resource_type, local_id)
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_local_audit_entity
                     ON audit_events(entity_type, entity_id);
                 CREATE INDEX IF NOT EXISTS idx_local_audit_created
@@ -1256,8 +1271,13 @@ class LocalOperationsLedger:
     def get_remote_identity_link(self, destination_key: str, resource_type: str, local_id: int) -> Optional[Dict[str, Any]]:
         with self._connection() as connection:
             row = connection.execute(
-                "SELECT remote_id, status FROM remote_identity_links WHERE destination_key = ? AND resource_type = ? AND local_id = ?",
-                (destination_key, resource_type, local_id),
+                "SELECT remote_id, status FROM ("
+                "SELECT remote_id, 'conflicted' AS status, 0 AS precedence FROM remote_identity_quarantines "
+                "WHERE destination_key = ? AND resource_type = ? AND local_id = ? "
+                "UNION ALL SELECT remote_id, status, 1 AS precedence FROM remote_identity_links "
+                "WHERE destination_key = ? AND resource_type = ? AND local_id = ?) "
+                "ORDER BY precedence LIMIT 1",
+                (destination_key, resource_type, local_id, destination_key, resource_type, local_id),
             ).fetchone()
         return dict(row) if row else None
 
@@ -1273,15 +1293,27 @@ class LocalOperationsLedger:
                 "SELECT local_id, remote_id, status FROM remote_identity_links WHERE destination_key = ? AND resource_type = ? AND (local_id = ? OR remote_id = ?)",
                 (destination_key, resource_type, local_id, remote_id),
             ).fetchall()
-            if existing:
-                if (len(existing) != 1 or existing[0]["local_id"] != local_id
-                        or existing[0]["remote_id"] != remote_id or existing[0]["status"] != "verified"):
-                    connection.execute(
-                        "UPDATE remote_identity_links SET status = 'conflicted' WHERE destination_key = ? AND resource_type = ? AND (local_id = ? OR remote_id = ?)",
-                        (destination_key, resource_type, local_id, remote_id),
-                    )
-                    conflicted = True
-            else:
+            quarantined = connection.execute(
+                "SELECT 1 FROM remote_identity_quarantines WHERE destination_key = ? AND resource_type = ? AND local_id = ?",
+                (destination_key, resource_type, local_id),
+            ).fetchone()
+            conflicted = bool(quarantined) or bool(existing and (
+                len(existing) != 1 or existing[0]["local_id"] != local_id
+                or existing[0]["remote_id"] != remote_id or existing[0]["status"] != "verified"
+            ))
+            if conflicted:
+                connection.execute(
+                    "UPDATE remote_identity_links SET status = 'conflicted' WHERE destination_key = ? AND resource_type = ? AND (local_id = ? OR remote_id = ?)",
+                    (destination_key, resource_type, local_id, remote_id),
+                )
+                # A rejected participant has no link row because remote IDs are unique.
+                participants = {local_id: remote_id, **{row["local_id"]: row["remote_id"] for row in existing}}
+                connection.executemany(
+                    "INSERT INTO remote_identity_quarantines (destination_key, resource_type, local_id, remote_id, created_at) "
+                    "VALUES (?, ?, ?, ?, ?) ON CONFLICT(destination_key, resource_type, local_id) DO NOTHING",
+                    [(destination_key, resource_type, identity, remote, self._now()) for identity, remote in participants.items()],
+                )
+            elif not existing:
                 connection.execute(
                     "INSERT INTO remote_identity_links (destination_key, resource_type, local_id, remote_id, created_at) VALUES (?, ?, ?, ?, ?)",
                     (destination_key, resource_type, local_id, remote_id, self._now()),

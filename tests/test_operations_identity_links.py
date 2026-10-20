@@ -107,6 +107,35 @@ def test_conflicting_links_are_quarantined_not_reassigned(tmp_path):
     assert ledger.get_remote_identity(destination, "documents", 1) is None
     with pytest.raises(ValueError, match="conflicts"):
         ledger.bind_remote_identity(destination, "documents", 1, 20)
+    with pytest.raises(ValueError, match="conflicts"):
+        ledger.bind_remote_identity(destination, "documents", 2, 21)
+    ledger.bind_remote_identity(destination, "documents", 3, 22)
+    ledger.bind_remote_identity("b" * 64, "documents", 2, 20)
+    ledger.bind_remote_identity(destination, "workflow_runs", 2, 20)
+    assert ledger.get_remote_identity(destination, "documents", 3) == 22
+    assert ledger.get_remote_identity("b" * 64, "documents", 2) == 20
+    assert ledger.get_remote_identity(destination, "workflow_runs", 2) == 20
+
+
+def test_both_sides_of_a_remote_id_collision_stay_quarantined_after_restart(tmp_path):
+    config = config_for(tmp_path)
+    client = OperationsClient(config)
+    client.session.request = MagicMock(side_effect=[reply({"id": 20}), reply({"id": 20})])
+    first = client.register_document("gmail", {"id": "first", "filename": "first.pdf"})
+    second = client.register_document("gmail", {"id": "second", "filename": "second.pdf"})
+    client.session.close()
+
+    restarted = OperationsClient(config)
+    restarted.session.request = MagicMock(return_value=reply({"id": 21}))
+    try:
+        assert restarted.register_document("gmail", {"id": "second", "filename": "second.pdf"}) == second
+        restarted.session.request.assert_not_called()
+        assert restarted.local_ledger.get_remote_identity(restarted.destination_key, "documents", first) is None
+        assert restarted.local_ledger.get_remote_identity(restarted.destination_key, "documents", second) is None
+        with pytest.raises(ValueError, match="conflicts"):
+            restarted.local_ledger.bind_remote_identity(restarted.destination_key, "documents", second, 21)
+    finally:
+        restarted.session.close()
 
 
 def test_conflicting_remote_registration_cannot_resubmit_or_update(tmp_path):
@@ -166,23 +195,31 @@ def test_invalid_local_references_cannot_select_record_one(tmp_path):
     client.session.close()
 
 
-def test_schema_two_upgrade_keeps_verified_recovery_snapshot(tmp_path):
+@pytest.mark.parametrize("source_version", [2, 3])
+def test_schema_upgrade_keeps_verified_recovery_snapshot(tmp_path, source_version):
     path = str(tmp_path / "ledger.sqlite3")
     ledger = LocalOperationsLedger(path)
     document = ledger.register_document({"source": "gmail", "sourceDocumentId": "retained", "originalFilename": "bill.pdf"})
+    ledger.bind_remote_identity("a" * 64, "documents", document, 55)
     with sqlite3.connect(path) as connection:
-        connection.execute("DROP TABLE remote_identity_links")
-        connection.execute("DELETE FROM schema_migrations WHERE version = 3")
-        connection.execute("PRAGMA user_version = 2")
+        if source_version == 2:
+            connection.execute("DROP TABLE remote_identity_links")
+        connection.execute("DROP TABLE remote_identity_quarantines")
+        connection.execute("DELETE FROM schema_migrations WHERE version > ?", (source_version,))
+        connection.execute(f"PRAGMA user_version = {source_version}")
     connection.close()
     upgraded = LocalOperationsLedger(path)
-    assert upgraded.schema_status()["currentVersion"] == 3
+    assert upgraded.schema_status()["currentVersion"] == 4
     assert upgraded.get_document(document)["source_document_id"] == "retained"
+    if source_version == 3:
+        assert upgraded.get_remote_identity("a" * 64, "documents", document) == 55
     manifests = list((tmp_path / "schema_backups").glob("*.json"))
     assert len(manifests) == 1
     manifest = json.loads(manifests[0].read_text())
-    assert manifest["sourceSchemaVersion"] == 2 and manifest["targetSchemaVersion"] == 3
+    assert manifest["sourceSchemaVersion"] == source_version and manifest["targetSchemaVersion"] == 4
     with sqlite3.connect(str(manifests[0].parent / manifest["backupFilename"])) as snapshot:
         assert snapshot.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
-        assert snapshot.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert snapshot.execute("PRAGMA user_version").fetchone()[0] == source_version
+        if source_version == 3:
+            assert snapshot.execute("SELECT remote_id FROM remote_identity_links").fetchone()[0] == 55
     snapshot.close()

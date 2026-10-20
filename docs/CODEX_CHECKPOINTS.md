@@ -1,5 +1,30 @@
 # Codex Checkpoints
 
+## Current Continuation (2026-10-20)
+
+Worktree `C:\Users\NO\Documents\Codex\2026-06-03\019-FAB-pr125-next`,
+branch `codex/fab-durable-telemetry-identities`, draft PR #146. Preserve the
+original checkout's user-owned source changes; do not reset or clean it.
+Ngrok remains retired by explicit user decision.
+
+Local full-suite evidence before the latest quarantine follow-up: 1,989 Python
+tests and 239 subtests passed, 8 skipped; 486 web tests passed, 7 skipped;
+TypeScript, production build, and bundle budgets passed. The schema-v4 follow-up
+passed 283 expanded migration/backup/API/readiness tests and 34 subtests, with
+2 skips, plus 8 stack-rehearsal tests. The built dashboard/API/SQLite/HAI
+synthetic rehearsal passed with provider writes disabled and children stopped.
+These are local/synthetic checks, not live deployment or provider acceptance.
+
+Hosted checks on `67fbc78` passed frontend, all Windows shards, MySQL, both
+containers, and CodeQL; Linux stopped at the newly reported certifi advisory.
+The follow-up pins certifi 2026.10.19 in the affected hash locks; lock consistency
+and the combined Python vulnerability audit pass locally. Exact-head hosted
+verification must be refreshed after the follow-up is pushed. Historical
+unmapped telemetry and unknown write outcomes still require verified recovery;
+the broader production objective is not complete.
+
+## Historical Checkpoint Table (2026-10-17)
+
 | Checkpoint | State | Resume evidence |
 | --- | --- | --- |
 | C0 Baseline | Current | As of 2026-10-17, the canonical checkout at `C:\Users\NO\Documents\Codex\2026-06-03\pull-noodzakelijk-online-019-fab-https\019-FAB` remains at `dbe3a8a6383c88ad926a707ff7d8975561c99327` with 64 pre-existing staged files plus local-only lock-verification and bounded folder-traversal fixes; preserve it. PR #125 is isolated in `C:\Users\NO\AppData\Local\Temp\019-fab-pr-publish-20261016`, branch `codex/fab-followup-20261015`, based at the verified `cd5889f` head before this update. |

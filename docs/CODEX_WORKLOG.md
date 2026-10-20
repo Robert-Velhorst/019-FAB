@@ -1420,3 +1420,37 @@ describe Ngrok document the former implementation and its verification only.
 - With the updated dependencies installed: 486 web tests passed, 7 skipped;
   TypeScript passed; production build and bundle budgets passed. Exact-head
   hosted checks for this dependency update still require a new CI run.
+
+## 2026-10-20 - Collision participants and isolated runtime verification
+
+- Reproduced a quarantine gap with two distinct local documents receiving the
+  same remote ID. After restart the rejected local document had no retained
+  link and was submitted again. The new regression failed before the fix.
+- Additive schema v4 retains quarantine markers for every conflict participant,
+  including the rejected local record without a link. Reads and binds honor
+  those markers; unrelated records, resource types, and destinations remain
+  independent. No existing migration checksum was changed. Synthetic v2/v3
+  upgrades verify pre-upgrade snapshot integrity and preserved v3 mappings.
+- Refreshed the affected Python locks from certifi 2026.10.18 to 2026.10.19
+  after hosted Linux CI reported GHSA-6q48-6c7w-9gw2. Only certifi and its
+  published artifact hashes changed. The ML lock required no content change.
+  All lock consistency checks and the combined four-lock pip-audit passed.
+- The isolated-environment stack rehearsal exposed a missing-Flask startup
+  failure: launching the base Python with PYTHONPATH did not process the active
+  environment's .pth dependencies. Its controlled bootstrap now adds only the
+  active environment's site directories, without inheriting PYTHONPATH or
+  provider credentials, while retaining a direct base child for Windows
+  shutdown. The dependency-import and child-lifecycle test group passed 8 tests.
+- With the updated hash-locked dependencies in an isolated uv environment,
+  expanded ledger/client, schema, recovery, backup, health, readiness, and API
+  checks passed 283 tests and 34 subtests, with 2 skips, in 103.09 seconds.
+- The built dashboard/API/SQLite/HAI rehearsal passed authentication, source
+  verification, mutation persistence, bank import/reconciliation, exception
+  handling, command authorization/replay, logout/revocation, and owned-child
+  shutdown. No provider credentials, live ledger, or provider writes were used.
+  Its 20-request, four-client warm-cache diagnostic measured 20.48 ms median,
+  27.22 ms p95, and 56,871 response bytes. Three 50 ms samples observed a
+  191,590,400-byte combined peak working set and 0.171875 dashboard CPU seconds.
+  This tiny synthetic run is not a scaled resource baseline or a comparable
+  whole-app speed improvement. Full exact-head CI remains pending; live
+  provider, cloud, production-sized restore, and operator acceptance remain.

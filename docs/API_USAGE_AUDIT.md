@@ -74,7 +74,10 @@ through verified links, never through numeric equality. Audit detail references
 are explicitly retained as scoped local evidence rather than remote IDs.
 
 Missing links defer remote writes while preserving local records. Conflicting
-links are quarantined and cannot trigger further creates or updates; failures
+links are quarantined and cannot trigger further creates or updates. Schema v4
+also retains a quarantine for a rejected local record that could not obtain a
+unique link, so both sides of a collision remain blocked after restart. Healthy
+records, other resources, and other destinations remain independent. Failures
 and deferrals are recorded in the local audit trail. Non-document upserts with
 an existing verified link are not submitted as additional remote creates.
 Document registration can refresh its idempotent source identity without

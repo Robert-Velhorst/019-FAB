@@ -4,7 +4,18 @@ import sys
 
 import pytest
 
-from scripts.run_stack_rehearsal import fixture_api, isolated_environment, stop_owned_child
+from scripts.run_stack_rehearsal import fixture_api, isolated_environment, python_script_command, stop_owned_child
+
+
+def test_fixture_child_imports_active_environment_dependencies(tmp_path):
+    script = tmp_path / "dependency_probe.py"
+    script.write_text("import flask, sys; print('dependency-loaded:' + sys.argv[1])")
+    command = python_script_command(script, "fixture")
+    assert command[0] == sys._base_executable
+    result = subprocess.run(command, cwd=tmp_path, env=isolated_environment(),
+                            capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "dependency-loaded:fixture"
 
 
 def test_rehearsal_does_not_inherit_provider_or_application_credentials(monkeypatch):
