@@ -1758,3 +1758,36 @@ describe Ngrok document the former implementation and its verification only.
   All ledgers and credentials were synthetic; no production/provider change.
   New exact-head CI is required; the previous b4b6f9d run was still queued/running
   when inspected, while c545df1's verification run had been superseded/cancelled.
+
+## 2026-10-20 - Atomic local draft routing and low-storage interruption
+
+- Four red regressions reproduced Wave/MijnGeldzaken routing attempts and
+  document/normalized changes left behind after normalization or completion
+  audit failure. Both public draft-preparation entrypoints now open a writer
+  transaction before reading their source. Existing private target planners,
+  blocked/review branches, normalized state and final audit share that boundary.
+  The transaction is per document or bank record, not the entire batch.
+- Eleven new cases cover both targets' document rollback, bank-record rollback
+  after an inserted completion audit, missing-field review/attempt failure,
+  valid approval-gated non-executing preparation, and a nested failed route that
+  preserves unrelated outer transaction changes. The bank-record fixture uses
+  the real record approval/correction service to select MijnGeldzaken; normalized
+  bank records otherwise default to Wave, so a vendor rule alone was insufficient.
+- Initial focused checks passed 14 tests and 2 subtests. An expanded run then
+  hit SQLite disk-I/O/full-disk errors when the source volume reached zero free
+  bytes; that run is not a code verdict. Stopped source edits/builds, inspected
+  intact files/diff and saved SHA-256-verified source recovery copies separately.
+- No files were deleted. Two cleanup requests for explicitly identified synthetic
+  artifacts remain owner decisions. A separate checkout/dependency setup was
+  attempted on the alternate volume, then stopped when the source volume regained
+  space and an existing offline locked environment was confirmed usable. The
+  alternate volume's exFAT 256 KiB allocation units made small-file setup costly;
+  abandoned clone/cache data and source recovery copies remain outside the repo.
+- Final offline checks with alternate-volume fixtures and bytecode disabled:
+  98 passed, 20 subtests passed in 203.26 seconds across routing, exports,
+  reconciliation, normalized records and autonomy. This is not an application
+  performance measurement. No provider executor was enabled or called; no schema
+  or external financial record changed. No new frontend/browser acceptance is
+  claimed for this Python-only follow-up. New exact-head CI remains required;
+  prior 7f451da verification and CodeQL completed successfully. Host free-space
+  headroom, production/cloud/provider and external HAI acceptance remain open.

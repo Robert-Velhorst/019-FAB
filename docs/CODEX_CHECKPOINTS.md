@@ -1,5 +1,18 @@
 # Codex Checkpoints
 
+Latest routing follow-up: document and bank-record draft preparation each use
+one writer transaction, including source validation, review/blocked branches,
+routing attempt, document/normalized export state and completion audit. Four
+red Wave/MijnGeldzaken cases reproduced partial persistence after normalization
+or audit failure. Final routing/export/reconciliation/records/autonomy checks
+passed 98 tests and 20 subtests, including nested rollback and approval/no-execute
+guards. C: exhausted during an expanded run; source writes stopped, recovery
+copies were hash-verified on D:, and final tests used offline locked dependencies
+with D: fixtures and bytecode disabled. No cleanup was performed. C: later
+regained space without this task deleting files. Keep host-storage headroom as
+an unresolved operational gate; no live financial/provider data was touched.
+Prior 7f451da CI and CodeQL passed; this follow-up needs fresh exact-head checks.
+
 Latest retry-admission follow-up: failed-document retries now compare their
 starting core snapshot under the ledger writer lock and atomically persist
 the imported transition, bounded retry history and retry-start audit. Stale

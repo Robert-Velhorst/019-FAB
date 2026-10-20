@@ -54,6 +54,15 @@ class LocalRoutingService:
         target_system: Optional[str] = None,
         workflow_run_id: Optional[int] = None,
     ) -> Dict[str, Any]:
+        with self.ledger.write_transaction():
+            return self._prepare_document_route(document_id, target_system, workflow_run_id)
+
+    def _prepare_document_route(
+        self,
+        document_id: int,
+        target_system: Optional[str] = None,
+        workflow_run_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
         document = self.ledger.get_document(document_id)
         if not document:
             return {"success": False, "status": "not_found", "error": "Document not found"}
@@ -271,6 +280,15 @@ class LocalRoutingService:
         }
 
     def prepare_bookkeeping_record_route(
+        self,
+        record_id: int,
+        target_system: Optional[str] = None,
+        workflow_run_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        with self.ledger.write_transaction():
+            return self._prepare_bookkeeping_record_route(record_id, target_system, workflow_run_id)
+
+    def _prepare_bookkeeping_record_route(
         self,
         record_id: int,
         target_system: Optional[str] = None,

@@ -157,6 +157,13 @@ batch's retried count. Retry status/history and the start audit commit together
 or roll back. OCR/file processing starts after that short claim transaction;
 this does not establish a global processing lease or external exactly-once delivery.
 
+Local draft routing commits each document or bank record as one unit: source
+checks, missing-field review gates, route attempt, normalized export state and
+audit. If persistence fails, that item's preparation rolls back, including any
+new review or draft row. Other successfully completed items in a batch are not
+rolled back. This only prepares local drafts; external submission still needs
+its existing approvals and execution/readback capabilities.
+
 ```powershell
 python -m pytest -q -p no:cacheprovider -p no:stepwise
 pnpm.cmd --dir web check
