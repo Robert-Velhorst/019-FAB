@@ -23,57 +23,15 @@ def run_script(tmp_path, shell, script):
     return json.loads(result.stdout.strip().splitlines()[-1])
 
 
-@pytest.mark.parametrize("pid_value", ["invalid", None])
-def test_ngrok_shutdown_preserves_ownership_files_when_pid_is_invalid(tmp_path, pid_value):
-    shell = shutil.which("pwsh") or shutil.which("powershell")
-    if not shell:
-        pytest.skip("PowerShell unavailable")
-    source = (ROOT / "Stop-FAB-Ngrok.ps1").read_text(encoding="utf-8")
-    start = source.index("$processId = 0")
-    end = source.index("if (-not $Quiet)", start)
-    shutdown = source[start:end]
-    runtime_setup = (
-        "$runtime=[pscustomobject]@{}"
-        if pid_value is None
-        else "$runtime=[pscustomobject]@{processId='invalid'}"
-    )
-    script = r"""
-    __RUNTIME_SETUP__
-    $runtimePath='cloud-runtime.json'
-    $managedRoot='managed'
-    $cleanupCalls=0
-    function Get-CimInstance { throw 'PID must not be queried for invalid metadata' }
-    function Stop-Process { throw 'process must not be stopped for invalid metadata' }
-    function Wait-Process { throw 'process must not be waited for invalid metadata' }
-    function Test-OwnedManagedPath { return $true }
-    function Remove-Item { $script:cleanupCalls++ }
-    $failure=$null
-    try { __SHUTDOWN__ } catch { $failure=$_.Exception.Message }
-    @{failure=$failure;cleanupCalls=$cleanupCalls} | ConvertTo-Json -Compress
-    """.replace("__RUNTIME_SETUP__", runtime_setup).replace("__SHUTDOWN__", shutdown)
-    observed = run_script(tmp_path, shell, script)
-    assert "no valid process ID" in observed["failure"]
-    assert observed["cleanupCalls"] == 0
-
-
-@pytest.mark.parametrize("failure", ["worker", "api", "web", "alive", "query", "unresponsive", "leases", "tunnel", "none"])
+@pytest.mark.parametrize("failure", ["worker", "api", "web", "alive", "query", "unresponsive", "leases", "none"])
 def test_incomplete_shutdown_retains_metadata_and_leases(tmp_path, failure):
     source = (ROOT / "Stop-FAB.ps1").read_text(encoding="utf-8")
     tail = source[source.index("foreach ($ownedWebPid in $webPids) {"):source.index("\n}\nfinally {\n    foreach ($process in $script:fabStopProcesses.Values)")]
     (tmp_path / "runtime.json").write_text('{"existing":"preserve"}', encoding="utf-8")
     (tmp_path / "worker.json").write_text('{"existing":"worker"}', encoding="utf-8")
-    if failure == "tunnel":
-        (tmp_path / "cloud.json").write_text('{"existing":"tunnel"}', encoding="utf-8")
-        (tmp_path / "Stop-FAB-Ngrok.ps1").write_text(
-            "param([switch]$Quiet)\nthrow 'synthetic-tunnel-stop-failed'\n", encoding="utf-8"
-        )
-        start = source.index("if (Test-Path -LiteralPath $cloudRuntimePath) {")
-        end = source.index("$apiPid = $null", start)
-        tail = source[start:end] + tail
     script = r"""
     $root=(Get-Location).Path; $webRoot=$root
     $runtimePath=Join-Path $root 'runtime.json'; $workerRuntimePath=Join-Path $root 'worker.json'
-    $cloudRuntimePath=Join-Path $root 'cloud.json'
     $webPids=@(300); $workerPid=200; $apiPids=@(100); $apiToken='synthetic-only'
     $venvPython='Invoke-SyntheticLeaseCleanup'; $stopFailed=$false
     $failure='__FAILURE__'; $cleanupCalls=0; $events=[Collections.Generic.List[string]]::new()

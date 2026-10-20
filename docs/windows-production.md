@@ -203,31 +203,12 @@ Review their configuration, access controls, encryption, and backup policy befor
 operational acceptance. The launcher is interactive startup support, not a newly
 installed Windows service or scheduled task.
 
-### Managed HTTPS Access
+### Production deployment
 
-Ordinary loopback-only Windows access is unchanged. If enabling managed HTTPS
-sign-in (including an owned ngrok/proxy endpoint), also set
-`FAB_OPERATOR_SESSION_VALIDATION_URL` in the Python/API environment to the actual
-dashboard listener, for example
-`http://127.0.0.1:3000/api/fab/operator-session/status`. Use the configured `PORT`,
-not an assumed fallback port. The INI equivalent is
-`[operations] operator_session_validation_url`. The URL is not a credential and
-must not include user information, query parameters or a fragment.
-
-Managed configuration requires a strong shared API token even under the `local`
-profile; preflight blocks missing credentials or a missing/invalid validation URL
-before creating the ledger. Configure the separate operator access secret, JWT
-secret, exact HTTPS public origin and trusted proxy peers on Node. The validation
-URL alone does not enable managed sign-in on Node. The launcher does not provision
-an ngrok tunnel, public domain or TLS configuration automatically.
-
-Set `FAB_LOCAL_API_PUBLIC_URL` to the HTTPS ledger origin reachable by the remote
-browser. The launcher preserves this configured address while keeping
-`FAB_LOCAL_API_URL` pointed at the actual loopback API. Without a public address,
-the browser ledger address defaults to that loopback URL. Neither setting opens
-a port or provisions a tunnel; the managed ngrok scripts expose only the API,
-not the React dashboard. See [ngrok setup](local_windows_ngrok_setup.md) for the
-existing-credential and endpoint ownership requirements.
+The Windows launcher is for local operation and keeps services on loopback.
+Production hosting is targeted to Hetzner behind a TLS reverse proxy with
+authenticated access, managed secrets, and an explicitly trusted public origin.
+Do not expose this Windows profile through a public tunnel.
 
 Dashboard logout, expiry and restart revoke subsequent linked ledger requests.
 If the dashboard authority cannot be reached, linked browser access is denied;

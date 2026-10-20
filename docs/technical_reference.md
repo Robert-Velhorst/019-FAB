@@ -486,7 +486,7 @@ python -m unittest discover tests
 
 *   **Release archive**: `python package.py --target compose` packages only clean tracked source, records each file size/SHA-256 in `FAB/RELEASE-MANIFEST.json`, writes an archive SHA-256 sidecar, and verifies the result before success.
 *   **State ownership**: The API and worker share the persistent operations ledger and source evidence volumes; the web service remains stateless.
-*   **Ingress**: Remote access requires TLS, authenticated reverse-proxy policy, a managed secret store, and the explicit trusted public origin. The supervised local ngrok path exposes only the authenticated API/HAI surface.
+*   **Ingress**: Production remote access is hosted on Hetzner and requires TLS, authenticated reverse-proxy policy, a managed secret store, and the explicit trusted public origin. The local Windows profile remains loopback-only.
 *   **Acceptance**: Restore, provider sandbox, authorization-expiry, attachment readback, and archive gates must pass in the deployed environment. A successful image start is not provider acceptance.
 
 ## 6. Future Improvements and Extensibility

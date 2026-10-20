@@ -8,7 +8,6 @@ $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $webRoot = Join-Path $root "web"
 $runtimePath = Join-Path $root "data\fab-runtime.json"
 $workerRuntimePath = Join-Path $root "data\fab-worker-runtime.json"
-$cloudRuntimePath = Join-Path $root "data\fab-ngrok-runtime.json"
 $venvPython = Join-Path $root ".venv\Scripts\python.exe"
 
 Set-Location -LiteralPath $root
@@ -524,16 +523,6 @@ catch {
     Write-Warning "FAB could not read its API token while recovering runtime ownership."
 }
 $apiToken = [string]$apiToken
-
-if (Test-Path -LiteralPath $cloudRuntimePath) {
-    try {
-        & (Join-Path $root "Stop-FAB-Ngrok.ps1") -Quiet
-    }
-    catch {
-        $stopFailed = $true
-        Write-Warning "FAB could not stop the managed ngrok process safely: $($_.Exception.Message)" -WarningAction Continue
-    }
-}
 
 $apiPid = $null
 $workerPid = $null

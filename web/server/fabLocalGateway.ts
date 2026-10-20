@@ -85,7 +85,6 @@ export type FabControlCenter = {
   driveAuthorization: JsonRecord;
   waveSetup: JsonRecord;
   waveReceiptExecutor: JsonRecord;
-  cloudAccess: JsonRecord;
   banking: {
     recentImports: JsonRecord[];
   };
@@ -163,7 +162,6 @@ const READ_PATHS = {
   sourceReadiness: "/api/sources/readiness",
   driveAuthorization: "/api/connectors/google-drive/authorization",
   haiStatus: "/api/hai/status",
-  cloudStatus: "/api/cloud/status",
   gmailAuthorization: "/api/connectors/gmail/authorization",
 } as const;
 
@@ -174,12 +172,10 @@ const READ_TIMEOUT_MS: Partial<Record<FabResourceKey, number>> = {
   autonomy: 15_000,
   backups: 12_000,
   driveWaveWorkOrders: 12_000,
-  cloudStatus: 3_000,
 };
 const CONTROL_CENTER_BATCH_PATH = "/api/control-center/resources";
 const CONTROL_CENTER_DIRECT_RESOURCES = new Set<FabResourceKey>([
   "backups",
-  "cloudStatus",
 ]);
 
 const resourceCache = new Map<FabResourceKey, { value: JsonRecord; updatedAt: string }>();
@@ -502,7 +498,6 @@ async function buildFabControlCenter(generation: number): Promise<FabControlCent
   const sourceReadiness = resources.sourceReadiness || {};
   const waveSetup = resources.waveSetup || {};
   const waveReceiptExecutor = resources.waveReceiptExecutor || {};
-  const cloudAccess = resources.cloudStatus || {};
   const registeredSources = arrayValue(resources.sources?.sources);
   const workflowRuns = arrayValue(resources.workflows?.workflowRuns);
   const reviewWorkItems = arrayValue(resources.reviewQueue?.workItems);
@@ -619,7 +614,6 @@ async function buildFabControlCenter(generation: number): Promise<FabControlCent
     driveAuthorization: resources.driveAuthorization || {},
     waveSetup,
     waveReceiptExecutor,
-    cloudAccess,
     banking: {
       recentImports: bankStatementImports.slice(0, 5).map((item) => ({
         ...selectFields(item, [
@@ -672,26 +666,6 @@ async function buildFabControlCenter(generation: number): Promise<FabControlCent
             : `Governed machine control is enabled for ${haiAllowedCommandIds.length} allowlisted commands. Configure a dedicated HAI credential before remote use; never share the operator API token.`
           : "Governed machine-control contract for safe local FAB commands.",
         allowedCommandIds: haiAllowedCommandIds,
-      },
-      {
-        id: "ngrok_cloud",
-        label: "FAB cloud access",
-        status: stringValue(cloudAccess.status, "not_running"),
-        configured: cloudAccess.configured === true,
-        ready: cloudAccess.active === true,
-        details: cloudAccess.active === true
-          ? cloudAccess.dashboardUrl
-            ? "Authenticated FAB API and HAI access are verified; the remote operator dashboard is protected by ngrok Basic Auth."
-            : "Authenticated HTTPS access is verified for the FAB API and HAI manifest."
-          : "Project-owned ngrok access for the authenticated FAB API and HAI connector.",
-        nextAction: stringValue(
-          cloudAccess.nextAction,
-          "Run Start-FAB-Ngrok.cmd after configuring a dedicated FAB endpoint.",
-        ),
-        lastSyncAt: cloudAccess.verifiedAt || null,
-        publicUrl: cloudAccess.publicUrl || null,
-        dashboardUrl: cloudAccess.dashboardUrl || null,
-        authMode: cloudAccess.authMode || null,
       },
     ],
     workflows: workflowRuns,
@@ -997,7 +971,6 @@ function disconnectedControlCenter(endpoint: string, checkedAt: string, error: s
     driveAuthorization: {},
     waveSetup: {},
     waveReceiptExecutor: {},
-    cloudAccess: {},
     banking: { recentImports: [] },
     exceptions: [],
     exceptionSummary: {},

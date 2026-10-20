@@ -257,7 +257,7 @@ def create_app(config: Dict[str, Any] = None) -> Flask:
     @require_auth
     def index():
         summary = reporting_service.summary()
-        return jsonify({"application": "FAB", "mode": "local-ngrok-compatible", "summary": summary})
+        return jsonify({"application": "FAB", "mode": "local-loopback", "summary": summary})
 
     @app.get("/documents")
     @require_auth

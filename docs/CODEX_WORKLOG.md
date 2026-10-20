@@ -1,5 +1,8 @@
 # Codex Worklog
 
+Historical record: Ngrok support was retired on 2026-10-19. Entries below that
+describe Ngrok document the former implementation and its verification only.
+
 ## 2026-10-16 - Confirm hosted CI and refresh PR security checkpoint
 
 - Verified PR #125 remains open at `6a3bf9bc249b1b6049ee3428c99892c564d3e30e`;

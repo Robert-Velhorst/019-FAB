@@ -1,5 +1,8 @@
 # Production Hardening Verification
 
+Historical verification log: Ngrok support was retired on 2026-10-19. Ngrok
+references below describe prior checks and do not indicate current support.
+
 Date: 2026-09-05. Branch: `hardening/windows-vm-production`, based on `5002f3a`.
 These are development checks, not a claim that an installed business system has
 passed production acceptance. No real ledger was restored, provider record changed,
