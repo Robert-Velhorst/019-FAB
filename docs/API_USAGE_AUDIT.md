@@ -40,14 +40,26 @@ The Express/tRPC gateway calls fixed local paths from `web/server/fabLocalGatewa
 
 - validates endpoint scheme/origin;
 - adds the local API bearer token server-side;
-- applies timeouts, a four-read concurrency bound, and a bounded projection before returning data;
+- applies timeouts, an eight-read concurrency bound, and a bounded projection before returning data;
 - caches only read resources for degraded/stale display;
-- coalesces identical control-center reads for two seconds and invalidates that snapshot after every successful mutation;
+- coalesces concurrent control-center reads, caches verified snapshots for 65 seconds, and invalidates snapshots before and after mutations, including failed readbacks;
 - compresses responses larger than 1 KiB for browser clients;
 - does not convert an API error into success;
 - uses role-gated `fabOperatorProcedure` for financial operations.
 
 Operator-facing links into the protected Flask ledger use `GET /api/fab/operator-session?next=...` instead of exposing a direct token-gated URL. The gateway authorizes a loopback operator or authenticated administrator, accepts only a bounded relative destination, and creates a 45-second HMAC ticket using the server-only API token. `/operator/session/bootstrap` independently verifies audience, version, signature, issue/expiry bounds, actor, nonce, and destination; consumes the nonce once; rotates the Flask session; writes redacted audit evidence; and redirects to the requested ledger page or read-only artifact. The bearer token is never placed in browser code or URLs. Non-loopback public API origins must be clean HTTPS origins.
+
+## Worker telemetry client
+
+`src/operations/operations_client.py` posts workflow/document telemetry to the
+configured dashboard service. Requests do not follow redirects, so a 307/308
+cannot forward the financial payload to a different destination. Redirects are
+reported as failures, not successful writes. Responses are streamed in 64 KiB
+chunks with a 1 MiB decoded-body limit, and closed on success and failure.
+Connect/read timeouts default to five seconds for invalid or non-finite values
+and are capped at 120 seconds. This is a per-connect/read timeout, not an overall
+wall-clock deadline. Existing best-effort local-ledger persistence remains active
+when the remote service fails. No automatic network retry is introduced.
 
 ## Provider APIs
 

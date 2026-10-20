@@ -2,6 +2,9 @@ import unittest
 import os
 import sqlite3
 import tempfile
+import io
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest.mock import MagicMock
 
 import requests
@@ -11,6 +14,90 @@ from src.operations.operations_client import OperationsClient
 
 
 class TestOperationsClient(unittest.TestCase):
+    def test_nonfinite_and_excessive_timeouts_are_bounded(self):
+        for value in (float("inf"), float("nan"), 10 ** 1000, 0, -1, "invalid"):
+            with self.subTest(value=value):
+                client = OperationsClient({"fab_operations_timeout_seconds": value})
+                self.assertEqual(client.timeout, 5.0)
+        client = OperationsClient({"fab_operations_timeout_seconds": 100000})
+        self.assertEqual(client.timeout, 120.0)
+
+    def test_redirect_is_not_followed_or_reported_as_success(self):
+        client = OperationsClient({"fab_operations_api_url": "http://localhost:3000"})
+        response = requests.Response()
+        response.status_code = 307
+        response.headers["Location"] = "https://other.example/collect"
+        response.raw = io.BytesIO(b'{"id": 44}')
+        client.session.request = MagicMock(return_value=response)
+
+        result = client.update_workflow_run(1, status="completed")
+
+        self.assertEqual(result["status"], "failed")
+        self.assertFalse(client.session.request.call_args.kwargs["allow_redirects"])
+        self.assertTrue(response.raw.closed)
+
+    def test_response_is_streamed_bounded_and_closed(self):
+        client = OperationsClient({"fab_operations_api_url": "http://localhost:3000"})
+        response = requests.Response()
+        response.status_code = 200
+        response.raw = io.BytesIO(b" " * (1024 * 1024 + 1))
+        client.session.request = MagicMock(return_value=response)
+
+        result = client.update_workflow_run(1, status="completed")
+
+        self.assertEqual(result["status"], "failed")
+        self.assertTrue(client.session.request.call_args.kwargs["stream"])
+        self.assertTrue(response.raw.closed)
+        self.assertFalse(response._content_consumed)
+
+    def test_real_http_redirect_preserves_document_locally_without_forwarding(self):
+        received = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+                received.append((self.path, body))
+                self.send_response(307 if len(received) == 1 else 200)
+                self.send_header("Location", "/unexpected-destination")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+            def log_message(self, *_args):
+                pass
+
+        with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                with tempfile.TemporaryDirectory() as directory:
+                    client = OperationsClient({
+                        "fab_operations_api_url": f"http://127.0.0.1:{server.server_port}",
+                        "fab_local_ledger_enabled": True,
+                        "fab_local_ledger_path": os.path.join(directory, "ledger.sqlite3"),
+                    })
+                    try:
+                        document_id = client.register_document(
+                            "gmail", {"id": "redirect-regression", "filename": "invoice.pdf"},
+                        )
+                        self.assertEqual(document_id, 1)
+                        connection = sqlite3.connect(client.local_ledger.path)
+                        try:
+                            row = connection.execute(
+                                "SELECT source_document_id FROM bookkeeping_documents WHERE id = ?",
+                                (document_id,),
+                            ).fetchone()
+                        finally:
+                            connection.close()
+                        self.assertEqual(row, ("redirect-regression",))
+                        self.assertEqual(len(received), 1)
+                        self.assertEqual(received[0][0], "/api/fab/operations/documents")
+                    finally:
+                        client.session.close()
+            finally:
+                server.shutdown()
+                thread.join(timeout=5)
+                self.assertFalse(thread.is_alive())
+
     def test_disabled_client_skips_without_http_request(self):
         client = OperationsClient({})
         client.session.request = MagicMock()
@@ -56,6 +143,8 @@ class TestOperationsClient(unittest.TestCase):
         })
         response = MagicMock()
         response.content = b'{"id": 12}'
+        response.status_code = 200
+        response.iter_content.return_value = [response.content]
         response.json.return_value = {"id": 12}
         response.raise_for_status.return_value = None
         client.session.request = MagicMock(return_value=response)
@@ -94,6 +183,8 @@ class TestOperationsClient(unittest.TestCase):
         client = OperationsClient({"fab_operations_api_url": "http://localhost:3000"})
         response = MagicMock()
         response.content = b'{"id": 13}'
+        response.status_code = 200
+        response.iter_content.return_value = [response.content]
         response.json.return_value = {"id": 13}
         response.raise_for_status.return_value = None
         client.session.request = MagicMock(return_value=response)
@@ -107,6 +198,8 @@ class TestOperationsClient(unittest.TestCase):
         client = OperationsClient({"fab_operations_api_url": "http://localhost:3000"})
         response = MagicMock()
         response.content = b'{"id": 14}'
+        response.status_code = 200
+        response.iter_content.return_value = [response.content]
         response.json.return_value = {"id": 14}
         response.raise_for_status.return_value = None
         client.session.request = MagicMock(return_value=response)
@@ -130,6 +223,8 @@ class TestOperationsClient(unittest.TestCase):
         })
         response = MagicMock()
         response.content = b'{"id": 44}'
+        response.status_code = 200
+        response.iter_content.return_value = [response.content]
         response.json.return_value = {"id": 44}
         response.raise_for_status.return_value = None
         client.session.request = MagicMock(return_value=response)

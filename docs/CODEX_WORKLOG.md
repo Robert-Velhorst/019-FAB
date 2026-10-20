@@ -1219,3 +1219,24 @@ describe Ngrok document the former implementation and its verification only.
   case-fold migration fixes are already upstream. The owner confirmed that the
   newer ngrok retirement remains in effect; Windows local operation and the
   supported cloud deployment profiles remain the current deployment direction.
+
+## 2026-10-20 - Bound worker telemetry transport
+
+- Reproduced infinite/excessive configured timeouts, redirects reported as
+  successful writes, and unbounded eager response buffering in OperationsClient.
+- Disable redirects, reject redirect responses, stream decoded response bodies
+  with a 1 MiB cap, and always close the response. Invalid/non-finite timeouts
+  fall back to five seconds; valid connect/read timeouts cap at 120 seconds.
+  These are not total wall-clock deadlines. No automatic retry was added.
+- A real loopback HTTP regression proves a redirected document POST is not
+  forwarded and the source identity is persisted in the local SQLite ledger.
+  Additional tests cover response limits/closure and invalid timeout values.
+- Operations-client and workflow-recovery suites passed on Windows: 32 tests
+  and 6 subtests in 15.86 seconds. The initial integration-test cleanup failure
+  was fixed by closing its own SQLite connection explicitly.
+- Corrected stale gateway audit documentation to match the eight-read pool,
+  65-second snapshot cache, and mutation invalidation already in the code.
+- All hosted checks passed for the preceding HAI commit 317492ee, including
+  Linux/Windows backend, frontend, MySQL, container builds, and CodeQL. That
+  result does not validate this subsequent transport change until CI reruns.
+  No live provider write, deployment, or live HAI acceptance was performed.

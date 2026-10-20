@@ -1,3 +1,5 @@
+import json
+import math
 from typing import Any, Dict, Optional
 
 import requests
@@ -23,6 +25,7 @@ class OperationsClient:
         "reconciliation_matches": "/api/fab/operations/reconciliation-matches",
         "audit_events": "/api/fab/operations/audit-events",
     }
+    MAX_RESPONSE_BYTES = 1024 * 1024
 
     def __init__(self, config: Dict[str, Any], logger=None):
         self.config = config or {}
@@ -72,9 +75,9 @@ class OperationsClient:
     def _positive_float(value: Any, default: float) -> float:
         try:
             parsed = float(value)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return default
-        return parsed if parsed > 0 else default
+        return min(parsed, 120.0) if math.isfinite(parsed) and parsed > 0 else default
 
     def _build_local_ledger(self) -> Optional[LocalOperationsLedger]:
         return build_local_operations_ledger(self.config, on_error=self._log_warning)
@@ -104,6 +107,7 @@ class OperationsClient:
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
 
+        response = None
         try:
             response = self.session.request(
                 method,
@@ -111,19 +115,31 @@ class OperationsClient:
                 json=payload,
                 headers=headers,
                 timeout=self.timeout,
+                allow_redirects=False,
+                stream=True,
             )
+            if 300 <= response.status_code < 400:
+                raise ValueError("FAB operations redirects are not allowed")
             response.raise_for_status()
-            data = response.json() if response.content else {"success": True}
+            content = bytearray()
+            for chunk in response.iter_content(chunk_size=64 * 1024):
+                if len(content) + len(chunk) > self.MAX_RESPONSE_BYTES:
+                    raise ValueError("FAB operations response exceeds the 1 MiB limit")
+                content.extend(chunk)
+            data = json.loads(content) if content else {"success": True}
             return {"enabled": True, "status": "success", "data": data}
         except requests.RequestException as exc:
             self._log_warning(f"FAB operations request failed for {endpoint_key}: {exc}")
             return {"enabled": True, "status": "failed", "error": str(exc)}
-        except ValueError as exc:
-            self._log_warning(f"FAB operations response was not JSON for {endpoint_key}: {exc}")
+        except (ValueError, RecursionError) as exc:
+            self._log_warning(f"FAB operations response was invalid for {endpoint_key}: {exc}")
             return {"enabled": True, "status": "failed", "error": str(exc)}
         except (TypeError, OverflowError) as exc:
             self._log_warning(f"FAB operations payload was not JSON serializable for {endpoint_key}: {exc}")
             return {"enabled": True, "status": "failed", "error": str(exc)}
+        finally:
+            if response is not None:
+                response.close()
 
     def _create_locally(
         self,
