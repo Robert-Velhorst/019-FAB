@@ -1312,3 +1312,33 @@ describe Ngrok document the former implementation and its verification only.
 - Preserved concurrent SQLite NULL-overflow fix 2ca2c12 through a clean,
   non-force rebase. The combined source-preview/bank-summary check passed
   12 tests and 2 subtests afterward; exact-head hosted CI is still required.
+
+## 2026-10-20 - Reviewed web migration command and rerun gate
+
+- Current branch inspection found no named production migration script;
+  `db:push` combines SQL generation and migration. Ported the existing, preserved
+  checkout's separate `db:generate` and `db:migrate` package scripts, without
+  changing its original files or unrelated pending work.
+- CI now invokes the documented `db:migrate` command twice against disposable
+  MySQL before the persistence/transaction integration suite. This changes no
+  migration SQL, schema, dependencies, or startup auto-migration behavior.
+- README/deployment instructions distinguish optional web MySQL from the
+  standalone SQLite ledger, require reviewed SQL and a verified backup/restore
+  path, and explain non-atomic MySQL DDL and fail/recover handling. `db:push`
+  remains development-only; the migration command never generates SQL.
+- Actual local test used cached mysql:8.4, a uniquely named container, loopback
+  port binding, fresh synthetic credentials, 768 MiB memory limit, and memory-
+  backed database storage with no persistent volume. `npm.cmd run db:migrate`
+  passed twice, then all seven real-MySQL integration tests passed. The container
+  stopped successfully and a follow-up inventory found no audit containers.
+  No user database, provider credential, or deployment was changed.
+- Three portable package-start tests passed through installed pnpm, including
+  paths with spaces. After retaining remote curated-preview-error fix 0906b7a
+  via a clean non-force rebase, 13 combined preview/startup tests passed.
+- Corrected README's stale MIT/no-root-license statement using the checked-in
+  AGPL version-3 LICENSE and package's AGPL-3.0-only declaration; no license
+  terms were changed.
+- Whitespace checks passed. Local YAML parsing was unavailable because neither
+  project nor bundled runtimes exposed a YAML parser; GitHub workflow parsing
+  and exact-head CI remain pending. The MySQL command was exercised with npm,
+  not reported as local pnpm migration proof.

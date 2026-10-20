@@ -195,6 +195,26 @@ Windows backend checks plus frontend type, test, audit, dependency-peer and
 build checks. Read the verification records before describing a result as
 current; separate test runs must not be combined into a fictitious total.
 
+### Optional Web MySQL Database
+
+The standalone Windows/VM bookkeeping ledger is SQLite and does not require
+MySQL. The optional full web server uses `DATABASE_URL` for its MySQL-backed
+application data. Before updating an existing MySQL database, stop its writers,
+take and verify a restorable backup, and review the tracked SQL in `web/drizzle/`.
+With the intended database URL supplied securely in the process environment:
+
+```powershell
+pnpm.cmd --dir web run db:migrate
+```
+
+This applies only checked-in migrations; it does not generate new schema SQL.
+`db:generate` is for developers preparing migrations for review. The legacy
+`db:push` combines generation and migration and is development-only; do not use
+it for production upgrades. MySQL schema changes can commit outside a transaction:
+on failure, stop and reconcile the schema/journal or restore the verified backup
+rather than assuming an automatic rollback. CI runs `db:migrate` twice against a
+disposable MySQL database before testing persistence and transaction behavior.
+
 ### Configuration and integrations
 
 The current development preview and its verified source bundles are available in the [FAB v0.1.0 Preview 1 release](https://github.com/Robert-Velhorst/019-FAB/releases/tag/v0.1.0-preview.1). The attached Windows and Compose ZIP files are source distributions, not signed installers or prebuilt container images.
@@ -289,9 +309,9 @@ gates, and report local tests separately from CI, live-provider, and deployment
 acceptance. Do not stage broad directory globs in a checkout containing
 runtime data or credentials.
 
-The web package declares MIT, but the repository has no root `LICENSE` file;
-therefore this repository's overall license is not yet stated. Do not assume
-that the web package's license declaration covers every repository file.
+The repository includes the GNU Affero General Public License version 3 in
+[`LICENSE`](LICENSE); the web package declares `AGPL-3.0-only`. Third-party
+dependencies retain their own license terms.
 
 For diagnostics, `python -m src.run_fab_doctor --support-bundle` can create a
 sanitized support archive. Review the archive before sharing it; sanitization
