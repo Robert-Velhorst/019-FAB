@@ -111,6 +111,14 @@ For rollback, stop FAB first. Preserve the failed live database and its WAL/SHM 
 
 ## Verification
 
+Autonomous duplicate-cycle checks cover the full confirmed-link history, not
+just recent dashboard pages. Repairs retain a pre-repair recovery package and
+return affected documents to manual review. If links change while the backup
+is being created, FAB defers that cycle and records `links_changed_since_scan`
+rather than overwriting the correction. Each cycle's links, reviews, normalized
+records, and audit are changed atomically; a persistence failure rolls the cycle
+back. Source files are not changed and no downstream submission is authorized.
+
 ```powershell
 python -m pytest -q -p no:cacheprovider -p no:stepwise
 pnpm.cmd --dir web check

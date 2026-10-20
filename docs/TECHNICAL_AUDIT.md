@@ -159,17 +159,26 @@ Audit date: 2026-08-13
 
 Autonomy batch counters now use bounded SQL counts instead of materializing OCR
 and review evidence merely to compute list lengths. Status filters and the
-existing 1-to-500 batch clamp are preserved. Duplicate-cycle detection now uses
-only document IDs and duplicate-link IDs, honoring its own maximum 5,000-row
-newest-document window instead of silently inheriting the UI's 500-row clamp.
-A regression reproduced an older two-document cycle hidden by 501 newer rows.
-This does not prove cycle absence outside the explicit 5,000-row graph window.
+existing 1-to-500 batch clamp are preserved. Duplicate-cycle detection now
+streams all confirmed links using only document IDs and link IDs, without a
+newest-document cutoff. A regression covers a cycle older than 5,001 newer
+linked documents, across multiple 500-row cursor batches. Explicit caller-
+supplied diagnostic limits retain their bounded-window behavior; autonomous
+planning and repair use the full-history default. Graph memory scales with
+confirmed links rather than document payload size.
+
+Each repair rechecks its selected links in bounded SQL batches after taking
+the writer lock. Changed cycles are deferred rather than undoing an intervening
+correction. Document links/status, review gates, normalized bookkeeping records,
+and the per-cycle audit commit together or roll back. Backup happens before
+the writer transaction; checksum-bound backup and retained-source gates remain.
 
 `python scripts/benchmark_planning_reads.py` uses only a new disposable synthetic
 SQLite ledger, never operator configuration or provider accounts. Its default
 fixture has 2,000 documents and 2,000 reviews, 8,192-byte OCR/review payloads,
 500-row batches, and five alternating warm samples per implementation. Both
-versions returned identical counts and 500-row graph projections:
+versions returned identical counts and 500-row graph projections in the initial
+`3e46b72` benchmark:
 
 | Read Path | Full-Payload Median | Lightweight Median | Full-Payload / Lightweight Peak Traced Python Bytes |
 | --- | --- | --- | --- |
@@ -184,6 +193,15 @@ data. Expanded ledger/API/health/autonomy/processing checks passed 298 tests and
 The built dashboard/API/SQLite/HAI synthetic rehearsal passed with no provider
 writes and both children stopped. Its tiny warm-cache result is not a scaled
 application baseline. Fresh hosted CI is required for this follow-up.
+
+The subsequent full-history follow-up adds `--confirmed-cycle` to seed a cycle
+spanning every synthetic document. A fresh 2,000-link, five-sample run returned
+the same cycle as the complete diagnostic-window reference: 28.36 ms median /
+1,149,040 peak traced Python bytes for that reference versus 12.87 ms / 583,036
+bytes for full-history confirmed-link streaming. Both implementations cover the
+whole fixture in this comparison; separate regression tests prove coverage
+beyond the old window. This remains a graph-path microbenchmark, not a process
+RSS, whole-app, or live-ledger performance claim.
 
 ## Remaining risks
 

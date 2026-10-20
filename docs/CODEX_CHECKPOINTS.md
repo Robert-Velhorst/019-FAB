@@ -1,5 +1,12 @@
 # Codex Checkpoints
 
+Latest continuation: full-history confirmed-link cycle scans now replace the
+default recent-row window. Per-cycle writer transactions revalidate links and
+atomically retain review/normalization/audit changes, deferring intervening
+corrections. Current focused checks passed 63 tests; the wider changed-service
+group passed 134. See the latest worklog entry for expanded tests, benchmark
+scope, and pending exact-head CI. Live cloud/provider/HAI-peer gates remain open.
+
 ## Current Continuation (2026-10-20)
 
 Worktree `C:\Users\NO\Documents\Codex\2026-06-03\019-FAB-pr125-next`,

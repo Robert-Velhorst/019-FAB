@@ -159,21 +159,25 @@ def trusted_category_suggestion_candidates(
 
 def duplicate_link_cycles(
     ledger: LocalOperationsLedger,
-    limit: int = 5000,
+    limit: Optional[int] = None,
 ) -> list:
-    """Return stable cycles inside the bounded newest-document graph window."""
-    documents = ledger.list_document_duplicate_links(limit=max(1, min(_safe_int(limit) or 5000, 5000)))
-    document_ids = {int(document["id"]) for document in documents}
-    links = {
-        int(document["id"]): int(document["duplicate_of_document_id"])
-        for document in documents
-        if document.get("duplicate_of_document_id") is not None
-        and int(document["duplicate_of_document_id"]) in document_ids
-    }
+    """Scan full link history by default; explicit limits are diagnostic windows."""
+    if limit is None:
+        links = {int(row["id"]): int(row["duplicate_of_document_id"])
+                 for row in ledger.iter_document_duplicate_links()}
+    else:
+        documents = ledger.list_document_duplicate_links(limit=max(1, min(_safe_int(limit) or 5000, 5000)))
+        document_ids = {int(document["id"]) for document in documents}
+        links = {
+            int(document["id"]): int(document["duplicate_of_document_id"])
+            for document in documents
+            if document.get("duplicate_of_document_id") is not None
+            and int(document["duplicate_of_document_id"]) in document_ids
+        }
     cycles = []
     seen_cycles = set()
     completed = set()
-    for start in sorted(links):
+    for start in links:
         path = []
         positions = {}
         current = start
@@ -411,6 +415,7 @@ class LocalDocumentProcessor:
         summary = {
             "cyclesFound": len(cycles),
             "cyclesRepaired": 0,
+            "cyclesSkipped": 0,
             "documentsCleared": 0,
             "reviewItemsCreated": 0,
             "cycleDocumentIds": cycles,
@@ -438,57 +443,58 @@ class LocalDocumentProcessor:
             }
 
         for cycle in cycles:
-            before_links = {}
             cycle_review_items_created = 0
-            for document_id in cycle:
-                document = self.ledger.get_document(document_id)
-                if not document:
+            with self.ledger.write_transaction():
+                current_links = self.ledger.document_duplicate_targets(cycle)
+                visited = set()
+                current = cycle[0]
+                while current in current_links and current not in visited:
+                    visited.add(current)
+                    current = current_links[current]
+                # The scan and backup precede the writer lock; do not undo an
+                # intervening correction or repair only part of a changed cycle.
+                if visited != set(cycle) or current != cycle[0]:
+                    summary["cyclesSkipped"] += 1
+                    self.ledger.record_audit_event({
+                        "action": "local_processing.duplicate_cycle_repair_deferred",
+                        "entityType": "bookkeeping_document", "entityId": str(cycle[0]),
+                        "details": {"actor": actor, "cycleDocumentIds": cycle,
+                                    "reason": "links_changed_since_scan", "externalSubmission": "not_executed"},
+                    })
                     continue
-                before_links[str(document_id)] = document.get("duplicate_of_document_id")
-                existing_duplicate_reviews = [
-                    item
-                    for item in document.get("review_items") or []
-                    if item.get("status") in {"pending", "in_review"}
-                    and item.get("reason") == "duplicate_candidate"
-                ]
-                self.ledger.clear_document_duplicate(document_id)
-                self.ledger.update_document(document_id, {
-                    "processingStatus": "needs_review",
-                })
-                if not existing_duplicate_reviews:
-                    self._queue_review(
-                        document,
-                        "duplicate_candidate",
-                        (
+                before_links = {str(key): value for key, value in current_links.items()}
+                for document_id in cycle:
+                    document = self.ledger.get_document(document_id)
+                    if not document:
+                        raise RuntimeError("A cycle document became unavailable during repair")
+                    existing_duplicate_reviews = [
+                        item for item in document.get("review_items") or []
+                        if item.get("status") in {"pending", "in_review"}
+                        and item.get("reason") == "duplicate_candidate"
+                    ]
+                    self.ledger.clear_document_duplicate(document_id)
+                    self.ledger.update_document(document_id, {"processingStatus": "needs_review"})
+                    if not existing_duplicate_reviews:
+                        self._queue_review(
+                            document, "duplicate_candidate",
                             "Cyclic duplicate links were cleared; compare the retained "
-                            "source documents before confirming a canonical record."
-                        ),
-                        corrected_data={
-                            "cycleDocumentIds": cycle,
-                            "actor": actor,
-                        },
-                    )
-                    cycle_review_items_created += 1
-                    summary["reviewItemsCreated"] += 1
-                LocalBookkeepingRecordService(
-                    self.ledger,
-                    self.config,
-                ).upsert_from_document(document_id)
-                summary["documentsCleared"] += 1
+                            "source documents before confirming a canonical record.",
+                            corrected_data={"cycleDocumentIds": cycle, "actor": actor},
+                        )
+                        cycle_review_items_created += 1
+                    LocalBookkeepingRecordService(self.ledger, self.config).upsert_from_document(document_id)
+                self.ledger.record_audit_event({
+                    "action": "local_processing.duplicate_cycle_repaired",
+                    "entityType": "bookkeeping_document", "entityId": str(cycle[0]),
+                    "details": {
+                        "actor": actor, "cycleDocumentIds": cycle, "previousLinks": before_links,
+                        "reviewItemsCreated": cycle_review_items_created,
+                        "externalSubmission": "not_executed", "sourceFilesModified": False,
+                    },
+                })
             summary["cyclesRepaired"] += 1
-            self.ledger.record_audit_event({
-                "action": "local_processing.duplicate_cycle_repaired",
-                "entityType": "bookkeeping_document",
-                "entityId": str(cycle[0]),
-                "details": {
-                    "actor": actor,
-                    "cycleDocumentIds": cycle,
-                    "previousLinks": before_links,
-                    "reviewItemsCreated": cycle_review_items_created,
-                    "externalSubmission": "not_executed",
-                    "sourceFilesModified": False,
-                },
-            })
+            summary["documentsCleared"] += len(cycle)
+            summary["reviewItemsCreated"] += cycle_review_items_created
         if cycles:
             self.ledger.record_audit_event({
                 "action": "local_processing.duplicate_cycle_repair_completed",

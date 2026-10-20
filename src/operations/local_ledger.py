@@ -4761,6 +4761,38 @@ class LocalOperationsLedger:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def iter_document_duplicate_links(self):
+        """Stream every confirmed link, without OCR, JSON, or unlinked rows."""
+        with self._connection() as connection:
+            cursor = connection.execute(
+                "SELECT id, duplicate_of_document_id FROM bookkeeping_documents "
+                "WHERE duplicate_of_document_id IS NOT NULL"
+            )
+            try:
+                while rows := cursor.fetchmany(500):
+                    for row in rows:
+                        yield dict(row)
+            finally:
+                cursor.close()
+
+    def document_duplicate_targets(self, document_ids: Sequence[int]) -> Dict[int, Optional[int]]:
+        """Read the complete selected graph in bounded SQL batches, without payloads."""
+        if not document_ids:
+            return {}
+        if any(type(value) is not int or not 0 < value <= 2 ** 63 - 1 for value in document_ids):
+            raise ValueError("Duplicate graph document IDs must be positive integers")
+        targets = {}
+        with self._connection() as connection:
+            for offset in range(0, len(document_ids), 500):
+                chunk = document_ids[offset:offset + 500]
+                placeholders = ", ".join("?" for _ in chunk)
+                rows = connection.execute(
+                    "SELECT id, duplicate_of_document_id FROM bookkeeping_documents "
+                    f"WHERE id IN ({placeholders})", chunk,
+                ).fetchall()
+                targets.update((int(row["id"]), row["duplicate_of_document_id"]) for row in rows)
+        return targets
+
     def list_documents(self, status: Optional[Any] = None, limit: int = 100) -> list:
         limit = self._bounded_limit(limit)
         query = "SELECT * FROM bookkeeping_documents"

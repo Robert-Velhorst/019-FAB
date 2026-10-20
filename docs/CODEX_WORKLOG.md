@@ -1542,3 +1542,41 @@ describe Ngrok document the former implementation and its verification only.
 - Prior commit 2a68fa5 finished all nine hosted verification jobs and all four
   CodeQL language analyses successfully. This planning follow-up still needs
   its own exact-head CI. Cloud host and actual HAI-peer acceptance remain open.
+
+## 2026-10-20 - Full-history and transactional duplicate-cycle recovery
+
+- Reproduced the remaining newest-5,000-row blind spot with 5,003 linked
+  documents. The default cycle scan now streams every non-null duplicate link
+  in 500-row cursor batches, retaining only ID relationships. Autonomous
+  planning and repair use that full-history default. Explicit diagnostic limits
+  retain bounded-window behavior; the preceding window limitation is superseded
+  for autonomous checks. Graph memory scales with confirmed links, not OCR.
+- Reproduced an intervening correction being overwritten while backup ran and
+  partial link clearing when a review write failed. Each repair now takes a
+  writer transaction, rechecks the complete cycle using payload-free ID queries
+  in 500-ID SQL batches, and defers changed cycles without undoing corrections.
+  Links, review gates, normalized records, and per-cycle audit commit together.
+  Backup precedes the writer lock; source files and downstream records are not
+  modified. No schema migration or live-ledger mutation was performed.
+- Added rollback cases for first/second review writes, normalization, and final
+  audit failure; stale-state preservation; multi-cycle/inbound-chain/dangling-
+  target graphs in both input orders; selected-ID batches above 1,000 rows;
+  strict ID validation; and full coverage beyond the old 5,000-row window.
+- Expanded ledger/API/health/processing/autonomy checks passed 299 tests and
+  5 subtests. The subsequent processing/autonomy/graph/benchmark group passed
+  134 tests; a fresh final focused run passed 63 tests after the payload-free
+  recheck helper and empty-selection fast path were complete.
+- The built dashboard/API/SQLite/HAI synthetic rehearsal passed again, with no
+  provider writes and owned children stopped. Tests and benchmarks used only
+  new temporary ledgers; original operator data was not used or changed.
+- Extended the bounded benchmark with --confirmed-cycle. A fresh 2,000-link
+  cycle, 2,000 reviews, 8 KiB payloads, and five interleaved warm samples produced
+  identical cycle results: diagnostic-window reference 28.36 ms median and
+  1,149,040 peak traced Python bytes versus full-history streaming 12.87 ms and
+  583,036 bytes. This compares graph paths whose coverage includes the whole
+  fixture, not process RSS, whole-app throughput, or a live production baseline.
+  The earlier run concurrent with regression tests is not used as this snapshot.
+- Fresh exact-head hosted checks remain required. Prior 3e46b72 passed Linux,
+  frontend, MySQL, container builds, CodeQL, and three Windows shards when
+  observed; the fourth Windows shard was still running, not treated as failed
+  or restarted due to an observation timeout. Broader production gates remain.
