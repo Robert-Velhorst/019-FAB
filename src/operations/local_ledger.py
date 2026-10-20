@@ -4740,6 +4740,27 @@ class LocalOperationsLedger:
             rows = connection.execute(query, params).fetchall()
         return [self._row_to_dict(row) for row in rows]
 
+    def count_documents(self, status: Optional[Any] = None, limit: int = 100) -> int:
+        """Count a bounded work batch without loading OCR or evidence metadata."""
+        where, params = [], []
+        self._append_status_filter(where, params, "processing_status", status)
+        query = "SELECT 1 FROM bookkeeping_documents"
+        if where:
+            query += " WHERE " + " AND ".join(where)
+        params.append(self._bounded_limit(limit))
+        with self._connection() as connection:
+            return int(connection.execute("SELECT COUNT(*) FROM (" + query + " LIMIT ?)", params).fetchone()[0])
+
+    def list_document_duplicate_links(self, limit: int = 5000) -> list:
+        """Read only the bounded graph, independently of the 500-row UI limit."""
+        with self._connection() as connection:
+            rows = connection.execute(
+                "SELECT id, duplicate_of_document_id FROM bookkeeping_documents "
+                "ORDER BY updated_at DESC, id DESC LIMIT ?",
+                (max(1, min(self._int(limit, 5000), 5000)),),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def list_documents(self, status: Optional[Any] = None, limit: int = 100) -> list:
         limit = self._bounded_limit(limit)
         query = "SELECT * FROM bookkeeping_documents"
@@ -5326,6 +5347,17 @@ class LocalOperationsLedger:
                 ).fetchall()
             ]
             return result
+
+    def count_review_items(self, status: Optional[Any] = None, limit: int = 100) -> int:
+        """Count a bounded review batch without parsing correction evidence."""
+        where, params = [], []
+        self._append_status_filter(where, params, "status", status)
+        query = "SELECT 1 FROM review_items"
+        if where:
+            query += " WHERE " + " AND ".join(where)
+        params.append(self._bounded_limit(limit))
+        with self._connection() as connection:
+            return int(connection.execute("SELECT COUNT(*) FROM (" + query + " LIMIT ?)", params).fetchone()[0])
 
     def list_review_items(
         self,

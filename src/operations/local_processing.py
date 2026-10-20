@@ -161,8 +161,8 @@ def duplicate_link_cycles(
     ledger: LocalOperationsLedger,
     limit: int = 5000,
 ) -> list:
-    """Return stable document-id groups whose confirmed-duplicate links form cycles."""
-    documents = ledger.list_documents(limit=max(1, min(_safe_int(limit) or 5000, 5000)))
+    """Return stable cycles inside the bounded newest-document graph window."""
+    documents = ledger.list_document_duplicate_links(limit=max(1, min(_safe_int(limit) or 5000, 5000)))
     document_ids = {int(document["id"]) for document in documents}
     links = {
         int(document["id"]): int(document["duplicate_of_document_id"])

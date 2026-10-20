@@ -1511,3 +1511,34 @@ describe Ngrok document the former implementation and its verification only.
   target-host TLS, secret ownership, storage encryption, and the actual HAI
   peer remain separate acceptance gates. The repository still supplies example
   cloud origins; the owner has been asked to identify the existing host/domain.
+
+## 2026-10-20 - Bounded planning read cost and duplicate-cycle window
+
+- Reproduced a cycle missed behind 501 newer documents: duplicate_link_cycles
+  requested 5,000 rows through a UI-oriented method that silently capped it at
+  500. A second red regression proved the graph scan parsed unnecessary OCR
+  and JSON. A dedicated ID/link projection now honors the bounded graph window.
+  This is not a full-history cycle-absence guarantee beyond 5,000 newest rows.
+- Wired bounded SQL document/review counts into autonomy planning. Filter,
+  empty-filter, hostile-string, invalid-limit, and large-queue cases match the
+  previous list-length semantics without hydrating payloads. Existing 500-row
+  work-batch caps and financial/review/approval gates remain intact.
+- Added a bounded, reusable synthetic planning-read benchmark with no operator
+  config or network. On 2,000 documents/reviews with 8 KiB OCR/review payloads,
+  five interleaved warm measurements reduced counter-read median from 164.67 ms
+  to 4.58 ms and a 500-row graph projection from 88.74 ms to 21.08 ms, with
+  identical results. Peak traced Python allocations were 7,186,967 versus
+  3,822 bytes for counters and 7,186,939 versus 170,268 bytes for the graph.
+  These are narrow synthetic reads, not process RSS or whole-app percentages.
+- Expanded ledger/API/health/autonomy/processing checks passed 298 tests and
+  5 subtests in 89.01 seconds. A subsequent 47-test focused run also passed,
+  including the newer 503-row queue ceiling case. Benchmark input bounds,
+  fresh temporary data, and preservation of an operator-path sentinel passed.
+- The real built dashboard/API/SQLite/HAI rehearsal passed with provider writes
+  disabled and owned children stopped. Its separate 20-request/four-client warm
+  diagnostic measured 25.68 ms median / 34.84 ms p95 and 56,871 response bytes;
+  four 50 ms samples observed 190,988,288 combined working-set bytes. This is
+  not a controlled before/after comparison or representative scaled host load.
+- Prior commit 2a68fa5 finished all nine hosted verification jobs and all four
+  CodeQL language analyses successfully. This planning follow-up still needs
+  its own exact-head CI. Cloud host and actual HAI-peer acceptance remain open.

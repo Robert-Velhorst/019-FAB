@@ -155,6 +155,36 @@ Audit date: 2026-08-13
 - Unexpected Flask route exceptions now record `externalSubmission: unknown`; the regression test simulates a provider-side effect before a route throws and verifies the audit does not falsely assert `not_executed`.
 - The fresh Windows production-stack rehearsal passed 30 concurrent authenticated warm-cache `fab.controlCenter` reads at concurrency 6. Removing the unused HAI manifest projection reduced the uncompressed response from 67,105 to 56,750 bytes (15.4%); post-change latency was 31.20 ms median and 37.26 ms p95 on a one-document synthetic ledger. Largest remaining projected fields were `autonomy` (12,081 bytes) and `health` (5,213 bytes). The direct HAI manifest endpoint remains available and passed the rehearsal. The latest 30-request run measured 49.56 ms median / 66.27 ms p95 and 57,768 response bytes on its fixture. Its 50 ms sampler captured six process samples: peak sampled combined API/dashboard working set 189,747,200 bytes (76,197,888 / 113,549,312), dashboard CPU 0.359375 seconds, and API CPU 0.0 seconds at reported precision. The one-document warm-cache, six-sample measurement is diagnostic only and does not measure cold refreshes, scaled-ledger behavior, sustained load, or a representative whole-app resource baseline. The 80-request burst was rate-limited by the existing tRPC policy; the combined rehearsal CLI is now bounded to 30 requests.
 
+## Planning Read Verification (2026-10-20)
+
+Autonomy batch counters now use bounded SQL counts instead of materializing OCR
+and review evidence merely to compute list lengths. Status filters and the
+existing 1-to-500 batch clamp are preserved. Duplicate-cycle detection now uses
+only document IDs and duplicate-link IDs, honoring its own maximum 5,000-row
+newest-document window instead of silently inheriting the UI's 500-row clamp.
+A regression reproduced an older two-document cycle hidden by 501 newer rows.
+This does not prove cycle absence outside the explicit 5,000-row graph window.
+
+`python scripts/benchmark_planning_reads.py` uses only a new disposable synthetic
+SQLite ledger, never operator configuration or provider accounts. Its default
+fixture has 2,000 documents and 2,000 reviews, 8,192-byte OCR/review payloads,
+500-row batches, and five alternating warm samples per implementation. Both
+versions returned identical counts and 500-row graph projections:
+
+| Read Path | Full-Payload Median | Lightweight Median | Full-Payload / Lightweight Peak Traced Python Bytes |
+| --- | --- | --- | --- |
+| Document/review batch counters | 164.67 ms | 4.58 ms | 7,186,967 / 3,822 |
+| 500-row duplicate graph projection | 88.74 ms | 21.08 ms | 7,186,939 / 170,268 |
+
+These are read-path timings and Python allocation peaks, not process RSS, total
+CPU, cold-cache throughput, or a whole-app resource-reduction percentage. The
+fixture remains bounded to 128 MiB of generated payload and removes its temporary
+data. Expanded ledger/API/health/autonomy/processing checks passed 298 tests and
+5 subtests; a further 47-case focused group includes the large-queue clamp check.
+The built dashboard/API/SQLite/HAI synthetic rehearsal passed with no provider
+writes and both children stopped. Its tiny warm-cache result is not a scaled
+application baseline. Fresh hosted CI is required for this follow-up.
+
 ## Remaining risks
 
 - Live Google and Wave acceptance depends on owner authorization and current provider state.
