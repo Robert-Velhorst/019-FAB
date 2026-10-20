@@ -1,4 +1,6 @@
 import os
+import sqlite3
+from contextlib import closing
 import tempfile
 import unittest
 import zipfile
@@ -62,6 +64,29 @@ class TestCorrectionLearningAndBackup(unittest.TestCase):
         self.assertTrue(os.path.exists(result["path"]))
         backups = manager.list_backups()
         self.assertEqual(len(backups), 1)
+
+    def test_nested_database_backup_includes_committed_wal_without_sidecars(self):
+        database_path = self.config["database_path"]
+        self.config["backup_paths"] = [self.tempdir.name]
+        with closing(sqlite3.connect(database_path)) as connection:
+            connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute("PRAGMA wal_autocheckpoint=0")
+            connection.execute("CREATE TABLE wal_backup_probe (value TEXT)")
+            connection.execute("INSERT INTO wal_backup_probe VALUES ('committed')")
+            connection.commit()
+            result = BackupManager(self.config).perform_backup()
+            self.assertEqual(result["status"], "success", result)
+            with zipfile.ZipFile(result["path"]) as archive:
+                members = [name for name in archive.namelist() if name.endswith("fab.sqlite3")]
+                self.assertEqual(len(members), 2)
+                self.assertFalse(any(name.endswith(("-wal", "-shm", "-journal")) for name in archive.namelist()))
+                for index, member in enumerate(members):
+                    restored = os.path.join(self.tempdir.name, f"restored-{index}.sqlite3")
+                    with open(restored, "wb") as handle:
+                        handle.write(archive.read(member))
+                    with closing(sqlite3.connect(restored)) as check:
+                        self.assertEqual(check.execute("PRAGMA integrity_check").fetchone(), ("ok",))
+                        self.assertEqual(check.execute("SELECT value FROM wal_backup_probe").fetchone(), ("committed",))
 
     def test_default_backup_includes_mijngeldzaken_supervised_artifacts(self):
         export_dir = os.path.join(self.tempdir.name, "mijngeldzaken-exports")

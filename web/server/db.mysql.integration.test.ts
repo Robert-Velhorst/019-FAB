@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import mysql from "mysql2/promise";
 import {
   auditEvents,
   bookkeepingDocuments,
@@ -45,6 +47,37 @@ describe.skipIf(!integrationUrl)("MySQL database integration", () => {
     if (dbModule) await dbModule.closeDb();
     if (previousDatabaseUrl === undefined) delete process.env.DATABASE_URL;
     else process.env.DATABASE_URL = previousDatabaseUrl;
+  });
+
+  it.each(["utf8mb4_0900_ai_ci", "utf8mb4_bin"])("deduplicates migration rows using the index collation %s", async collation => {
+    const connection = await mysql.createConnection(integrationUrl!);
+    const suffix = randomUUID().replaceAll("-", "");
+    const names = ["bookkeeping_documents", "review_items", "routing_attempts", "reconciliation_matches", "audit_events"];
+    const table = (name: string) => `probe_${suffix}_${name}`;
+    try {
+      await connection.query(`CREATE TABLE \`${table(names[0])}\` (id INT PRIMARY KEY, source VARCHAR(64), sourceDocumentId VARCHAR(64), duplicateOfDocumentId INT, INDEX idx_bookkeeping_docs_source (source, sourceDocumentId)) CHARACTER SET utf8mb4 COLLATE ${collation}`);
+      for (const name of names.slice(1, 4)) await connection.query(`CREATE TABLE \`${table(name)}\` (id INT PRIMARY KEY, documentId INT)`);
+      await connection.query(`CREATE TABLE \`${table("audit_events")}\` (id INT PRIMARY KEY, entityType VARCHAR(64), entityId VARCHAR(64))`);
+      await connection.query(`INSERT INTO \`${table(names[0])}\` VALUES (1,'gmail','ABC',NULL),(2,'gmail','abc',NULL),(3,'gmail',NULL,2)`);
+      for (const name of names.slice(1, 4)) await connection.query(`INSERT INTO \`${table(name)}\` VALUES (1,2)`);
+      await connection.query(`INSERT INTO \`${table("audit_events")}\` VALUES (1,'bookkeeping_document','2')`);
+      let migration = await readFile(new URL("../drizzle/0007_idempotent_document_registration.sql", import.meta.url), "utf8");
+      for (const name of [...names, "fab_document_canonical"]) migration = migration.replaceAll(`\`${name}\``, `\`${table(name)}\``);
+      for (const statement of migration.split("--> statement-breakpoint")) if (statement.trim()) await connection.query(statement);
+      const canonicalId = collation.endsWith("_bin") ? 2 : 1;
+      const [documents] = await connection.query(`SELECT id, duplicateOfDocumentId FROM \`${table(names[0])}\` ORDER BY id`);
+      expect(documents).toHaveLength(collation.endsWith("_bin") ? 3 : 2);
+      expect((documents as any[]).find(row => row.id === 3).duplicateOfDocumentId).toBe(canonicalId);
+      for (const name of names.slice(1, 4)) {
+        const [rows] = await connection.query(`SELECT documentId FROM \`${table(name)}\``);
+        expect(rows).toEqual([{ documentId: canonicalId }]);
+      }
+      const [audit] = await connection.query(`SELECT entityId FROM \`${table("audit_events")}\``);
+      expect(audit).toEqual([{ entityId: String(canonicalId) }]);
+    } finally {
+      for (const name of [...names].reverse()) await connection.query(`DROP TABLE IF EXISTS \`${table(name)}\``);
+      await connection.end();
+    }
   });
 
   it("keeps source registration idempotent and commits its audit event", async () => {

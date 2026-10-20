@@ -141,9 +141,22 @@ class BackupManager:
         try:
             written_names = set()
             total_source_bytes = 0
+            database_snapshot = None
             with zipfile.ZipFile(partial_path, "x", zipfile.ZIP_DEFLATED) as zipf:
                 def write_source_file(file_path: str, arcname: str) -> None:
-                    nonlocal total_source_bytes
+                    nonlocal total_source_bytes, database_snapshot
+                    canonical_file = _canonical_path(file_path)
+                    # Every archive layout must use the same consistent snapshot,
+                    # including when the database is reached through a directory.
+                    if os.path.normcase(canonical_file) == os.path.normcase(database_path):
+                        if database_snapshot is None:
+                            database_snapshot = self._snapshot_sqlite_database(database_path)
+                            temporary_snapshots.append(database_snapshot)
+                        file_path = database_snapshot
+                    elif os.path.normcase(canonical_file) in {
+                        os.path.normcase(database_path + suffix) for suffix in ("-wal", "-shm", "-journal")
+                    }:
+                        return
                     size_before = os.stat(file_path, follow_symlinks=False).st_size
                     if size_before < 0 or total_source_bytes + size_before > MAX_RESTORE_BYTES:
                         raise ValueError("Backup source data exceeds the restore size limit.")
@@ -162,12 +175,7 @@ class BackupManager:
                         if normalized_arcname in written_names:
                             raise ValueError("Backup sources contain duplicate archive names.")
                         written_names.add(normalized_arcname)
-                        if path == database_path:
-                            snapshot_path = self._snapshot_sqlite_database(path)
-                            temporary_snapshots.append(snapshot_path)
-                            write_source_file(snapshot_path, arcname)
-                        else:
-                            write_source_file(path, arcname)
+                        write_source_file(path, arcname)
                     elif os.path.isdir(path):
                         root_name = os.path.basename(os.path.normpath(path))
                         for root, directories, files in os.walk(
