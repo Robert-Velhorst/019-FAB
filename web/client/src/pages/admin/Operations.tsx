@@ -341,6 +341,7 @@ export default function AdminOperations() {
       offsets,
       limit,
       (offset, pageLimit) => utils.fab.reviewPage.fetch({ offset, limit: pageLimit }),
+      { isCurrent: () => !cancelled && sequence === reviewRefreshSequence.current },
     ).then((refreshed) => {
       if (cancelled || sequence !== reviewRefreshSequence.current) return;
       setReviewWorkItems(refreshed.workItems);

@@ -1,5 +1,18 @@
 # Codex Checkpoints
 
+Latest dashboard follow-up: background review-page refreshes run at most four
+logical reads at a time, preserve offset order and stop queued dispatch after
+supersession or failure. The Operations effect passes its live sequence/cleanup
+guard. Corrected desktop/mobile navigation cascade and mobile table value
+columns. Full web suite: 490 passed, 7 skipped; TypeScript and production build
+budgets passed. Owner-approved Playwright fallback used a temporary real
+dashboard/API/SQLite stack after the in-app browser failed to initialize.
+175 reviews across seven loaded pages refreshed six additional pages at a
+measured logical peak of four; desktop/mobile navigation, no-overflow, console
+and screenshot checks passed. All rehearsal children stopped; no provider writes
+or live ledger access. Prior 9967ba0 CI and CodeQL passed. This follow-up needs
+fresh exact-head CI; full production acceptance and wider UI race audits remain.
+
 Latest continuation: category-review discovery now uses filtered SQL and
 100-document timestamp/ID cursor pages instead of the newest 5,000 global
 reviews. Complete open review groups and all prior eligibility gates remain.

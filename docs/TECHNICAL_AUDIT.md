@@ -21,6 +21,15 @@ Audit date: 2026-08-13
 
 ## Remediated in this audit
 
+- Background refresh of loaded review pages is bounded to four logical reads
+  rather than one request per loaded page at once. Superseded/error batches stop
+  queued work and preserve ordered, all-or-nothing result merging. Synthetic
+  Chromium checks against the real temporary stack observed six additional
+  page reads with peak four while retaining 175 loaded reviews. Desktop mobile
+  navigation-control visibility, collapsed-sidebar mobile reopening and narrow
+  table-value placement were corrected and checked at 1280x800 and 390x844.
+  This is not a whole-app resource or complete browser/device acceptance claim.
+
 - Category candidate discovery no longer takes only the newest 5,000 global
   reviews. SQL selects documents with open category gates, and a stable
   timestamp/ID cursor traverses 100-document pages with complete open review

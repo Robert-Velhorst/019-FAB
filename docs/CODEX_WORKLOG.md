@@ -1665,3 +1665,39 @@ describe Ngrok document the former implementation and its verification only.
   stopped its owned children. No live ledger, credentials, schema or deployment
   changed. Prior 1c75fec completed all nine hosted jobs and CodeQL; this follow-up
   needs fresh exact-head CI, not a transferred production/security clearance.
+
+## 2026-10-20 - Bounded dashboard review refresh and responsive regressions
+
+- A red deferred-response regression proved every loaded review page started
+  concurrently. Replace unbounded fan-out with four logical workers, ordered
+  result slots and an Operations effect sequence/cleanup predicate. Superseded
+  or failed refreshes stop queued dispatch and cannot return a partial merge.
+  Already-issued reads finish normally; no transport-abort claim is made.
+- Six focused cases cover the ceiling, out-of-order completion, initial/staged
+  cancellation, page failure, duplicate-item merge precedence and first-page-only
+  behavior. The full web suite passed 490 tests with 7 skips; TypeScript and
+  production builds/bundle budgets passed. No dependencies changed.
+- The in-app browser failed twice with a kernel-assets path error. Robert
+  approved standard Playwright fallback. A temporary, uncommitted harness used
+  the existing disposable production dashboard/API/SQLite rehearsal, seeded 350
+  synthetic document reviews, and routed a reserved HTTPS origin only to its
+  owned loopback services. No real provider accounts or operator ledger were used.
+- Browser interaction loaded seven 25-document pages (175 loaded reviews;
+  12 visible rows per UI page), triggered the existing background poll and
+  observed six additional page reads with peak logical concurrency four.
+  Displayed row order was retained. The initial harness assumptions of 50-row
+  server pages and all loaded rows rendered were corrected from actual UI state.
+- Visual inspection and a red browser assertion found the desktop mobile-close
+  control exposed by a later generic icon rule. Move its default hidden rule
+  after that rule, retain mobile media overrides, and fix open-navigation
+  specificity for a previously collapsed desktop sidebar. Both transitions pass.
+  Mobile table cells now keep subsequent values in column two with a stable
+  96-pixel label column rather than wrapping metadata under the labels.
+- Final Chromium fallback checked identity/nonblank content, no framework
+  overlay or console errors, 1280x800 and 390x844 document overflow, navigation
+  open/close after desktop collapse, value-column placement and screenshots.
+  The complete synthetic API/HAI/auth/reconciliation rehearsal also passed and
+  stopped its owned children. Evidence/scripts remain outside committed source.
+- Prior 9967ba0 completed all nine CI jobs and CodeQL. This follow-up still
+  requires fresh hosted checks. This does not prove all browser/device races,
+  whole-app resource percentages, production hosting or live provider acceptance.
