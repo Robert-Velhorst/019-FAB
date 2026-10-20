@@ -1395,7 +1395,28 @@ describe Ngrok document the former implementation and its verification only.
   as a fresh final-tree integration pass. The script now checks that prerequisite
   before starting anything.
 - The previous unlogged full-suite process was lost during the tool-host reset.
-  A new full suite is running with durable XML output under ignored
-  data/verification/identity-full-suite.xml. Its completion is not yet claimed.
-  The original dirty checkout remains untouched. No provider or live database
+  The replacement full suite passed: 1,989 tests, 239 subtests, and 8 skips in
+  727.35 seconds. Durable XML output is retained under ignored
+  data/verification/identity-full-suite.xml.
+  The original checkout's source changes remain preserved. No provider or live database
   was changed; the broader production goal remains incomplete.
+
+## 2026-10-20 - Dependency audit repair and deployment direction
+
+- Preserved the user's explicit decision to keep ngrok retired. The older goal
+  text does not authorize restoring it; Windows standalone, supported cloud
+  deployment, and HAI remain the deployment objectives.
+- PR #146's first hosted run passed Linux, all four Windows backend shards,
+  MySQL integration, both container builds, and CodeQL. Frontend stopped at its
+  dependency audit: follow-redirects 1.16.0 had two high-severity advisories and
+  sanitize-html 2.17.7 had one moderate advisory.
+- Updated sanitize-html to 2.18.1 and the locked Axios follow-redirects dependency
+  to 1.16.1, with their targeted dependency closure. The new lockfile audit
+  reports zero known vulnerabilities; this is not a claim of complete security.
+- The inherited node_modules junction hit a Windows package-map write error.
+  Preserved that junction under ignored data/verification and installed this
+  worktree's dependencies independently with a successful frozen-lockfile run.
+  No original source files, credentials, or application records were changed.
+- With the updated dependencies installed: 486 web tests passed, 7 skipped;
+  TypeScript passed; production build and bundle budgets passed. Exact-head
+  hosted checks for this dependency update still require a new CI run.
