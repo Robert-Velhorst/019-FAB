@@ -321,7 +321,7 @@ def duplicate_candidate_reassessment_plan(
     return plans
 
 
-def _duplicate_reassessment_plan_signature(plan: Dict[str, Any]) -> str:
+def _processing_plan_signature(plan: Dict[str, Any]) -> str:
     digest = hashlib.sha256()
     encoder = json.JSONEncoder(sort_keys=True, separators=(",", ":"), allow_nan=False, default=str)
     for chunk in encoder.iterencode(plan):
@@ -543,7 +543,7 @@ class LocalDocumentProcessor:
         }
         if not plans:
             return summary
-        signatures = {tuple(plan["pair"]): _duplicate_reassessment_plan_signature(plan) for plan in plans}
+        signatures = {tuple(plan["pair"]): _processing_plan_signature(plan) for plan in plans}
         # Do not retain a second OCR/evidence snapshot while revalidating later.
         del plans
         if create_backup:
@@ -574,7 +574,7 @@ class LocalDocumentProcessor:
             validated_plans = []
             for pair, signature in signatures.items():
                 current = current_plans.get(pair)
-                if current is not None and _duplicate_reassessment_plan_signature(current) == signature:
+                if current is not None and _processing_plan_signature(current) == signature:
                     validated_plans.append(current)
                     continue
                 summary["deferredPairs"] += 1
@@ -788,8 +788,13 @@ class LocalDocumentProcessor:
     def apply_trusted_category_suggestions(self, limit: int = 500) -> Dict[str, Any]:
         """Apply exact vendor taxonomy matches while preserving every other gate."""
         candidates = self.trusted_category_suggestion_candidates(limit=limit)
+        signatures = {
+            int(candidate["document"]["id"]): _processing_plan_signature(candidate)
+            for candidate in candidates
+        }
+        del candidates
         pre_mutation_backup = None
-        if candidates:
+        if signatures:
             try:
                 backup_service = LocalBackupService(self.ledger, self.config)
                 backup = backup_service.create_backup(
@@ -813,7 +818,7 @@ class LocalDocumentProcessor:
                     "action": "local_processing.trusted_category_batch_blocked",
                     "entityType": "bookkeeping_document",
                     "details": {
-                        "candidateCount": len(candidates),
+                        "candidateCount": len(signatures),
                         "reason": "pre_mutation_backup_failed",
                         "errorType": type(exc).__name__,
                         "externalSubmission": "not_executed",
@@ -824,7 +829,8 @@ class LocalDocumentProcessor:
                     "pre-mutation backup could not be verified."
                 ) from exc
         summary = {
-            "candidates": len(candidates),
+            "candidates": len(signatures),
+            "deferredDocuments": 0,
             "updatedDocuments": 0,
             "resolvedReviewItems": 0,
             "stillNeedsReview": 0,
@@ -833,6 +839,33 @@ class LocalDocumentProcessor:
             "preMutationBackup": pre_mutation_backup,
             "externalSubmission": "not_executed",
         }
+        if not signatures:
+            return summary
+        with self.ledger.write_transaction():
+            current_candidates = {
+                int(candidate["document"]["id"]): candidate
+                for candidate in self.trusted_category_suggestion_candidates(limit=limit)
+            }
+            validated_candidates = []
+            for document_id, signature in signatures.items():
+                current = current_candidates.get(document_id)
+                if current is not None and _processing_plan_signature(current) == signature:
+                    validated_candidates.append(current)
+                    continue
+                summary["deferredDocuments"] += 1
+                self.ledger.record_audit_event({
+                    "action": "local_processing.trusted_category_deferred",
+                    "entityType": "bookkeeping_document",
+                    "entityId": str(document_id),
+                    "details": {
+                        "reason": "evidence_or_review_state_changed",
+                        "externalSubmission": "not_executed",
+                    },
+                })
+            return self._apply_trusted_category_suggestions(validated_candidates, summary)
+
+    def _apply_trusted_category_suggestions(self, candidates: list, summary: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply only revalidated candidates within the caller's writer transaction."""
         for candidate in candidates:
             document = candidate["document"]
             suggestion = candidate["suggestion"]
@@ -935,12 +968,11 @@ class LocalDocumentProcessor:
             summary["stillNeedsReview"] += int(bool(remaining_reviews))
             summary["readyDocuments"] += int(not remaining_reviews)
             summary["documentIds"].append(document_id)
-        if candidates:
-            self.ledger.record_audit_event({
-                "action": "local_processing.trusted_category_batch_completed",
-                "entityType": "bookkeeping_document",
-                "details": dict(summary),
-            })
+        self.ledger.record_audit_event({
+            "action": "local_processing.trusted_category_batch_completed",
+            "entityType": "bookkeeping_document",
+            "details": dict(summary),
+        })
         return summary
 
     def _replace_trusted_category_extracted_field(

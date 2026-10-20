@@ -1606,3 +1606,32 @@ describe Ngrok document the former implementation and its verification only.
 - Prior commit 0052ef6 passed all nine hosted verification jobs and four-language
   CodeQL. This reassessment follow-up requires new exact-head checks and is not
   yet a completed independent security review or live deployment acceptance.
+
+## 2026-10-20 - Trusted-category stale decisions and batch atomicity
+
+- Four red regressions reproduced a category decision overwritten after an
+  operator correction during backup, and partial writes after extracted-field,
+  review or completion-audit failures. The existing method had no shared writer
+  transaction and consumed the pre-backup candidates without revalidation.
+- Store compact canonical plan fingerprints, release the original payload
+  snapshot, and rebuild candidates under the ledger's immediate writer lock.
+  Changed evidence/category/review state defers that document; new candidates
+  cannot enter an already backed-up batch. Non-category review gates remain.
+- Category, extracted fields, review resolution, processing status, normalized
+  records and per-document/completion audits now commit together or roll back.
+  The additive `deferredDocuments` summary distinguishes skips from successes;
+  the autonomy contract assertion includes its zero value on unchanged work.
+- Expanded processing/autonomy/ledger/API/records/health checks: 289 passed and
+  8 subtests passed in 74.52 seconds. Final focused category/duplicate tests:
+  17 passed, including a separate ledger connection making a same-timestamp
+  correction, post-persistence normalization failure, a second-document field
+  failure, changed evidence/new candidates, and an authenticated synthetic backup.
+  That backup fixture lacks source files and is not production restore proof.
+- The built dashboard/API/SQLite/HAI rehearsal passed with synthetic-only data,
+  loopback-only access, no provider writes and owned children stopped. No UI
+  layout changes or new live browser acceptance are claimed for this follow-up.
+- Prior e344700 completed all nine verification jobs and four-language CodeQL.
+  Its managed sequential diff security review sealed with zero reportable
+  findings; it was not independent and does not cover this newer diff. Fresh
+  exact-head hosted checks remain required. Ngrok stays retired; live host,
+  provider and external HAI-peer acceptance remain separate unresolved gates.

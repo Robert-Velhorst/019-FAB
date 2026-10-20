@@ -1,5 +1,17 @@
 # Codex Checkpoints
 
+Latest continuation: trusted-vendor category automation now fingerprints its
+original candidates, releases that snapshot before backup, revalidates under
+the writer lock, and defers changed documents. Accepted category/field/review/
+normalized-record/audit mutations share one batch transaction. Expanded checks
+passed 289 tests and 8 subtests; final focused checks passed 17 tests including
+a separate-connection operator correction and real synthetic authenticated
+backup. The built dashboard/API/SQLite/HAI synthetic rehearsal passed and its
+children stopped. Prior e344700 completed all nine CI jobs and four-language
+CodeQL; its focused managed security review had zero reportable findings, not
+an independent or whole-repository clearance. This new follow-up requires fresh
+exact-head CI. No live provider, ledger, cloud host or external HAI peer changed.
+
 Latest safety follow-up: duplicate-candidate reassessment now fingerprints and
 revalidates evidence under the writer lock, defers changed/operator-confirmed
 pairs, and commits accepted candidate/link/review/document/normalized-record/

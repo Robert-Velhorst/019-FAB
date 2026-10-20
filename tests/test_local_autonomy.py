@@ -563,6 +563,7 @@ class TestLocalAutonomousService(unittest.TestCase):
                 trusted,
                 {
                     "candidates": 1,
+                    "deferredDocuments": 0,
                     "updatedDocuments": 1,
                     "resolvedReviewItems": 2,
                     "stillNeedsReview": 1,

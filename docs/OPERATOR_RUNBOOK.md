@@ -128,6 +128,15 @@ commit as one batch or roll back. A failed candidate transition is not counted
 as a successful closure. Confirmed operator decisions are not reopened by an
 older machine plan.
 
+Trusted exact-vendor category automation follows the same backup/revalidation
+boundary. If source evidence, the category decision, or category review state
+changes while backup runs, that document is deferred with
+`evidence_or_review_state_changed`. `deferredDocuments` counts these skipped
+documents; it does not count them as updated or ready. Newly discovered
+candidates wait for another backed-up batch. All accepted category, extracted
+field, review, normalized-record, and audit changes commit together or roll back.
+Non-category review gates and external approval requirements remain in place.
+
 ```powershell
 python -m pytest -q -p no:cacheprovider -p no:stepwise
 pnpm.cmd --dir web check
