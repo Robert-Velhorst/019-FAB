@@ -1,5 +1,18 @@
 # Codex Checkpoints
 
+Latest retry-admission follow-up: failed-document retries now compare their
+starting core snapshot under the ledger writer lock and atomically persist
+the imported transition, bounded retry history and retry-start audit. Stale
+claims are skipped, not counted as retried; admission avoids full history
+hydration. Three red regressions reproduced partial writes, overwritten newer
+status and competing callers. Expanded checks passed 277 tests and 8 subtests;
+10 final focused cases include single/batch authenticated API skip semantics,
+same-timestamp evidence drift, post-insert audit failure and fast re-failure.
+The built synthetic dashboard/API/HAI rehearsal passed and stopped children.
+OCR/file work runs after the claim transaction; this is not a global processing
+lease or exactly-once guarantee. Fresh exact-head CI and live production gates
+remain open. Ngrok stays retired and no live financial data changed.
+
 Latest queue race follow-up: incremental review loads now retain their starting
 queue generation and cannot append rows, offsets, pagination or stale errors
 after a newer manual/background refresh. Every first-page effect and cleanup

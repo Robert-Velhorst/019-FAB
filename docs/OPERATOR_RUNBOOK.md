@@ -150,6 +150,13 @@ Only one incremental load runs at a time; after it settles, "Load next" can
 retrieve a fresh page normally. Background first-page updates have the same
 supersession behavior. This affects the operator view, not financial posting.
 
+A failed-processing retry claims only the exact failed document snapshot that
+was inspected. If its status or evidence changes before admission, FAB skips it
+with `document_changed_before_retry`; a skipped claim does not increment the
+batch's retried count. Retry status/history and the start audit commit together
+or roll back. OCR/file processing starts after that short claim transaction;
+this does not establish a global processing lease or external exactly-once delivery.
+
 ```powershell
 python -m pytest -q -p no:cacheprovider -p no:stepwise
 pnpm.cmd --dir web check

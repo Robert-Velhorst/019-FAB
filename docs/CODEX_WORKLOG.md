@@ -1729,3 +1729,32 @@ describe Ngrok document the former implementation and its verification only.
   no operator ledger, provider account, production deployment or permissions
   changed. Fresh exact-head CI and broader multi-tab/device/provider acceptance
   remain necessary; this is not an error-free or production-complete claim.
+
+## 2026-10-20 - Atomic snapshot-bound failed-retry admission
+
+- Three red regressions reproduced an imported transition left behind when the
+  retry-start audit failed, a newer reviewed status overwritten by a stale
+  retry snapshot, and two competing failed-retry callers both entering processing.
+- Read a compact core snapshot instead of hydrating the full document history.
+  Under the immediate writer lock, require the document to remain failed and its
+  canonical core fingerprint to match. Persist status, retry count/history and
+  audit in that transaction; an audit exception rolls them all back. Competing
+  stale snapshots cannot reclaim a document even if the first retry fails fast
+  and its processing status becomes failed again.
+- A changed claim returns `skipped` with `document_changed_before_retry` and no
+  retry marker. Batch summaries count only actual retry claims as retried;
+  existing single-document and batch API routes expose that state unchanged.
+  OCR and file I/O stay outside the writer transaction to avoid holding the
+  database lock during expensive work. This is admission safety, not a new
+  whole-processing lease, generic-importer exclusion or exactly-once guarantee.
+- Expanded processing/autonomy/ledger/API/records/health checks: 277 passed and
+  8 subtests passed in 87.20 seconds. Final focused suite: 10 passed, covering
+  before/after-insert audit failure, separate-connection operator correction,
+  two-caller contention and fast re-failure, same-timestamp evidence changes,
+  skip counts, no history hydration and authenticated single/batch API behavior.
+- The built dashboard/API/SQLite/auth/HAI/reconciliation synthetic rehearsal
+  passed with loopback-only access, no provider writes and owned children stopped.
+  No web source changed, so no new browser/layout acceptance is claimed here.
+  All ledgers and credentials were synthetic; no production/provider change.
+  New exact-head CI is required; the previous b4b6f9d run was still queued/running
+  when inspected, while c545df1's verification run had been superseded/cancelled.

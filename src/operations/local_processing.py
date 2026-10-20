@@ -1478,7 +1478,7 @@ class LocalDocumentProcessor:
         for document in documents:
             result = self.retry_document(int(document["id"]), actor=actor)
             status = result.get("status")
-            summary["retried"] += 1
+            summary["retried"] += int(result.get("retry") is True)
             if result.get("skipped"):
                 summary["skipped"] += 1
             elif status == "processed":
@@ -1505,7 +1505,7 @@ class LocalDocumentProcessor:
         return summary
 
     def retry_document(self, document_id: int, actor: str = "fab_local_processing") -> Dict[str, Any]:
-        document = self.ledger.get_document(document_id)
+        document = self.ledger.get_document_core(document_id)
         if not document:
             return {"documentId": document_id, "status": "not_found", "error": "Document not found"}
         if document.get("processing_status") != "failed":
@@ -1516,6 +1516,14 @@ class LocalDocumentProcessor:
                 "reason": "document_not_failed",
             }
         retry_count = self._mark_retry_started(document, actor)
+        if retry_count is None:
+            current = self.ledger.get_document_core(document_id)
+            return {
+                "documentId": document_id,
+                "status": current.get("processing_status") if current else "not_found",
+                "skipped": True,
+                "reason": "document_changed_before_retry",
+            }
         result = self.process_document(document_id)
         result["retry"] = True
         result["retryCount"] = retry_count
@@ -2035,36 +2043,42 @@ class LocalDocumentProcessor:
             "correctedData": review_data,
         })
 
-    def _mark_retry_started(self, document: Dict[str, Any], actor: str) -> int:
+    def _mark_retry_started(self, document: Dict[str, Any], actor: str) -> Optional[int]:
         document_id = int(document["id"])
-        metadata = dict(document.get("metadata") or {})
-        processing = dict(metadata.get("processing") or {})
-        retry_count = _safe_int(processing.get("retryCount")) + 1
-        retry_history = list(processing.get("retryHistory") or [])
-        retry_history.append({
-            "retryCount": retry_count,
-            "startedAt": _now(),
-            "actor": actor,
-            "previousStatus": document.get("processing_status"),
-            "previousError": metadata.get("processingError"),
-        })
-        processing["retryCount"] = retry_count
-        processing["retryHistory"] = retry_history[-10:]
-        metadata["processing"] = processing
-        self.ledger.update_document(document_id, {
-            "processingStatus": "imported",
-            "metadata": metadata,
-        })
-        self.ledger.record_audit_event({
-            "action": "local_processing.retry_started",
-            "entityType": "bookkeeping_document",
-            "entityId": str(document_id),
-            "details": {
-                "actor": actor,
+        signature = _processing_plan_signature(document)
+        with self.ledger.write_transaction():
+            current = self.ledger.get_document_core(document_id)
+            if (not current or current.get("processing_status") != "failed"
+                    or _processing_plan_signature(current) != signature):
+                return None
+            metadata = dict(current.get("metadata") or {})
+            processing = dict(metadata.get("processing") or {})
+            retry_count = _safe_int(processing.get("retryCount")) + 1
+            retry_history = list(processing.get("retryHistory") or [])
+            retry_history.append({
                 "retryCount": retry_count,
+                "startedAt": _now(),
+                "actor": actor,
+                "previousStatus": current.get("processing_status"),
                 "previousError": metadata.get("processingError"),
-            },
-        })
+            })
+            processing["retryCount"] = retry_count
+            processing["retryHistory"] = retry_history[-10:]
+            metadata["processing"] = processing
+            self.ledger.update_document(document_id, {
+                "processingStatus": "imported",
+                "metadata": metadata,
+            })
+            self.ledger.record_audit_event({
+                "action": "local_processing.retry_started",
+                "entityType": "bookkeeping_document",
+                "entityId": str(document_id),
+                "details": {
+                    "actor": actor,
+                    "retryCount": retry_count,
+                    "previousError": metadata.get("processingError"),
+                },
+            })
         return retry_count
 
     def _resolve_inactive_processing_reviews(
