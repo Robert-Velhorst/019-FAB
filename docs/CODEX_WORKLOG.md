@@ -1245,3 +1245,38 @@ describe Ngrok document the former implementation and its verification only.
 
 - Store `invalid_executor_result` as the audit error code and replay the original stored failure code. Historical invalid-result records without that field retain their classification through their existing error type; ordinary executor exceptions retain `executor_failed`.
 - Added assertions for authenticated API replay, all seven malformed-result fixtures, and the durable audit code. Local connector suite: 27 tests and 15 subtests passed. No provider execution or deployment was performed.
+
+## 2026-10-20 - Complete, compact bank dashboard totals
+
+- Found the dashboard deriving gross unreconciled bank amounts from only its
+  latest 250 transaction rows. Replaced that partial window with a complete
+  SQLite aggregate, wired through Flask's individual and batched resources to
+  the dashboard gateway. Shared filters preserve the default detail route.
+- Summary reads omit private transaction rows and limit recent statement
+  imports to five. Approved/reconciled/ignored entries do not contribute.
+  Missing amounts or overflow mark the summary incomplete. The gateway shows
+  unavailable amounts for absent, incomplete, malformed, or unsupported-currency
+  aggregates instead of silently calculating partial legacy totals.
+- Reproduced the API detail-load bug and six gateway failures before fixes.
+  Final checks: 146 Python tests and 7 subtests passed across API, bank import,
+  reconciliation, SQL safety, and new summary coverage; 71 gateway tests passed.
+  Type check and production build/budget verification passed.
+- Actual HTTP smoke check on this Windows host: built standalone dashboard
+  using the windows deployment profile, temporary Flask backend, fresh random
+  secrets, and a synthetic SQLite ledger. The tRPC control-center response
+  reported 301 transactions, EUR 602 exposure, and a live bank resource. The
+  dashboard HTML returned 200; an anonymous backend summary request returned
+  401. All temporary processes stopped and temporary data was removed. This
+  was not browser rendering, installer acceptance, or live provider acceptance.
+- Final-code synthetic benchmark: 2,000 transactions with 4 KiB metadata each,
+  ten Flask test-client reads after warmup, under tracemalloc. Detail-window
+  response: 1,127,049 bytes, 62.437 ms median, 4,772,111-byte traced Python peak.
+  Complete-summary response: 209 bytes, 11.449 ms median, 38,444-byte traced peak.
+  The summary asserted all 2,000 transactions and EUR 2,500 exposure. These are
+  scoped endpoint measurements, not whole-app memory or sustained-load claims.
+- Hosted checks for the preceding transport commit 0e18e590 passed, including
+  Linux/Windows backend, frontend, MySQL, container builds, and CodeQL. The new
+  dashboard-summary commit requires its own CI verification.
+- Preserved concurrent remote HAI replay-classification commit 3d58a92 through
+  a non-force rebase; the only conflict was adjacent work-log entries, both
+  retained. The combined HAI/summary check then passed 29 tests and 17 subtests.

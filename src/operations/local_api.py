@@ -200,7 +200,7 @@ CONTROL_CENTER_BATCH_PATHS = {
     "metrics": "/api/dashboard",
     "notifications": "/api/notifications?limit=10",
     "settings": "/api/settings",
-    "bankTransactions": "/api/bank-transactions?limit=250",
+    "bankTransactions": "/api/bank-transactions?view=summary",
     "reconciliation": "/api/reconciliation?limit=10",
     "activity": "/api/audit?limit=12",
     "sources": "/api/sources?limit=50",
@@ -7653,18 +7653,22 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
 
     @app.get("/api/bank-transactions")
     def bank_transactions():
-        return jsonify({
-            "bankTransactions": ledger.list_bank_transactions(
-                account_identifier=request.args.get("accountIdentifier") or request.args.get("account_identifier"),
-                status=request.args.get("status"),
-                reconciliation_status=request.args.get("reconciliationStatus") or request.args.get("reconciliation_status"),
-                limit=_limit_arg(),
-            ),
+        filters = {
+            "account_identifier": request.args.get("accountIdentifier") or request.args.get("account_identifier"),
+            "status": request.args.get("status"),
+            "reconciliation_status": request.args.get("reconciliationStatus") or request.args.get("reconciliation_status"),
+        }
+        summary_only = request.args.get("view") == "summary"
+        payload = {
+            "bankTransactions": [] if summary_only else ledger.list_bank_transactions(**filters, limit=_limit_arg()),
             "bankStatementImports": ledger.list_bank_statement_imports(
-                account_identifier=request.args.get("accountIdentifier") or request.args.get("account_identifier"),
-                limit=25,
+                account_identifier=filters["account_identifier"],
+                limit=5 if summary_only else 25,
             ),
-        })
+        }
+        if summary_only:
+            payload["summary"] = ledger.bank_transaction_summary(**filters)
+        return jsonify(payload)
 
     @app.post("/api/bank-transactions/import")
     def import_bank_transactions():

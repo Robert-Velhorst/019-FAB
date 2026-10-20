@@ -5808,7 +5808,57 @@ class LocalOperationsLedger:
         limit: int = 100,
     ) -> list:
         limit = self._bounded_limit(limit)
+        where, params = self._bank_transaction_filters(account_identifier, status, reconciliation_status)
         query = "SELECT * FROM bank_transactions"
+        if where:
+            query = f"{query} WHERE {' AND '.join(where)}"
+        query = f"{query} ORDER BY transaction_date DESC, updated_at DESC, id DESC LIMIT ?"
+        params.append(limit)
+        with self._connection() as connection:
+            rows = connection.execute(query, params).fetchall()
+        return [self._row_to_dict(row) for row in rows]
+
+    def bank_transaction_summary(
+        self,
+        account_identifier: Optional[str] = None,
+        status: Optional[Any] = None,
+        reconciliation_status: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        where, params = self._bank_transaction_filters(account_identifier, status, reconciliation_status)
+        # Aggregate the full matching set in SQLite, not a paginated detail window.
+        query = """
+            SELECT UPPER(COALESCE(NULLIF(TRIM(currency), ''), 'UNKNOWN')) AS currency,
+                   COUNT(*) AS transaction_count,
+                   SUM(CASE WHEN reconciliation_status NOT IN ('approved', 'reconciled', 'ignored')
+                            THEN 1 ELSE 0 END) AS unreconciled_count,
+                   SUM(CASE WHEN reconciliation_status NOT IN ('approved', 'reconciled', 'ignored') AND amount IS NULL
+                            THEN 1 ELSE 0 END) AS missing_amount_count,
+                   SUM(CASE WHEN reconciliation_status NOT IN ('approved', 'reconciled', 'ignored')
+                            THEN ABS(COALESCE(amount, 0)) ELSE 0 END) AS unreconciled_amount
+            FROM bank_transactions
+        """
+        if where:
+            query += f" WHERE {' AND '.join(where)}"
+        query += " GROUP BY 1"
+        with self._connection() as connection:
+            rows = connection.execute(query, params).fetchall()
+        complete = all(
+            not row["missing_amount_count"] and math.isfinite(row["unreconciled_amount"])
+            for row in rows
+        )
+        return {
+            "complete": complete,
+            "scope": "all_matching_transactions",
+            "transactionCount": sum(row["transaction_count"] for row in rows),
+            "unreconciledCount": sum(row["unreconciled_count"] for row in rows),
+            "unreconciledAmountByCurrency": {
+                row["currency"]: round(row["unreconciled_amount"], 2)
+                for row in rows if row["unreconciled_count"]
+            } if complete else {},
+        }
+
+    @staticmethod
+    def _bank_transaction_filters(account_identifier, status, reconciliation_status):
         params = []
         where = []
         if account_identifier:
@@ -5834,13 +5884,7 @@ class LocalOperationsLedger:
             else:
                 where.append("reconciliation_status = ?")
                 params.append(reconciliation_status)
-        if where:
-            query = f"{query} WHERE {' AND '.join(where)}"
-        query = f"{query} ORDER BY transaction_date DESC, updated_at DESC, id DESC LIMIT ?"
-        params.append(limit)
-        with self._connection() as connection:
-            rows = connection.execute(query, params).fetchall()
-        return [self._row_to_dict(row) for row in rows]
+        return where, params
 
     def upsert_vendor_category_rule(self, payload: Dict[str, Any]) -> int:
         vendor_name = str(payload.get("vendorName") or payload.get("vendor_name") or "").strip()

@@ -87,3 +87,20 @@ ceiling is no longer the default memory budget for ordinary commands.
 Every JSON error below `/api/` has the same transport envelope: `success=false`, `status`, `errorCode`, `message`, and `requestId`. Route-specific fields such as `error`, validation details, or provider state are preserved. FAB accepts a caller-provided `X-Request-ID` only when it is a bounded safe identifier; otherwise it creates one and always returns the effective value in the response header and body. Unexpected exceptions return a generic message and create a sanitized correlated ledger audit event plus local log entry without exposing financial or provider details.
 
 `GET /api/health` computes the complete issue set before deriving status, severity counts, metrics, type counts, and next actions. It returns the highest-priority issue-detail window only: 50 by default and 1-500 through `issueLimit`. `issueCount`, `issueTypeCounts`, `issuesReturned`, and `issuesTruncated` distinguish complete aggregate evidence from the bounded detail array. Identical read-only projections are coalesced in an eight-entry, two-second server cache; `X-FAB-Health-Cache` reports `hit`, `miss`, or `disabled`, while browser/proxy caching remains `no-store`. Internal autonomy, notifications, close readiness, exception materialization, and every external-execution gate continue to read the ledger directly and never use this cache.
+
+## Complete bank dashboard aggregates
+
+`GET /api/bank-transactions?view=summary` computes counts and gross unreconciled
+amounts by currency over all matching bank transactions, not a limited detail
+page. It applies the same account/status/reconciliation filters as the detail
+route and excludes approved, reconciled, and ignored transactions from exposure.
+Amounts are absolute values (incoming and outgoing do not cancel), rounded to
+two decimal places for this dashboard metric. The summary omits transaction
+details and returns only the five most recent statement imports.
+
+Both the batched control-center resource and individual gateway read use this
+summary. Missing amounts or non-finite aggregate totals mark it incomplete;
+the gateway then displays the amount as unavailable. It also rejects missing,
+incomplete, malformed, or unsupported-currency aggregates instead of reconstructing
+an apparently complete amount from a legacy server's latest 250 detail rows.
+The default detail endpoint remains available with its existing bounded list.
