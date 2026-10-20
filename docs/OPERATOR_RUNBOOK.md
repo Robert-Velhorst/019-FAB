@@ -86,6 +86,10 @@ Never archive a Drive source merely because a Wave record exists. FAB must verif
 
 Production deployment is targeted to Hetzner. Keep this Windows profile loopback-only; use the Hetzner deployment instructions for public HTTPS access.
 
+The VM profile has an explicit, separately credentialed HAI override. Follow
+the [VM HAI setup and rotation steps](vm-production.md#optional-hai-access);
+do not share an operator credential with an agent or expose another port.
+
 Create a verified recovery package from the dashboard. Restore only after starting `Start-FAB-Maintenance.cmd`; the worker, normal mutations, HAI execution are then locked. Inspect the package first. Ledger-only recovery requires `RESTORE FAB LOCAL LEDGER`; a source-complete recovery package can also recover exact source bytes with `RESTORE FAB LEDGER AND SOURCE EVIDENCE`. FAB creates a pre-restore package, refuses source overwrite or checksum drift, verifies rewritten paths and bytes, and rolls the ledger back after a failed final check. When recovery is complete, run `Stop-FAB.cmd` and `Start-FAB.cmd`, then verify standard liveness and worker ownership.
 
 New recovery package names include a random identifier as well as a timestamp.

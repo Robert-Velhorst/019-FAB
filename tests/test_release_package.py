@@ -35,6 +35,9 @@ class ReleasePackageTests(unittest.TestCase):
         self.assertEqual(windows["target"], "windows")
         self.assertEqual(compose["target"], "compose")
         self.assertTrue(windows_path.with_suffix(".zip.sha256").is_file())
+        with zipfile.ZipFile(compose_path, "r") as release:
+            self.assertIn("FAB/docker-compose.vm.yml", release.namelist())
+            self.assertIn("FAB/docker-compose.vm.hai.yml", release.namelist())
 
         with zipfile.ZipFile(windows_path, "r") as release:
             names = release.namelist()
@@ -51,6 +54,12 @@ class ReleasePackageTests(unittest.TestCase):
         (self.root / "README.md").write_text("modified\n", encoding="utf-8")
         with self.assertRaisesRegex(ReleasePackageError, "modified tracked files"):
             self.builder.build_local_package()
+
+    def test_compose_release_requires_the_documented_hai_override(self):
+        (self.root / "docker-compose.vm.hai.yml").unlink()
+        self._commit("missing HAI deployment fixture")
+        with self.assertRaisesRegex(ReleasePackageError, "docker-compose.vm.hai.yml"):
+            self.builder.build_cloud_package()
 
     def test_refuses_tracked_runtime_or_secret_paths(self):
         secret = self.root / "credentials" / "token.json"
@@ -148,6 +157,8 @@ class ReleasePackageTests(unittest.TestCase):
             "web/Dockerfile": "FROM node:22-slim\n",
             "Dockerfile": "FROM python:3.13-slim\n",
             "docker-compose.yml": "services: {}\n",
+            "docker-compose.vm.yml": "services: {}\n",
+            "docker-compose.vm.hai.yml": "services: {}\n",
             "docker-compose.maintenance.yml": "services: {}\n",
             "README.md": "# FAB\n",
             "tests/development_only.py": "assert True\n",

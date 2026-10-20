@@ -33,6 +33,14 @@ passed Linux, frontend, MySQL, containers, CodeQL, and three Windows shards;
 one Windows shard was still running when checked. The backup follow-up itself
 requires fresh exact-head hosted verification.
 
+The latest opt-in VM HAI wiring adds an API-only dedicated secret and restricted
+default commands through `docker-compose.vm.hai.yml`; it is not applied to a
+live host. Its expanded configuration/authentication/release checks passed
+152 tests and 15 subtests, including real Compose rendering and ConfigLoader
+secret-file/API/SQLite checks. Fresh source-package verification follows the
+commit. Host/domain identification, target TLS/permissions/encryption, and
+an external HAI peer remain unverified. Ngrok stays retired.
+
 ## Historical Checkpoint Table (2026-10-17)
 
 | Checkpoint | State | Resume evidence |

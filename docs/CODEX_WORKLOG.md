@@ -1481,3 +1481,33 @@ describe Ngrok document the former implementation and its verification only.
   audit, recovery rehearsal, and deployment-config validation. Frontend,
   MySQL, both containers, CodeQL, and three Windows shards also passed; the
   remaining Windows shard was still running at that observation.
+
+## 2026-10-20 - Opt-in VM HAI deployment wiring
+
+- The VM profile supported API bearer authentication but did not provision the
+  dedicated HAI credential. Added explicit docker-compose.vm.hai.yml, combined
+  only with the VM base file, mounting its separate secret only into API.
+  Default commands are notification refresh and emergency stop. No live
+  installation, secret, access policy, DNS, or network exposure was changed.
+- Real Docker Compose configuration tests verify opt-in behavior, mandatory
+  HAI file configuration, API-only secret scope, retained operator credentials,
+  narrow/default and customized allowlists, loopback ports, dropped privileges,
+  and unchanged encryption preflight. Configuration rendering needs no engine
+  and does not create containers or read secret contents.
+- Tests load those rendered settings through ConfigLoader with fresh synthetic
+  secret files and exercise the real Flask/SQLite path: dedicated authentication,
+  denied anonymous/operator-route/unallowlisted requests, request replay, and
+  retained audit identity. Weak or operator-equivalent HAI credentials block
+  startup before ledger creation. The notification executor itself is isolated
+  by a test mock, not presented as provider or remote-peer acceptance.
+- Compose source releases now require and include the documented VM base and
+  HAI override; missing-override packaging fails. Linux CI explicitly validates
+  the combined configuration as well as the base profile. Setup, restriction,
+  credential rotation, and revocation instructions are in vm-production.md.
+- The expanded HAI/configuration/security/release group passed 152 tests and
+  15 subtests in 17.57 seconds in the isolated hash-locked environment. Seven
+  new cases used the installed Compose CLI and real configuration loader/API.
+  Real source-package verification will run after this change is committed;
+  target-host TLS, secret ownership, storage encryption, and the actual HAI
+  peer remain separate acceptance gates. The repository still supplies example
+  cloud origins; the owner has been asked to identify the existing host/domain.
