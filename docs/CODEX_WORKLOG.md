@@ -1240,3 +1240,8 @@ describe Ngrok document the former implementation and its verification only.
   Linux/Windows backend, frontend, MySQL, container builds, and CodeQL. That
   result does not validate this subsequent transport change until CI reruns.
   No live provider write, deployment, or live HAI acceptance was performed.
+
+## 2026-10-20 - Keep HAI failure classification on replay
+
+- Store `invalid_executor_result` as the audit error code and replay the original stored failure code. Historical invalid-result records without that field retain their classification through their existing error type; ordinary executor exceptions retain `executor_failed`.
+- Added assertions for authenticated API replay, all seven malformed-result fixtures, and the durable audit code. Local connector suite: 27 tests and 15 subtests passed. No provider execution or deployment was performed.

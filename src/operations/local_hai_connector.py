@@ -627,6 +627,7 @@ class LocalHaiConnector:
                         "actor": actor,
                         "payload": normalized_payload,
                         "errorType": "invalid_executor_result",
+                        "errorCode": "invalid_executor_result",
                         "externalSubmission": external_submission,
                     },
                 })
@@ -743,7 +744,11 @@ class LocalHaiConnector:
             "requestId": request_id,
             "commandId": details.get("commandId") or command_id,
             "error": "This requestId already has a failed execution outcome.",
-            "errorCode": "executor_failed",
+            "errorCode": details.get("errorCode") or (
+                "invalid_executor_result"
+                if details.get("errorType") == "invalid_executor_result"
+                else "executor_failed"
+            ),
             "errorType": details.get("errorType"),
             "auditEventId": failed.get("id"),
             "externalSubmission": _valid_external_submission(

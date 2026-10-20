@@ -411,6 +411,7 @@ class TestLocalHaiConnector(unittest.TestCase):
             self.assertEqual(first.get_json()["status"], "failed")
             self.assertEqual(first.get_json()["externalSubmission"], "unknown")
             self.assertEqual(replay.get_json()["status"], "previously_failed")
+            self.assertEqual(replay.get_json()["errorCode"], "executor_failed")
             self.assertEqual(replay.get_json()["externalSubmission"], "unknown")
             self.assertEqual(event["details"]["externalSubmission"], "unknown")
             archive.assert_called_once()
@@ -542,6 +543,7 @@ class TestLocalHaiConnector(unittest.TestCase):
             self.assertNotIn("result", first.get_json())
             self.assertEqual(replay.status_code, 409)
             self.assertEqual(replay.get_json()["status"], "previously_failed")
+            self.assertEqual(replay.get_json()["errorCode"], "invalid_executor_result")
             archive.assert_called_once()
 
     def test_malformed_executor_metadata_is_failed_once_without_success_audit(self):
@@ -583,6 +585,8 @@ class TestLocalHaiConnector(unittest.TestCase):
                     self.assertEqual(first["errorCode"], "invalid_executor_result")
                     self.assertEqual(first["externalSubmission"], "unknown")
                     self.assertEqual(replay["status"], "previously_failed")
+                    self.assertEqual(replay["errorCode"], "invalid_executor_result")
+                    self.assertEqual(event["details"]["errorCode"], "invalid_executor_result")
                     self.assertEqual(replay["externalSubmission"], "unknown")
                     self.assertNotIn("result", event["details"])
                     self.assertIsNone(ledger.find_audit_event(
