@@ -61,6 +61,15 @@ and are capped at 120 seconds. This is a per-connect/read timeout, not an overal
 wall-clock deadline. Existing best-effort local-ledger persistence remains active
 when the remote service fails. No automatic network retry is introduced.
 
+Nonempty success responses must be JSON objects containing only finite numbers;
+an optional `success` flag must be boolean and cannot be false. Returned IDs
+must be positive signed 64-bit integers (or their ASCII decimal strings), not
+booleans or coerced floating-point values. Malformed responses are failures,
+allowing the existing local-ledger fallback without reusing an invalid ID.
+This validation does not establish identity mapping between independent local
+and remote databases: valid numeric ID collisions remain a separate production
+blocker for dual-store synchronization.
+
 ## Provider APIs
 
 - Google connectors use owner OAuth and scoped read operations against configured sources.

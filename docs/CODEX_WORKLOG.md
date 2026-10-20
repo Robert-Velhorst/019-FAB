@@ -1342,3 +1342,24 @@ describe Ngrok document the former implementation and its verification only.
   project nor bundled runtimes exposed a YAML parser; GitHub workflow parsing
   and exact-head CI remain pending. The MySQL command was exercised with npm,
   not reported as local pnpm migration proof.
+
+## 2026-10-20 - Strict telemetry response identities
+
+- Reproduced malformed HTTP-200 bodies being reported as successful operations:
+  arrays/scalars, false or string success flags, NaN/Infinity, and exponent
+  overflow. Numeric ID coercion accepted booleans/fractions and could throw on
+  infinity; a boolean ID could return an unrelated existing local row's ID.
+- Require finite-number JSON objects and a correctly typed, non-false optional
+  success flag. Returned IDs must be positive signed 64-bit integers or bounded
+  ASCII decimal strings. Reject malformed responses before selecting a local
+  preferred ID; preserve existing local-ledger fallback and response closure.
+- Regression tests verify malformed responses fail, valid integer/string IDs
+  remain accepted, and new documents remain distinct from a preexisting local
+  document when malformed remote IDs are returned. Combined client, recovery,
+  Windows launcher, and credential tests: 74 passed and 29 subtests passed.
+- A separate synthetic probe confirmed a remaining valid-ID collision: remote
+  ID 1 for a new source returned local ID 1 for an existing unrelated source,
+  without storing the new local document. Recorded as high-priority technical
+  debt: durable cross-store mapping and foreign-key/update translation are not
+  implemented by strict type validation. Do not call dual-store synchronization
+  production-ready on this evidence. No real data or external service was used.

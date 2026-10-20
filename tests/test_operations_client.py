@@ -14,6 +14,51 @@ from src.operations.operations_client import OperationsClient
 
 
 class TestOperationsClient(unittest.TestCase):
+    def test_malformed_success_response_is_not_reported_as_success(self):
+        bodies = (
+            b'[]', b'null', b'"ok"', b'{"success": false}', b'{"success": "false"}',
+            b'{"id": Infinity}', b'{"value": NaN}', b'{"value": 1e400}',
+            b'{"id": true}', b'{"id": 1.5}', b'{"id": -1}', b'{"id": 9223372036854775808}',
+        )
+        for body in bodies:
+            with self.subTest(body=body):
+                client = OperationsClient({"fab_operations_api_url": "http://localhost:3000"})
+                response = requests.Response()
+                response.status_code = 200
+                response.raw = io.BytesIO(body)
+                client.session.request = MagicMock(return_value=response)
+                result = client.update_workflow_run(1, status="completed")
+                self.assertEqual(result["status"], "failed")
+                client.session.close()
+
+    def test_remote_ids_are_positive_integers_not_coercible_metadata(self):
+        for value in (True, False, 1.5, float("inf"), 0, -1, 2 ** 63, "9" * 100, "-1", "1.5", None):
+            with self.subTest(value=value):
+                self.assertIsNone(OperationsClient._result_id({"data": {"id": value}}))
+        for value in (12, "12"):
+            self.assertEqual(OperationsClient._result_id({"data": {"id": value}}), 12)
+
+    def test_invalid_remote_id_preserves_existing_and_new_local_documents(self):
+        with tempfile.TemporaryDirectory() as directory:
+            client = OperationsClient({
+                "fab_operations_api_url": "http://localhost:3000",
+                "fab_local_ledger_enabled": True,
+                "fab_local_ledger_path": os.path.join(directory, "ledger.sqlite3"),
+            })
+            existing_id = client.local_ledger.register_document({
+                "source": "gmail", "sourceDocumentId": "retained-original", "originalFilename": "original.pdf",
+            })
+            for index, body in enumerate((b'{"id": true}', b'{"id": Infinity}', b'{"id": 1.5}')):
+                response = requests.Response()
+                response.status_code = 200
+                response.raw = io.BytesIO(body)
+                client.session.request = MagicMock(return_value=response)
+                document_id = client.register_document("gmail", {"id": f"new-{index}", "filename": "new.pdf"})
+                self.assertNotEqual(document_id, existing_id)
+                self.assertEqual(client.local_ledger.get_document(document_id)["source_document_id"], f"new-{index}")
+                self.assertEqual(client.local_ledger.get_document(existing_id)["source_document_id"], "retained-original")
+            client.session.close()
+
     def test_nonfinite_and_excessive_timeouts_are_bounded(self):
         for value in (float("inf"), float("nan"), 10 ** 1000, 0, -1, "invalid"):
             with self.subTest(value=value):
