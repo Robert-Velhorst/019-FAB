@@ -31,7 +31,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.15.0"
+          python-version: "3.15.1"
           cache: pip
           cache-dependency-path: requirements-test.lock
       - name: Install Python dependencies
@@ -100,7 +100,7 @@ jobs:
         if: matrix.shard == 1
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "26.12.0"
+          node-version: "26.12.1"
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
       - name: Install and build Windows dashboard
@@ -129,7 +129,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "26.12.0"
+          node-version: "26.12.1"
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
       - name: Install frontend dependencies
@@ -149,7 +149,7 @@ jobs:
       - name: Set up Python for Linux stack rehearsal
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.15.0"
+          python-version: "3.15.1"
           cache: pip
           cache-dependency-path: requirements.lock
       - name: Install API dependencies for Linux stack rehearsal
@@ -193,7 +193,7 @@ jobs:
     timeout-minutes: 20
     services:
       mysql:
-        image: mysql:8.4
+        image: mysql:26.10.0@sha256:f51c9c01c16b0eb5d81bb70ab7e7fcb3b96abc6a54114be3a94e8e569cae7815
         env:
           MYSQL_ROOT_PASSWORD: fab-ci-only-password
           MYSQL_DATABASE: fab_test
@@ -215,7 +215,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: "26.12.0"
+          node-version: "26.12.1"
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
       - name: Install web dependencies

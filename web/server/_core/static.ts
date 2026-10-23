@@ -27,6 +27,7 @@ export function serveStatic(
   }));
   app.use((_req, res) => {
     res.setHeader("Cache-Control", "no-cache");
-    res.sendFile(path.resolve(distPath, "index.html"));
+    // Anchor lookup to the public directory so hidden installation folders work.
+    res.sendFile("index.html", { root: distPath });
   });
 }
