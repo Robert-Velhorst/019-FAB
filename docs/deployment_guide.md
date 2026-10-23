@@ -245,3 +245,5 @@ before restore.
 Build a tracked-source-only Compose release from a clean committed checkout with `python package.py --target compose`. Verify the emitted `.zip.sha256` sidecar before transferring it. The archive manifest binds every included file to its size and SHA-256 checksum; it never includes local secrets or runtime financial data.
 
 
+
+See [verified SQLite runtime setup](sqlite-runtime.md) before manually starting Python services or tests. The supported launcher and API container provision the pinned engine.

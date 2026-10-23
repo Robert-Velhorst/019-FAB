@@ -303,7 +303,7 @@ def rehearse(node, bundle_dir=None, benchmark_requests=0, benchmark_concurrency=
         try:
             with (root / "api.log").open("wb") as api_log, (root / "web.log").open("wb") as web_log:
                 python_env = isolated_environment()
-                python_env["PYTHONPATH"] = os.pathsep.join([str(ROOT), *site.getsitepackages()])
+                python_env["PYTHONPATH"] = os.pathsep.join([str(ROOT / "runtime_bootstrap"), str(ROOT), *site.getsitepackages()])
                 api = subprocess.Popen([
                     sys._base_executable, str(Path(__file__).resolve()), "--fixture-api", str(root),
                     "--web-port", str(web_port),

@@ -42,6 +42,9 @@ class ReleasePackageTests(unittest.TestCase):
         self.assertIn("FAB/Start-FAB.ps1", names)
         self.assertIn("FAB/Start-FAB-Maintenance.cmd", names)
         self.assertIn("FAB/config/config_template.ini", names)
+        for path in ("sqlite-runtime.json", "fab_sqlite_runtime.py",
+                     "scripts/setup_sqlite_runtime.py", "runtime_bootstrap/sitecustomize.py"):
+            self.assertIn(f"FAB/{path}", names)
         self.assertNotIn("FAB/tests/development_only.py", names)
         self.assertNotIn("FAB/config/config.ini", names)
         self.assertEqual(manifest["fileCount"], len(manifest["files"]))
@@ -66,6 +69,14 @@ class ReleasePackageTests(unittest.TestCase):
         self._commit("retired entrypoint fixture")
         with self.assertRaisesRegex(ReleasePackageError, "Forbidden runtime or secret path"):
             self.builder.build_cloud_package()
+
+    def test_refuses_tracked_native_runtime_artifacts(self):
+        native = self.root / ".fab-runtime" / "sqlite" / "untrusted.dll"
+        native.parent.mkdir(parents=True)
+        native.write_bytes(b"synthetic native artifact")
+        self._commit("tracked native fixture")
+        with self.assertRaisesRegex(ReleasePackageError, "Forbidden runtime or secret path"):
+            self.builder.build_local_package()
 
     def test_detects_archive_tampering(self):
         archive = Path(self.builder.build_local_package())
@@ -137,6 +148,10 @@ class ReleasePackageTests(unittest.TestCase):
             "Start-FAB.ps1": "Write-Output 'start'\n",
             "Start-FAB-Maintenance.cmd": "@echo off\n",
             "Stop-FAB.ps1": "Write-Output 'stop'\n",
+            "sqlite-runtime.json": '{"version":"3.54.1"}\n',
+            "fab_sqlite_runtime.py": "def require_stable_sqlite(): pass\n",
+            "runtime_bootstrap/sitecustomize.py": "# synthetic bootstrap fixture\n",
+            "scripts/setup_sqlite_runtime.py": "# synthetic installer fixture\n",
             "config/config_template.ini": "[operations]\nenabled=false\n",
             "requirements.txt": "Flask\n",
             "requirements-local.lock": "Flask==3.1.0\n",

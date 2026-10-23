@@ -10,6 +10,13 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$sqliteBootstrap = Join-Path $root "runtime_bootstrap"
+# A second launch from the same PowerShell process must be able to provision
+# a newly pinned release before enabling that release's child-process guard.
+if ($env:PYTHONPATH) {
+    $env:PYTHONPATH = (@($env:PYTHONPATH -split [regex]::Escape([string][System.IO.Path]::PathSeparator) |
+        Where-Object { $_ -and $_.TrimEnd('\', '/') -ne $sqliteBootstrap.TrimEnd('\', '/') }) -join [System.IO.Path]::PathSeparator)
+}
 . (Join-Path $root "scripts\Windows-Profile.ps1")
 . (Join-Path $root "scripts\Windows-Job.ps1")
 . (Join-Path $root "scripts\Windows-Process.ps1")
@@ -644,6 +651,12 @@ if ($LASTEXITCODE -ne 0) {
         throw "FAB local runtime dependency installation failed with exit code $LASTEXITCODE."
     }
 }
+
+& $python.Source -I (Join-Path $root "scripts\setup_sqlite_runtime.py")
+if ($LASTEXITCODE -ne 0) {
+    throw "FAB's verified SQLite runtime could not be provisioned. No ledger was opened."
+}
+$env:PYTHONPATH = $sqliteBootstrap + [System.IO.Path]::PathSeparator + $root + $(if ($env:PYTHONPATH) { [System.IO.Path]::PathSeparator + $env:PYTHONPATH } else { "" })
 
 if (-not (Test-Path -LiteralPath (Join-Path $root "config\config.ini"))) {
     Copy-Item -LiteralPath (Join-Path $root "config\config_template.ini") -Destination (Join-Path $root "config\config.ini")

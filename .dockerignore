@@ -4,6 +4,12 @@
 !requirements.txt
 !requirements.lock
 !requirements-ml.lock
+!sqlite-runtime.json
+!fab_sqlite_runtime.py
+!runtime_bootstrap/
+!runtime_bootstrap/sitecustomize.py
+!scripts/
+!scripts/setup_sqlite_runtime.py
 !src/
 !src/**
 !config/

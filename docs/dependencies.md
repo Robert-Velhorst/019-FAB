@@ -60,3 +60,5 @@ continue to work without the optional packages.
 
 External tools like Tesseract OCR Engine might require separate installation steps depending on the operating system and deployment environment.
 
+
+See [verified SQLite runtime setup](sqlite-runtime.md) before manually starting Python services or tests. The supported launcher and API container provision the pinned engine.

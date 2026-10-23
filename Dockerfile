@@ -1,4 +1,14 @@
-FROM python:3.15-slim-bookworm@sha256:122756f3fe72c4f5d3d71897888204ee85774bc79de952555b8a474e1d0a5d53
+FROM python:3.15.1-slim-trixie@sha256:08275f764e022331c6d3e3ca55d8cce01fa4684b02111adf0445d71806fe7941 AS sqlite-builder
+
+WORKDIR /app
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+COPY sqlite-runtime.json fab_sqlite_runtime.py ./
+COPY scripts/setup_sqlite_runtime.py ./scripts/setup_sqlite_runtime.py
+RUN python scripts/setup_sqlite_runtime.py
+
+FROM python:3.15.1-slim-trixie@sha256:08275f764e022331c6d3e3ca55d8cce01fa4684b02111adf0445d71806fe7941
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
@@ -20,6 +30,12 @@ RUN python -m pip install --no-cache-dir --disable-pip-version-check --require-h
     && if [ "$FAB_ENABLE_ML" = "true" ]; then python -m pip install --no-cache-dir --disable-pip-version-check --require-hashes -r requirements-ml.lock; fi \
     && rm -rf /var/lib/apt/lists/* /root/.cache/pip
 
+COPY --from=sqlite-builder /app/.fab-runtime ./.fab-runtime
+COPY sqlite-runtime.json fab_sqlite_runtime.py ./
+COPY runtime_bootstrap ./runtime_bootstrap
+ENV PYTHONPATH=/app/runtime_bootstrap:/app
+RUN python -c "import sys, sqlite3; assert sys.version_info[:3] == (3, 15, 1); assert sqlite3.sqlite_version == '3.54.1'"
+
 COPY src ./src
 COPY config/config_template.ini ./config/config_template.ini
 # Containers start from the reviewed fail-closed defaults; environment values
@@ -29,9 +45,11 @@ COPY config/config_template.ini ./config/config.ini
 RUN groupadd --system --gid 10001 fab \
     && useradd --system --uid 10001 --gid fab --home-dir /app fab \
     && mkdir -p data backups credentials tokens downloads/sort-out logs output/support \
-    && chown -R fab:fab /app
+    && chown -R fab:fab data backups credentials tokens downloads logs output config
 
 USER fab
+
+RUN python -c "import os, sqlite3; assert os.getuid() == 10001; assert sqlite3.sqlite_version == '3.54.1'"
 
 EXPOSE 5001
 

@@ -32,15 +32,25 @@ unused runtime npm/Yarn. Hosted image qualification remains required.
 - Four Python locks regenerate reproducibly; hash-required installation and
   Python advisory audit pass with zero known findings.
 
+## Native SQLite upgrade
+
+Owned CPython 3.15.1 bundles SQLite 3.53.1. FAB now provisions and verifies the
+separate official SQLite 3.54.1 library before importing service modules.
+The Windows launcher, CI profiles and API container use this guard. The API
+image targets pinned Python 3.15.1 / Debian Trixie; a separate build stage
+compiles the checksum-verified SQLite source. Read the
+[provisioning and recovery instructions](sqlite-runtime.md).
+
+Windows qualification completed 115 tests and 23 subtests, with two optional
+environment cases skipped. These cover native identity, tamper/missing-library
+rejection, actual bundled-engine synthetic ledger readback with identical
+schema/rows, WAL, foreign keys, rollback, backup integrity, routing/export
+approval boundaries and recovery rehearsal. No operator ledger was opened or
+upgraded. Linux/image qualification remains pending.
+
 ## Unfinished qualification
 
-Actual owned CPython 3.15.1 reports SQLite 3.53.1 through an in-memory SQL
-query. The official current SQLite release is 3.54.1. FAB's local ledger and
-backup modules use sqlite3, so a Python version bump does not finish the
-database requirement. The current MySQL target does not resolve this gap.
-No operator ledger was opened or upgraded.
-
-SQLite upgrade/recovery, current-head hosted suites, installed-image/native
+Current-head hosted suites, installed-image/native
 inventory and browser behavior remain required. This is not a claim that all
 runtime, transitive or embedded compiler components are current, nor a
 deployment or authorization to submit financial operations.
