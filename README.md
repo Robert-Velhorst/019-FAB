@@ -51,17 +51,11 @@ The first development preview, [`v0.1.0-preview.1`](https://github.com/Robert-Ve
 
 ## Operator Quick Start (Windows 11)
 
-Requirements: Git; Node.js 22.12 or newer; pnpm 11.20.0 or newer; Python
-3.13 (the launcher may provision it using the Windows Python launcher or uv);
-Tesseract with Dutch and English language data; and Poppler for PDF OCR.
-Node.js and pnpm build and run the operator dashboard; the launcher installs
-dashboard packages from the frozen lockfile and Python dependencies in
-project-local environments.
-
-Requirements: Windows 11, Git, Python 3.13 (the launcher may provision it using
-the Windows Python launcher or `uv`), Tesseract with Dutch and English language
-data, and Poppler for PDF OCR. The launcher installs project dependencies in a
-local virtual environment.
+Requirements: Windows 11, Git, Node.js 26.12.1, pnpm 12.15.0 and Python 3.15.1.
+The launcher may provision Python through the Windows Python launcher or uv
+0.13.5. OCR also requires Tesseract (Dutch and English) and Poppler.
+The launcher installs locked dependencies and the verified project-local
+[SQLite 3.54.1 runtime](docs/sqlite-runtime.md) before starting services.
 
 ```powershell
 git clone https://github.com/Robert-Velhorst/019-FAB.git
@@ -128,7 +122,7 @@ evidence merely because an export was queued or a record appears to exist.
 
 ### Architecture
 
-- `src/`: Python 3.13 document intake, OCR/extraction, categorization,
+- `src/`: Python 3.15.1 document intake, OCR/extraction, categorization,
   operations API, SQLite ledger, reconciliation, provider adapters, worker,
   audit, backup, and recovery services.
 - `web/client/`: React operator dashboard.
@@ -152,8 +146,8 @@ commit, issue, or public artifact.
 
 ### Development prerequisites
 
-- Python 3.13 and PowerShell on Windows.
-- Node.js 22 and pnpm 11.20.0 for the dashboard.
+- Python 3.15.1 and PowerShell on Windows.
+- Node.js 26.12.1 and pnpm 12.15.0 for the dashboard.
 - Tesseract (`eng` and `nld`) and Poppler for document OCR tests/workflows.
 - Docker Desktop/Engine only for Compose work.
 
@@ -163,6 +157,8 @@ Create a Python environment and install the hash-locked test dependencies:
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --disable-pip-version-check --require-hashes -r requirements-test.lock
+python -I scripts/setup_sqlite_runtime.py
+$env:PYTHONPATH = "$PWD/runtime_bootstrap;$PWD"
 pnpm.cmd --dir web install --frozen-lockfile
 ```
 

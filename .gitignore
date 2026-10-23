@@ -31,3 +31,4 @@ build/
 .playwright-cli/
 output/
 tmp/
+.fab-runtime/

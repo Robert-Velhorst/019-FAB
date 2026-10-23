@@ -15,7 +15,7 @@
  *     }]
  *   });
  */
-import { storagePut } from "server/storage";
+import { storagePut } from "../storage";
 import { sanitizeExternalMessage } from "../lib/errorSanitizer";
 import { ENV } from "./env";
 

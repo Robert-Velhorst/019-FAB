@@ -263,3 +263,5 @@ privacy, and legal acceptance remain separate as well.
 Launcher tests execute only isolated configuration/preflight and credential-scope
 blocks with synthetic settings, never the full launcher. The `no:cacheprovider`
 option avoids shared pytest-cache writes during concurrent verification.
+
+See [verified SQLite runtime setup](sqlite-runtime.md) before manually starting Python services or tests. The supported launcher and API container provision the pinned engine.

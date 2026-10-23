@@ -1,7 +1,7 @@
 import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
 import type { Express, Request, Response } from "express";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { parse } from "cookie";
+import { parseCookie as parse } from "cookie";
 import rateLimit from "express-rate-limit";
 import * as db from "../db";
 import { isFabManagedAuthEnabled } from "../fabManagedAuth";

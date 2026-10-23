@@ -29,6 +29,10 @@ class PackageBuilder:
         "windows": {
             "Start-FAB-Maintenance.cmd",
             "Start-FAB.ps1",
+            "sqlite-runtime.json",
+            "fab_sqlite_runtime.py",
+            "runtime_bootstrap/sitecustomize.py",
+            "scripts/setup_sqlite_runtime.py",
             "Stop-FAB.ps1",
             "config/config_template.ini",
             "requirements.txt",
@@ -40,6 +44,10 @@ class PackageBuilder:
         },
         "compose": {
             "Dockerfile",
+            "sqlite-runtime.json",
+            "fab_sqlite_runtime.py",
+            "runtime_bootstrap/sitecustomize.py",
+            "scripts/setup_sqlite_runtime.py",
             "docker-compose.maintenance.yml",
             "docker-compose.yml",
             "config/config_template.ini",
@@ -55,6 +63,7 @@ class PackageBuilder:
     FORBIDDEN_PARTS = {
         ".git",
         ".venv",
+        ".fab-runtime",
         "backups",
         "build",
         "credentials",

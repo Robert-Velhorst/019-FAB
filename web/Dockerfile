@@ -1,7 +1,11 @@
-FROM node:26.12.0-bookworm-slim@sha256:298992629d69bbd5b2b03ad57094d8e4fcb3a8eeb7c4e25d29de656519568913 AS build
+FROM node:26.12.1-alpine3.24@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS build
 
 WORKDIR /app
-RUN npm install --global pnpm@11.20.0
+RUN test "$(node --version)" = "v26.12.1" \
+    && grep -qx 'VERSION_ID=3.24.3' /etc/os-release \
+    && npm install --global npm@12.2.1 --no-audit --no-fund \
+    && npm install --global pnpm@12.15.0 --no-audit --no-fund \
+    && test "$(pnpm --version)" = "12.15.0"
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY patches ./patches
@@ -10,7 +14,12 @@ RUN pnpm install --frozen-lockfile
 COPY . .
 RUN pnpm build
 
-FROM node:26.12.0-bookworm-slim@sha256:298992629d69bbd5b2b03ad57094d8e4fcb3a8eeb7c4e25d29de656519568913
+FROM node:26.12.1-alpine3.24@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797
+
+RUN test "$(node --version)" = "v26.12.1" \
+    && grep -qx 'VERSION_ID=3.24.3' /etc/os-release \
+    && rm -rf /usr/local/lib/node_modules/npm /opt/yarn-* \
+    && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/yarn /usr/local/bin/yarnpkg
 
 ENV NODE_ENV=production
 WORKDIR /app

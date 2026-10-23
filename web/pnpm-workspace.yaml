@@ -2,12 +2,12 @@ packages:
   - "."
 
 patchedDependencies:
-  wouter@3.7.1: patches/wouter@3.7.1.patch
+  wouter@3.13.0: patches/wouter@3.13.0.patch
 
 overrides:
-  "@esbuild-kit/core-utils>esbuild": 0.25.12
-  katex: 0.18.2
-  postcss-selector-parser: 7.1.6
+  "@esbuild-kit/core-utils>esbuild": 0.28.2
+  katex: 0.19.1
+  postcss-selector-parser: 7.1.7
   proxy-addr: 2.0.8
   source-map-js: 1.2.2
 
@@ -18,3 +18,5 @@ onlyBuiltDependencies:
 allowBuilds:
   "@tailwindcss/oxide": true
   esbuild: true
+
+engineStrict: true

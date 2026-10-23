@@ -136,3 +136,5 @@ Production acceptance still requires target-host TLS, volume encryption, secret
 permissions, off-host backup monitoring, recovery rehearsal, and authorised live
 provider readback. See the implementation verification report for checks actually
 run in development.
+
+See [verified SQLite runtime setup](sqlite-runtime.md) before manually starting Python services or tests. The supported launcher and API container provision the pinned engine.

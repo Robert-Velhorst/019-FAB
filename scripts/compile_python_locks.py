@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path
 
 
-UV_VERSION = "0.11.26"
+UV_VERSION = "0.13.5"
 LOCKS = (
     ("requirements.txt", "requirements.lock"),
     ("requirements-local.txt", "requirements-local.lock"),
@@ -34,7 +34,7 @@ def main() -> int:
 
     uv = shutil.which("uv")
     if not uv:
-        parser.error("uv 0.11.26 is required; install the pinned version before compiling locks")
+        parser.error("uv 0.13.5 is required; install the pinned version before compiling locks")
     version = subprocess.run([uv, "--version"], capture_output=True, text=True, check=True).stdout.strip()
     if not version.startswith(f"uv {UV_VERSION} "):
         parser.error(f"expected uv {UV_VERSION}, found {version}")
@@ -56,7 +56,7 @@ def main() -> int:
                 input_name,
                 "--universal",
                 "--python-version",
-                "3.13",
+                "3.15.1",
                 "--generate-hashes",
                 "--no-header",
                 "--output-file",
