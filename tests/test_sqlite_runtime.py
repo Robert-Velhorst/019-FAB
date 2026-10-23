@@ -7,11 +7,17 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from fab_sqlite_runtime import ROOT, platform_key, require_stable_sqlite, runtime_evidence
 
 
 class TestSQLiteRuntime(unittest.TestCase):
+    @unittest.skipUnless(os.name == 'nt', 'Windows compiled ABI policy')
+    def test_windows_abi_does_not_require_processor_environment(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(platform_key(), 'windows-x86_64')
+
     def test_actual_engine_and_required_features(self):
         sqlite = require_stable_sqlite()
         evidence = runtime_evidence()

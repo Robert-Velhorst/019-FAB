@@ -1,10 +1,27 @@
 import os
+import site
 import subprocess
 import sys
 
 import pytest
 
-from scripts.run_stack_rehearsal import fixture_api, isolated_environment, stop_owned_child
+from scripts.run_stack_rehearsal import ROOT, fixture_api, fixture_python_environment, isolated_environment, stop_owned_child
+
+
+def test_fixture_python_uses_only_owned_bootstrap_paths(monkeypatch):
+    monkeypatch.setenv("PYTHONPATH", "unrelated-project")
+    monkeypatch.setenv("FAB_LOCAL_API_TOKEN", "private-provider-token")
+    env = fixture_python_environment()
+    assert env['PYTHONPATH'].split(os.pathsep) == [str(ROOT / 'runtime_bootstrap'), str(ROOT), *site.getsitepackages()]
+    assert 'FAB_LOCAL_API_TOKEN' not in env
+
+
+def test_qualified_interpreter_bootstraps_from_an_isolated_working_directory(tmp_path):
+    result = subprocess.run([sys._base_executable, '-c',
+        'import json; from fab_sqlite_runtime import runtime_evidence; print(json.dumps(runtime_evidence()))'],
+        cwd=tmp_path, env=fixture_python_environment(), capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    assert '"version": "3.54.1"' in result.stdout
 
 
 def test_rehearsal_does_not_inherit_provider_or_application_credentials(monkeypatch):

@@ -104,6 +104,12 @@ def isolated_environment():
     return {key: value for key, value in os.environ.items() if key.upper() in allowed}
 
 
+def fixture_python_environment():
+    env = isolated_environment()
+    env["PYTHONPATH"] = os.pathsep.join([str(ROOT / "runtime_bootstrap"), str(ROOT), *site.getsitepackages()])
+    return env
+
+
 def stop_owned_child(child):
     if child.poll() is None:
         child.terminate()
@@ -302,8 +308,7 @@ def rehearse(node, bundle_dir=None, benchmark_requests=0, benchmark_concurrency=
         session.trust_env = False
         try:
             with (root / "api.log").open("wb") as api_log, (root / "web.log").open("wb") as web_log:
-                python_env = isolated_environment()
-                python_env["PYTHONPATH"] = os.pathsep.join([str(ROOT / "runtime_bootstrap"), str(ROOT), *site.getsitepackages()])
+                python_env = fixture_python_environment()
                 api = subprocess.Popen([
                     sys._base_executable, str(Path(__file__).resolve()), "--fixture-api", str(root),
                     "--web-port", str(web_port),

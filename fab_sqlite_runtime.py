@@ -11,8 +11,8 @@ import importlib
 import json
 import os
 from pathlib import Path
-import platform
 import sys
+import sysconfig
 
 ROOT = Path(__file__).resolve().parent
 _handle = None
@@ -21,12 +21,13 @@ _identity = None
 
 
 def platform_key() -> str:
-    machine = platform.machine().lower()
-    if machine not in {"amd64", "x86_64"} or sys.maxsize <= 2**32:
+    if sys.maxsize <= 2**32:
         raise RuntimeError("FAB's verified SQLite runtime supports x86_64 Windows/Linux")
-    if os.name == "nt":
+    # Windows platform.machine() depends on inherited processor environment
+    # variables. Select the DLL by the interpreter's compiled ABI instead.
+    if os.name == "nt" and sysconfig.get_platform().lower() == "win-amd64":
         return "windows-x86_64"
-    if sys.platform == "linux":
+    if sys.platform == "linux" and os.uname().machine.lower() == "x86_64":
         return "linux-x86_64"
     raise RuntimeError("FAB's verified SQLite runtime supports Windows/Linux")
 
