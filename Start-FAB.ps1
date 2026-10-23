@@ -498,11 +498,11 @@ function Invoke-FabNativeCommand {
     }
 }
 
-function Get-FabPython313Candidates {
+function Get-FabPython315Candidates {
     param([string[]]$LauncherOutput)
 
     foreach ($line in $LauncherOutput) {
-        if ([string]$line -match '^\s*-\S*3\.13\S*(?:\s+\*)?\s+(.+?)\s*$') {
+        if ([string]$line -match '^\s*-\S*3\.15\S*(?:\s+\*)?\s+(.+?)\s*$') {
             $candidate = $Matches[1].Trim().Trim('"')
             if (Test-Path -LiteralPath $candidate -PathType Leaf) {
                 Write-Output $candidate
@@ -551,13 +551,13 @@ if (Test-Path -LiteralPath $venvRoot) {
     }
 }
 if (-not (Test-Path -LiteralPath $venvPython)) {
-    $pythonVersionProbe = "import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 13) else 1)"
+    $pythonVersionProbe = "import sys; raise SystemExit(0 if sys.version_info[:3] == (3, 15, 1) else 1)"
     $pyLauncher = Get-Command py -ErrorAction SilentlyContinue
     if ($pyLauncher) {
-        $probeExitCode = Invoke-FabNativeCommand -FilePath $pyLauncher.Source -ArgumentList @("-3.13", "-c", $pythonVersionProbe) -DiscardOutput
+        $probeExitCode = Invoke-FabNativeCommand -FilePath $pyLauncher.Source -ArgumentList @("-3.15", "-c", $pythonVersionProbe) -DiscardOutput
         if ($probeExitCode -eq 0) {
-            Write-Host "Creating FAB's isolated Python 3.13 runtime..."
-            $createExitCode = Invoke-FabNativeCommand -FilePath $pyLauncher.Source -ArgumentList @("-3.13", "-m", "venv", $venvRoot)
+            Write-Host "Creating FAB's isolated Python 3.15.1 runtime..."
+            $createExitCode = Invoke-FabNativeCommand -FilePath $pyLauncher.Source -ArgumentList @("-3.15", "-m", "venv", $venvRoot)
             if ($createExitCode -ne 0) {
                 Remove-FabVirtualEnvironment -InstanceRoot $root -VenvPath $venvRoot
             }
@@ -565,11 +565,11 @@ if (-not (Test-Path -LiteralPath $venvPython)) {
 
         if (-not (Test-Path -LiteralPath $venvPython)) {
             $launcherOutput = @(& $pyLauncher.Source -0p 2>$null)
-            foreach ($python313 in @(Get-FabPython313Candidates -LauncherOutput $launcherOutput)) {
-                $probeExitCode = Invoke-FabNativeCommand -FilePath $python313 -ArgumentList @("-c", $pythonVersionProbe) -DiscardOutput
+            foreach ($python315 in @(Get-FabPython315Candidates -LauncherOutput $launcherOutput)) {
+                $probeExitCode = Invoke-FabNativeCommand -FilePath $python315 -ArgumentList @("-c", $pythonVersionProbe) -DiscardOutput
                 if ($probeExitCode -eq 0) {
-                    Write-Host "Creating FAB's isolated Python 3.13 runtime..."
-                    $createExitCode = Invoke-FabNativeCommand -FilePath $python313 -ArgumentList @("-m", "venv", $venvRoot)
+                    Write-Host "Creating FAB's isolated Python 3.15.1 runtime..."
+                    $createExitCode = Invoke-FabNativeCommand -FilePath $python315 -ArgumentList @("-m", "venv", $venvRoot)
                     if ($createExitCode -ne 0) {
                         Remove-FabVirtualEnvironment -InstanceRoot $root -VenvPath $venvRoot
                     }
@@ -582,8 +582,12 @@ if (-not (Test-Path -LiteralPath $venvPython)) {
     if (-not (Test-Path -LiteralPath $venvPython)) {
         $uv = Get-Command uv -ErrorAction SilentlyContinue
         if ($uv) {
-            Write-Host "Creating FAB's isolated Python 3.13 runtime with uv..."
-            $createExitCode = Invoke-FabNativeCommand -FilePath $uv.Source -ArgumentList @("venv", "--seed", "--python", "3.13", $venvRoot)
+            $uvVersion = ([string](& $uv.Source --version)).Trim()
+            if ($LASTEXITCODE -ne 0 -or -not $uvVersion.StartsWith("uv 0.13.5 ")) {
+                throw "FAB runtime provisioning requires uv 0.13.5; found $uvVersion."
+            }
+            Write-Host "Creating FAB's isolated Python 3.15.1 runtime with uv..."
+            $createExitCode = Invoke-FabNativeCommand -FilePath $uv.Source -ArgumentList @("venv", "--seed", "--python", "3.15.1", $venvRoot)
             if ($createExitCode -ne 0) {
                 Remove-FabVirtualEnvironment -InstanceRoot $root -VenvPath $venvRoot
             }
@@ -595,7 +599,7 @@ if (-not (Test-Path -LiteralPath $venvPython)) {
         if ($systemPython) {
             $probeExitCode = Invoke-FabNativeCommand -FilePath $systemPython.Source -ArgumentList @("-c", $pythonVersionProbe) -DiscardOutput
             if ($probeExitCode -eq 0) {
-                Write-Host "Creating FAB's isolated Python 3.13 runtime..."
+                Write-Host "Creating FAB's isolated Python 3.15.1 runtime..."
                 $createExitCode = Invoke-FabNativeCommand -FilePath $systemPython.Source -ArgumentList @("-m", "venv", $venvRoot)
                 if ($createExitCode -ne 0) {
                     Remove-FabVirtualEnvironment -InstanceRoot $root -VenvPath $venvRoot
@@ -605,22 +609,31 @@ if (-not (Test-Path -LiteralPath $venvPython)) {
     }
 
     if (-not (Test-Path -LiteralPath $venvPython)) {
-        throw "FAB requires Python 3.13. Install Python 3.13, then run Start-FAB.cmd again."
+        throw "FAB requires Python 3.15.1. Install Python 3.15.1, then run Start-FAB.cmd again."
     }
 }
 
 $python = Get-Command $venvPython -ErrorAction Stop
-& $python.Source -c "import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 13) else 1)"
+& $python.Source -c "import sys; raise SystemExit(0 if sys.version_info[:3] == (3, 15, 1) else 1)"
 if ($LASTEXITCODE -ne 0) {
-    throw "The FAB .venv is not Python 3.13. Remove only the .venv directory, install Python 3.13, and run Start-FAB.cmd again."
+    throw "The FAB .venv is not Python 3.15.1. Remove only the .venv directory, install Python 3.15.1, and run Start-FAB.cmd again."
 }
 $node = Get-Command node -ErrorAction SilentlyContinue
 if (-not $node) {
-    throw "FAB's dashboard requires Node.js 22.12 or newer. Install Node.js, reopen the terminal, and run Start-FAB.cmd again."
+    throw "FAB's dashboard requires Node.js 26.12.1. Install Node.js, reopen the terminal, and run Start-FAB.cmd again."
 }
 $pnpm = Get-Command pnpm.cmd -ErrorAction SilentlyContinue
 if (-not $pnpm) {
-    throw "FAB's dashboard requires pnpm 11.20.0 or newer. Install pnpm, reopen the terminal, and run Start-FAB.cmd again."
+    throw "FAB's dashboard requires pnpm 12.15.0. Install pnpm, reopen the terminal, and run Start-FAB.cmd again."
+}
+
+$nodeVersion = ([string](& $node.Source --version)).Trim()
+if ($LASTEXITCODE -ne 0 -or $nodeVersion -ne "v26.12.1") {
+    throw "FAB's dashboard requires Node.js 26.12.1; found $nodeVersion."
+}
+$pnpmVersion = ([string](& $pnpm.Source --version)).Trim()
+if ($LASTEXITCODE -ne 0 -or $pnpmVersion -ne "12.15.0") {
+    throw "FAB's dashboard requires pnpm 12.15.0; found $pnpmVersion."
 }
 
 & $python.Source -c "import importlib.util,sys; modules=('flask','waitress','PIL','pytesseract','pdf2image','langdetect','googleapiclient'); sys.exit(0 if all(importlib.util.find_spec(module) for module in modules) else 1)" 2>$null

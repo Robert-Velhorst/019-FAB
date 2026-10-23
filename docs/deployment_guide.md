@@ -8,7 +8,7 @@ Local deployment is suitable for development, testing, and running the solution 
 
 ### 1.1. Prerequisites
 
-*   **Python 3.13** installed (the Windows launcher can provision a project-local runtime).
+*   **Python 3.15.1** installed (the Windows launcher can provision a project-local runtime).
 *   **`pip`** (Python package installer).
 *   **`git`** (if cloning from repository).
 *   **Tesseract OCR**: Install Tesseract OCR engine and language packs (`eng`, `nld`) on your system. Refer to Tesseract's official documentation for installation instructions specific to your OS.

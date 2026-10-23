@@ -1,15 +1,15 @@
-google-api-python-client
-google-auth-httplib2
-google-auth-oauthlib
-google-cloud-vision
-requests
-Pillow
-pytesseract # Python bridge for the local Tesseract OCR executable
-pdf2image # For PDF-to-image conversion before OCR
-langdetect # For BilingualProcessor
-python-dateutil # Windows-compatible IANA timezone data for local scheduling
-openpyxl # For streaming local .xlsx bank exports
-Flask>=3.1.3,<4 # Authenticated local operations API and retained compatibility dashboard
-waitress # Production WSGI server for the local FAB API
-cryptography # For SecurityManager
-defusedxml # Hardened parsing for untrusted CAMT/XML bank statements
+google-api-python-client==2.201.0
+google-auth-httplib2==0.4.4
+google-auth-oauthlib==1.5.0
+google-cloud-vision==3.16.0
+requests==2.34.2
+Pillow==13.0.0
+pytesseract==0.3.13 # Python bridge for the local Tesseract OCR executable
+pdf2image==1.17.0 # For PDF-to-image conversion before OCR
+langdetect==1.0.9 # For BilingualProcessor
+python-dateutil==3.0.0 # Windows-compatible IANA timezone data for local scheduling
+openpyxl==3.1.5 # For streaming local .xlsx bank exports
+Flask==3.1.3 # Authenticated local operations API and retained compatibility dashboard
+waitress==3.0.2 # Production WSGI server for the local FAB API
+cryptography==50.0.2 # For SecurityManager
+defusedxml==0.7.1 # Hardened parsing for untrusted CAMT/XML bank statements

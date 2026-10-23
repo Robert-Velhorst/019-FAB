@@ -58,7 +58,7 @@ Node.js and pnpm build and run the operator dashboard; the launcher installs
 dashboard packages from the frozen lockfile and Python dependencies in
 project-local environments.
 
-Requirements: Windows 11, Git, Python 3.13 (the launcher may provision it using
+Requirements: Windows 11, Git, Python 3.15.1 (the launcher may provision it using
 the Windows Python launcher or `uv`), Tesseract with Dutch and English language
 data, and Poppler for PDF OCR. The launcher installs project dependencies in a
 local virtual environment.
@@ -128,7 +128,7 @@ evidence merely because an export was queued or a record appears to exist.
 
 ### Architecture
 
-- `src/`: Python 3.13 document intake, OCR/extraction, categorization,
+- `src/`: Python 3.15.1 document intake, OCR/extraction, categorization,
   operations API, SQLite ledger, reconciliation, provider adapters, worker,
   audit, backup, and recovery services.
 - `web/client/`: React operator dashboard.
@@ -152,7 +152,7 @@ commit, issue, or public artifact.
 
 ### Development prerequisites
 
-- Python 3.13 and PowerShell on Windows.
+- Python 3.15.1 and PowerShell on Windows.
 - Node.js 22 and pnpm 11.20.0 for the dashboard.
 - Tesseract (`eng` and `nld`) and Poppler for document OCR tests/workflows.
 - Docker Desktop/Engine only for Compose work.

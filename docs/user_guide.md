@@ -22,7 +22,7 @@ Before you can use the system, you need to complete the initial setup steps.
 
 Ensure you have the following installed on your system:
 
-*   **Python 3.13**: `Start-FAB.cmd` provisions the project-local runtime automatically on Windows through the Windows Python launcher, `uv`, or a matching system `python` installation.
+*   **Python 3.15.1**: `Start-FAB.cmd` provisions the project-local runtime automatically on Windows through the Windows Python launcher, `uv`, or a matching system `python` installation.
 *   **`pip`**: Python's package installer, usually comes with Python.
 *   **`git`** (optional, if cloning from a repository): Download from [git-scm.com](https://git-scm.com/downloads).
 *   **Docker** (optional, for containerized deployment): Download from [docker.com](https://www.docker.com/products/docker-desktop).

@@ -6,6 +6,7 @@
  */
 import Stripe from "stripe";
 import { createLogger } from "../lib/logger";
+import { getDefaultProduct } from "./products";
 
 const log = createLogger("Stripe");
 
@@ -41,7 +42,7 @@ export function getStripe(): Stripe {
       );
     }
     _stripe = new Stripe(secretKey, {
-      apiVersion: "2025-02-24.acacia" as any,
+      apiVersion: "2026-09-30.endive",
       maxNetworkRetries: 2, // Retry transient network errors
       timeout: 30_000, // 30s timeout for Stripe API calls
     });
@@ -148,7 +149,8 @@ export async function createCheckoutSession(params: {
     customer: params.stripeCustomerId,
     client_reference_id: params.userId.toString(),
     mode: "setup",
-    payment_method_types: ["card"],
+    allowed_payment_method_types: ["card"],
+    currency: getDefaultProduct().currency,
     setup_intent_data: {
       metadata: {
         user_id: params.userId.toString(),

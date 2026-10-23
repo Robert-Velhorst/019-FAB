@@ -1,6 +1,6 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import express, { type Application, type Request, type Response } from "express";
-import { parse } from "cookie";
+import { parseCookie as parse } from "cookie";
 import { jwtVerify, SignJWT } from "jose";
 import rateLimit from "express-rate-limit";
 import type { User } from "../drizzle/schema";
