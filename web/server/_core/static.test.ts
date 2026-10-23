@@ -14,8 +14,8 @@ afterEach(() => {
 });
 
 describe("production static fallback", () => {
-  it("serves nested SPA routes without caching the entry point", async () => {
-    const distPath = fs.mkdtempSync(path.join(os.tmpdir(), "fab-static-"));
+  it.each(["fab-static-", ".fab-static-"])("serves nested SPA routes without caching the entry point (root %s)", async (prefix) => {
+    const distPath = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
     testDirectories.push(distPath);
     fs.mkdirSync(path.join(distPath, "assets"));
     fs.writeFileSync(
