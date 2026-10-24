@@ -1822,3 +1822,30 @@ describe Ngrok document the former implementation and its verification only.
   CodeQL run 39500268031. This update needs its own exact-head hosted checks.
   No cleanup was performed. C: had about 9.5 GB free when checked; D: remained
   low. Live provider/cloud/HAI-peer acceptance and storage headroom remain open.
+
+## 2026-10-24 - Verify and publish bank-record retry safety during cleanup
+
+- Seven initial red cases exposed Wave bank draft reuse before review/evidence
+  checks, approval/metadata rewrites, and MijnGeldzaken retries blocked by their
+  machine-generated prepared status. Removed the early Wave shortcut; both
+  planners now check review/status gates before operation/snapshot/target-bound
+  reuse. Unchanged prepared/approved records are no-ops; mismatched or legacy
+  unbound prepared records require review instead of silent replacement.
+- Scope bounded routing lookup to the bookkeeping record before applying its
+  limit, retaining exact post-filter identity checks for legacy metadata matches.
+  Added 19 cases for approval preservation, evidence/review changes, missing
+  bindings, cross-provider targets, a draft behind 501 unrelated attempts,
+  competing callers and authenticated API retries. Batch eligibility is unchanged.
+- Final shared-service verification passed 144 tests and 20 subtests in 72.68
+  seconds, including MijnGeldzaken control tests. The earlier 52-test focused run
+  and synthetic loopback dashboard/API/SQLite/HAI rehearsal passed, but the later
+  disk-full expanded run was interrupted and was not a valid final verdict.
+- Prior adfea9b completed all nine hosted verification jobs and CodeQL. Fresh
+  exact-head checks are required for this publication. No provider or live
+  financial data was changed; no new frontend/browser acceptance is claimed.
+- The owner requested FAB-only cleanup on both local drives and publication of
+  recoverable code. Unique code and real data are retained; disposable test/cache
+  artifacts are removed only after bounded inventory and consumer/reparse checks.
+  A local cleanup manifest records exact removed paths and preserved recovery
+  copies. Local-profile pre-write storage checks remain an unimplemented gap;
+  cleanup and passing focused tests do not establish production acceptance.

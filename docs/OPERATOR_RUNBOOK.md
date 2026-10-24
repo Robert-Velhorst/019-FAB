@@ -172,6 +172,12 @@ or a missing local record requires review before preparing a replacement. Open
 reviews and duplicate gates still apply. This local identity check does not
 verify a provider entry or its receipt attachment and cannot authorize archival.
 
+Bank-record retries apply the same source/operation/target checks after review
+and status validation. An unchanged prepared or locally approved record returns
+the existing draft without downgrading its approval. Changed or legacy-unbound
+prepared records require review before replacement. Matching draft lookup is
+scoped to the record, so unrelated recent routing attempts do not hide its draft.
+
 ```powershell
 python -m pytest -q -p no:cacheprovider -p no:stepwise
 pnpm.cmd --dir web check

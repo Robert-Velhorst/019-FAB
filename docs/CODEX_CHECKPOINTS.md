@@ -1,5 +1,16 @@
 # Codex Checkpoints
 
+2026-10-24 cleanup/publication follow-up: bank-record preparation retries now
+check review/status gates, operation identity, source snapshot and target before
+reusing a draft. Unchanged retries retain approval and metadata; stale or unbound
+prepared records require review. Lookup filters by record before its bounded
+limit. Final routing/export/reconciliation/records/autonomy/MijnGeldzaken checks
+passed 144 tests and 20 subtests. The prior interrupted full-disk run is not a
+verdict. Exact-head CI is required after publication; adfea9b completed all nine
+verification jobs and CodeQL. Owner-authorized local cleanup preserves financial
+data, credentials, backups and unique source. The separate local-profile
+pre-write low-storage guard remains an identified, unimplemented gap.
+
 Latest prepared-draft retry follow-up: unchanged document preparation returns
 the same local draft without rewriting normalized approval, timestamps or audit.
 Reuse requires the operation, source snapshot (excluding machine processing

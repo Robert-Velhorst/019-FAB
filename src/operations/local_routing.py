@@ -26,6 +26,8 @@ WAVE_TARGET_SYSTEMS = {"wave", "waveapps", "waveapps_business", "waveapps_person
 MIJNGELDZAKEN_TARGET_SYSTEMS = {"mijngeldzaken", "mijngeldzaken_nl", "mijngeldzaken.nl", "category_a", "personal"}
 ROUTABLE_BOOKKEEPING_RECORD_STATUSES = ("draft", "ready_to_route", "reviewed", "validated")
 ROUTABLE_BOOKKEEPING_EXPORT_STATUSES = ("not_started", "ready")
+PREPARED_RECORD_STATUSES = ("export_draft_prepared", "export_approved")
+PREPARED_RECORD_EXPORT_STATUSES = ("draft_prepared", "approved_not_submitted")
 
 
 class LocalRoutingService:
@@ -330,29 +332,6 @@ class LocalRoutingService:
                 workflow_run_id=workflow_run_id,
             )
 
-        existing_attempt = _find_existing_record_attempt(
-            self.ledger,
-            int(record["id"]),
-            statuses=PREPARED_ROUTING_STATUSES,
-        )
-        if existing_attempt:
-            _update_record_export_state(
-                self.ledger,
-                record,
-                "draft_prepared",
-                status="export_draft_prepared",
-                routing_attempt_id=int(existing_attempt["id"]),
-                details={"status": "already_prepared"},
-            )
-            return {
-                "success": True,
-                "status": "already_prepared",
-                "routingAttemptId": existing_attempt["id"],
-                "bookkeepingRecordId": record["id"],
-                "target": existing_attempt["target"],
-                "operation": existing_attempt.get("metadata", {}).get("operation"),
-            }
-
         if record.get("review_required"):
             return self._record_blocked_record_attempt(
                 record,
@@ -362,7 +341,7 @@ class LocalRoutingService:
                 workflow_run_id=workflow_run_id,
             )
 
-        if record.get("status") not in ROUTABLE_BOOKKEEPING_RECORD_STATUSES:
+        if record.get("status") not in (*ROUTABLE_BOOKKEEPING_RECORD_STATUSES, *PREPARED_RECORD_STATUSES):
             return self._record_blocked_record_attempt(
                 record,
                 "blocked_status",
@@ -371,7 +350,7 @@ class LocalRoutingService:
                 workflow_run_id=workflow_run_id,
             )
 
-        if record.get("export_status") not in ROUTABLE_BOOKKEEPING_EXPORT_STATUSES:
+        if record.get("export_status") not in (*ROUTABLE_BOOKKEEPING_EXPORT_STATUSES, *PREPARED_RECORD_EXPORT_STATUSES):
             return self._record_blocked_record_attempt(
                 record,
                 "blocked_export_status",
@@ -411,16 +390,15 @@ class LocalRoutingService:
             int(record["id"]),
             operation_id=operation["operation_id"],
             statuses=PREPARED_ROUTING_STATUSES,
+            record=record,
+            target_system=target_system,
         )
         if operation_existing_attempt:
-            _update_record_export_state(
-                self.ledger,
-                record,
-                "draft_prepared",
-                status="export_draft_prepared",
-                routing_attempt_id=int(operation_existing_attempt["id"]),
-                details={"status": "already_prepared"},
-            )
+            if not _record_has_prepared_state(record):
+                _update_record_export_state(
+                    self.ledger, record, "draft_prepared", status="export_draft_prepared",
+                    routing_attempt_id=int(operation_existing_attempt["id"]), details={"status": "already_prepared"},
+                )
             return {
                 "success": True,
                 "status": "already_prepared",
@@ -429,6 +407,12 @@ class LocalRoutingService:
                 "target": operation_existing_attempt["target"],
                 "operation": operation_existing_attempt.get("metadata", {}).get("operation"),
             }
+
+        if _record_has_prepared_state(record):
+            return self._record_blocked_record_attempt(
+                record, "needs_review", "Prepared bank draft no longer matches its source or target; review before replacement.",
+                {"targetSystem": target_system}, workflow_run_id=workflow_run_id,
+            )
 
         plan = operation["plan"]
         if plan.get("status") != "planned":
@@ -728,7 +712,7 @@ class LocalRoutingService:
                 {"reviewRequired": True},
                 workflow_run_id=workflow_run_id,
             )
-        if record.get("status") not in ROUTABLE_BOOKKEEPING_RECORD_STATUSES:
+        if record.get("status") not in (*ROUTABLE_BOOKKEEPING_RECORD_STATUSES, *PREPARED_RECORD_STATUSES):
             return self._record_mijngeldzaken_blocked_record_attempt(
                 record,
                 "blocked_status",
@@ -736,7 +720,7 @@ class LocalRoutingService:
                 {"recordStatus": record.get("status")},
                 workflow_run_id=workflow_run_id,
             )
-        if record.get("export_status") not in ROUTABLE_BOOKKEEPING_EXPORT_STATUSES:
+        if record.get("export_status") not in (*ROUTABLE_BOOKKEEPING_EXPORT_STATUSES, *PREPARED_RECORD_EXPORT_STATUSES):
             return self._record_mijngeldzaken_blocked_record_attempt(
                 record,
                 "blocked_export_status",
@@ -783,16 +767,15 @@ class LocalRoutingService:
             int(record["id"]),
             operation_id=operation["operation_id"],
             statuses=PREPARED_ROUTING_STATUSES,
+            record=record,
+            target_system=target_system,
         )
         if existing_attempt:
-            _update_record_export_state(
-                self.ledger,
-                record,
-                "draft_prepared",
-                status="export_draft_prepared",
-                routing_attempt_id=int(existing_attempt["id"]),
-                details={"status": "already_prepared"},
-            )
+            if not _record_has_prepared_state(record):
+                _update_record_export_state(
+                    self.ledger, record, "draft_prepared", status="export_draft_prepared",
+                    routing_attempt_id=int(existing_attempt["id"]), details={"status": "already_prepared"},
+                )
             return {
                 "success": True,
                 "status": "already_prepared",
@@ -801,6 +784,11 @@ class LocalRoutingService:
                 "target": existing_attempt["target"],
                 "operation": existing_attempt.get("metadata", {}).get("operation"),
             }
+        if _record_has_prepared_state(record):
+            return self._record_mijngeldzaken_blocked_record_attempt(
+                record, "needs_review", "Prepared bank draft no longer matches its source or target; review before replacement.",
+                {"targetSystem": target_system}, workflow_run_id=workflow_run_id,
+            )
         plan = operation["plan"]
         if plan.get("status") != "planned":
             return self._record_mijngeldzaken_blocked_record_attempt(
@@ -1439,17 +1427,36 @@ def _find_existing_record_attempt(
     record_id: int,
     operation_id: Optional[str] = None,
     statuses: Optional[tuple] = None,
+    record: Optional[Dict[str, Any]] = None,
+    target_system: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
-    for attempt in ledger.list_routing_attempts(status=statuses, limit=500):
-        metadata = attempt.get("metadata") or {}
+    for attempt in ledger.list_routing_attempts(status=statuses, bookkeeping_record_id=record_id, limit=500):
+        metadata = attempt.get("metadata") if isinstance(attempt.get("metadata"), dict) else {}
         attempt_record_id = attempt.get("bookkeeping_record_id") or metadata.get("bookkeepingRecordId")
         if attempt_record_id != record_id:
             continue
         operation = metadata.get("operation") if isinstance(metadata.get("operation"), dict) else {}
         if operation_id and operation.get("operation_id") != operation_id:
             continue
+        if target_system is not None and (
+            not metadata.get("targetSystem")
+            or _routing_target_key(metadata["targetSystem"]) != _routing_target_key(target_system)
+        ):
+            continue
+        if record is not None:
+            snapshot = metadata.get("bookkeepingRecordSnapshot")
+            if not isinstance(snapshot, dict) or any(
+                snapshot.get(key) != value for key, value in _bookkeeping_record_snapshot(record).items()
+                if key not in {"status", "exportStatus"}
+            ):
+                continue
         return attempt
     return None
+
+
+def _record_has_prepared_state(record: Dict[str, Any]) -> bool:
+    return (record.get("status") in PREPARED_RECORD_STATUSES
+            or record.get("export_status") in PREPARED_RECORD_EXPORT_STATUSES)
 
 
 def _document_snapshot(document: Dict[str, Any]) -> Dict[str, Any]:
