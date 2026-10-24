@@ -1363,3 +1363,489 @@ describe Ngrok document the former implementation and its verification only.
   debt: durable cross-store mapping and foreign-key/update translation are not
   implemented by strict type validation. Do not call dual-store synchronization
   production-ready on this evidence. No real data or external service was used.
+
+## 2026-10-20 - Durable local/remote telemetry identities
+
+- Replaced remote-ID-as-local-ID mirroring with local-first persistence and
+  destination-scoped links. Local IDs remain canonical; update URLs and typed
+  document/workflow/routing/duplicate/audit references use verified remote links.
+  Failed local persistence no longer falls through to an unrelated remote ID.
+- Schema v3 adds unique, immutable identity links. Conflicts quarantine the
+  affected links and stop further remote creates/updates. Missing links defer
+  writes while retaining local data and scoped audit diagnostics. Disabled
+  mirroring skips identity lookups entirely. Non-document local upserts with
+  known links do not create additional remote rows.
+- Added a non-secret operations identity_scope generation label for replacing
+  a remote database at the same URL. Historical unmapped records, lost create
+  acknowledgements, remote database resets without scope rotation, and exactly-
+  once/backfill protocols remain explicit recovery/acceptance boundaries.
+- Document telemetry now carries a supplied content checksum, and registration
+  preserves an existing intake checksum when a refresh omits that field.
+- Focused ledger/client checks passed: 71 tests and 32 subtests. The latest
+  identity-map contract suite passed 12 tests, including destination isolation,
+  restart, related references, local-authority failure, conflict quarantine,
+  offline fast path, checksum preservation, and verified v2-to-v3 backup.
+- Added an opt-in real HTTP/MySQL rehearsal with fresh synthetic credentials,
+  temporary SQLite, loopback-only cached MySQL 8.4, memory limits, no persistent
+  volumes, and the built full web server. An earlier run succeeded with local
+  document/workflow IDs 2 mapping to remote IDs 1, translated review/routing
+  references, restart updates, and unchanged unrelated local evidence. Temporary
+  services and data were cleaned up. A repeat after the tool-host reset could
+  not start because Docker Desktop's Linux engine is stopped; it is not claimed
+  as a fresh final-tree integration pass. The script now checks that prerequisite
+  before starting anything.
+- The previous unlogged full-suite process was lost during the tool-host reset.
+  The replacement full suite passed: 1,989 tests, 239 subtests, and 8 skips in
+  727.35 seconds. Durable XML output is retained under ignored
+  data/verification/identity-full-suite.xml.
+  The original checkout's source changes remain preserved. No provider or live database
+  was changed; the broader production goal remains incomplete.
+
+## 2026-10-20 - Dependency audit repair and deployment direction
+
+- Preserved the user's explicit decision to keep ngrok retired. The older goal
+  text does not authorize restoring it; Windows standalone, supported cloud
+  deployment, and HAI remain the deployment objectives.
+- PR #146's first hosted run passed Linux, all four Windows backend shards,
+  MySQL integration, both container builds, and CodeQL. Frontend stopped at its
+  dependency audit: follow-redirects 1.16.0 had two high-severity advisories and
+  sanitize-html 2.17.7 had one moderate advisory.
+- Updated sanitize-html to 2.18.1 and the locked Axios follow-redirects dependency
+  to 1.16.1, with their targeted dependency closure. The new lockfile audit
+  reports zero known vulnerabilities; this is not a claim of complete security.
+- The inherited node_modules junction hit a Windows package-map write error.
+  Preserved that junction under ignored data/verification and installed this
+  worktree's dependencies independently with a successful frozen-lockfile run.
+  No original source files, credentials, or application records were changed.
+- With the updated dependencies installed: 486 web tests passed, 7 skipped;
+  TypeScript passed; production build and bundle budgets passed. Exact-head
+  hosted checks for this dependency update still require a new CI run.
+
+## 2026-10-20 - Collision participants and isolated runtime verification
+
+- Reproduced a quarantine gap with two distinct local documents receiving the
+  same remote ID. After restart the rejected local document had no retained
+  link and was submitted again. The new regression failed before the fix.
+- Additive schema v4 retains quarantine markers for every conflict participant,
+  including the rejected local record without a link. Reads and binds honor
+  those markers; unrelated records, resource types, and destinations remain
+  independent. No existing migration checksum was changed. Synthetic v2/v3
+  upgrades verify pre-upgrade snapshot integrity and preserved v3 mappings.
+- Refreshed the affected Python locks from certifi 2026.10.18 to 2026.10.19
+  after hosted Linux CI reported GHSA-6q48-6c7w-9gw2. Only certifi and its
+  published artifact hashes changed. The ML lock required no content change.
+  All lock consistency checks and the combined four-lock pip-audit passed.
+- The isolated-environment stack rehearsal exposed a missing-Flask startup
+  failure: launching the base Python with PYTHONPATH did not process the active
+  environment's .pth dependencies. Its controlled bootstrap now adds only the
+  active environment's site directories, without inheriting PYTHONPATH or
+  provider credentials, while retaining a direct base child for Windows
+  shutdown. The dependency-import and child-lifecycle test group passed 8 tests.
+- With the updated hash-locked dependencies in an isolated uv environment,
+  expanded ledger/client, schema, recovery, backup, health, readiness, and API
+  checks passed 283 tests and 34 subtests, with 2 skips, in 103.09 seconds.
+- The built dashboard/API/SQLite/HAI rehearsal passed authentication, source
+  verification, mutation persistence, bank import/reconciliation, exception
+  handling, command authorization/replay, logout/revocation, and owned-child
+  shutdown. No provider credentials, live ledger, or provider writes were used.
+  Its 20-request, four-client warm-cache diagnostic measured 20.48 ms median,
+  27.22 ms p95, and 56,871 response bytes. Three 50 ms samples observed a
+  191,590,400-byte combined peak working set and 0.171875 dashboard CPU seconds.
+  This tiny synthetic run is not a scaled resource baseline or a comparable
+  whole-app speed improvement. Full exact-head CI remains pending; live
+  provider, cloud, production-sized restore, and operator acceptance remain.
+
+## 2026-10-20 - Preserve recovery points and bound backup creation
+
+- Reproduced two data-loss paths with a frozen synthetic clock: a second backup
+  replaced the first package, and a failed second snapshot removed the first
+  package during cleanup. Both regressions failed before this fix. No real
+  backup or source document was opened or changed in the reproduction.
+- Recovery package names now include a random identifier. A private exclusive
+  temporary file is published without replacement (Windows rename, otherwise
+  same-directory hard link). Even a forced timestamp/identifier collision fails
+  without replacing or deleting the old package. Failure cleanup removes only
+  this attempt's published package and temporary file; unsafe reparse-point
+  backup directories are rejected before package creation.
+- Source capture now checks the per-file byte limit during streaming, rather
+  than trusting only a pre-copy file size. Known archive file-count, manifest,
+  and total-uncompressed-size overruns fail before ZIP compression. Tests
+  verified that compression is not invoked for these rejected packages and
+  that earlier packages and their integrity checks remain intact.
+- Expanded backup, recovery, correction/backup integration, API, and health
+  checks passed 202 tests and 2 subtests, with 2 skips, in 78.57 seconds in the
+  isolated hash-locked environment. This is not a production-sized restore or
+  a whole-application resource-reduction claim. Fresh exact-head CI is needed
+  after publishing this follow-up.
+- Prior commit 79cafdc passed hosted Linux's full backend suite, dependency
+  audit, recovery rehearsal, and deployment-config validation. Frontend,
+  MySQL, both containers, CodeQL, and three Windows shards also passed; the
+  remaining Windows shard was still running at that observation.
+
+## 2026-10-20 - Opt-in VM HAI deployment wiring
+
+- The VM profile supported API bearer authentication but did not provision the
+  dedicated HAI credential. Added explicit docker-compose.vm.hai.yml, combined
+  only with the VM base file, mounting its separate secret only into API.
+  Default commands are notification refresh and emergency stop. No live
+  installation, secret, access policy, DNS, or network exposure was changed.
+- Real Docker Compose configuration tests verify opt-in behavior, mandatory
+  HAI file configuration, API-only secret scope, retained operator credentials,
+  narrow/default and customized allowlists, loopback ports, dropped privileges,
+  and unchanged encryption preflight. Configuration rendering needs no engine
+  and does not create containers or read secret contents.
+- Tests load those rendered settings through ConfigLoader with fresh synthetic
+  secret files and exercise the real Flask/SQLite path: dedicated authentication,
+  denied anonymous/operator-route/unallowlisted requests, request replay, and
+  retained audit identity. Weak or operator-equivalent HAI credentials block
+  startup before ledger creation. The notification executor itself is isolated
+  by a test mock, not presented as provider or remote-peer acceptance.
+- Compose source releases now require and include the documented VM base and
+  HAI override; missing-override packaging fails. Linux CI explicitly validates
+  the combined configuration as well as the base profile. Setup, restriction,
+  credential rotation, and revocation instructions are in vm-production.md.
+- The expanded HAI/configuration/security/release group passed 152 tests and
+  15 subtests in 17.57 seconds in the isolated hash-locked environment. Seven
+  new cases used the installed Compose CLI and real configuration loader/API.
+  Real source-package verification will run after this change is committed;
+  target-host TLS, secret ownership, storage encryption, and the actual HAI
+  peer remain separate acceptance gates. The repository still supplies example
+  cloud origins; the owner has been asked to identify the existing host/domain.
+
+## 2026-10-20 - Bounded planning read cost and duplicate-cycle window
+
+- Reproduced a cycle missed behind 501 newer documents: duplicate_link_cycles
+  requested 5,000 rows through a UI-oriented method that silently capped it at
+  500. A second red regression proved the graph scan parsed unnecessary OCR
+  and JSON. A dedicated ID/link projection now honors the bounded graph window.
+  This is not a full-history cycle-absence guarantee beyond 5,000 newest rows.
+- Wired bounded SQL document/review counts into autonomy planning. Filter,
+  empty-filter, hostile-string, invalid-limit, and large-queue cases match the
+  previous list-length semantics without hydrating payloads. Existing 500-row
+  work-batch caps and financial/review/approval gates remain intact.
+- Added a bounded, reusable synthetic planning-read benchmark with no operator
+  config or network. On 2,000 documents/reviews with 8 KiB OCR/review payloads,
+  five interleaved warm measurements reduced counter-read median from 164.67 ms
+  to 4.58 ms and a 500-row graph projection from 88.74 ms to 21.08 ms, with
+  identical results. Peak traced Python allocations were 7,186,967 versus
+  3,822 bytes for counters and 7,186,939 versus 170,268 bytes for the graph.
+  These are narrow synthetic reads, not process RSS or whole-app percentages.
+- Expanded ledger/API/health/autonomy/processing checks passed 298 tests and
+  5 subtests in 89.01 seconds. A subsequent 47-test focused run also passed,
+  including the newer 503-row queue ceiling case. Benchmark input bounds,
+  fresh temporary data, and preservation of an operator-path sentinel passed.
+- The real built dashboard/API/SQLite/HAI rehearsal passed with provider writes
+  disabled and owned children stopped. Its separate 20-request/four-client warm
+  diagnostic measured 25.68 ms median / 34.84 ms p95 and 56,871 response bytes;
+  four 50 ms samples observed 190,988,288 combined working-set bytes. This is
+  not a controlled before/after comparison or representative scaled host load.
+- Prior commit 2a68fa5 finished all nine hosted verification jobs and all four
+  CodeQL language analyses successfully. This planning follow-up still needs
+  its own exact-head CI. Cloud host and actual HAI-peer acceptance remain open.
+
+## 2026-10-20 - Full-history and transactional duplicate-cycle recovery
+
+- Reproduced the remaining newest-5,000-row blind spot with 5,003 linked
+  documents. The default cycle scan now streams every non-null duplicate link
+  in 500-row cursor batches, retaining only ID relationships. Autonomous
+  planning and repair use that full-history default. Explicit diagnostic limits
+  retain bounded-window behavior; the preceding window limitation is superseded
+  for autonomous checks. Graph memory scales with confirmed links, not OCR.
+- Reproduced an intervening correction being overwritten while backup ran and
+  partial link clearing when a review write failed. Each repair now takes a
+  writer transaction, rechecks the complete cycle using payload-free ID queries
+  in 500-ID SQL batches, and defers changed cycles without undoing corrections.
+  Links, review gates, normalized records, and per-cycle audit commit together.
+  Backup precedes the writer lock; source files and downstream records are not
+  modified. No schema migration or live-ledger mutation was performed.
+- Added rollback cases for first/second review writes, normalization, and final
+  audit failure; stale-state preservation; multi-cycle/inbound-chain/dangling-
+  target graphs in both input orders; selected-ID batches above 1,000 rows;
+  strict ID validation; and full coverage beyond the old 5,000-row window.
+- Expanded ledger/API/health/processing/autonomy checks passed 299 tests and
+  5 subtests. The subsequent processing/autonomy/graph/benchmark group passed
+  134 tests; a fresh final focused run passed 63 tests after the payload-free
+  recheck helper and empty-selection fast path were complete.
+- The built dashboard/API/SQLite/HAI synthetic rehearsal passed again, with no
+  provider writes and owned children stopped. Tests and benchmarks used only
+  new temporary ledgers; original operator data was not used or changed.
+- Extended the bounded benchmark with --confirmed-cycle. A fresh 2,000-link
+  cycle, 2,000 reviews, 8 KiB payloads, and five interleaved warm samples produced
+  identical cycle results: diagnostic-window reference 28.36 ms median and
+  1,149,040 peak traced Python bytes versus full-history streaming 12.87 ms and
+  583,036 bytes. This compares graph paths whose coverage includes the whole
+  fixture, not process RSS, whole-app throughput, or a live production baseline.
+  The earlier run concurrent with regression tests is not used as this snapshot.
+- Fresh exact-head hosted checks remain required. Prior 3e46b72 passed Linux,
+  frontend, MySQL, container builds, CodeQL, and three Windows shards when
+  observed; the fourth Windows shard was still running, not treated as failed
+  or restarted due to an observation timeout. Broader production gates remain.
+
+## 2026-10-20 - Revalidate and atomically retain duplicate reassessments
+
+- Red regressions reproduced a stale reassessment rejecting an operator-confirmed
+  candidate after backup, and candidate/link/review changes remaining committed
+  when normalization or the completion audit failed.
+- Initial decisions are now retained as compact SHA-256 fingerprints of canonical
+  structured plan data. The initial OCR/evidence snapshot is released before
+  backup and revalidation, rather than retaining two full payload snapshots.
+  Under the writer lock, current plans must match those fingerprints. Changed
+  evidence, candidate, or review state defers only that pair and records a
+  diagnostic; newly confirmed operator decisions remain untouched.
+- Accepted candidate closures/replacements, pending links, review gates,
+  document metadata/status, normalized records, and per-pair/completion audit
+  commit together or roll back as one batch. A false transition result aborts
+  instead of being counted as a successful closure. No schema change is needed.
+- Expanded processing/autonomy/ledger/API/health checks passed 264 tests and
+  5 subtests in 164.73 seconds. Nine final focused tests passed, covering manual
+  confirmation, same-timestamp source edits, mixed fresh/stale pairs, multi-pair
+  rollback, replacement candidate/review failure, and false transition results.
+  A real synthetic pre-mutation recovery package passed authenticated integrity
+  inspection. That fixture has missing source paths and is not represented as
+  a source-complete production restore. All data and credentials were synthetic.
+- Prior commit 0052ef6 passed all nine hosted verification jobs and four-language
+  CodeQL. This reassessment follow-up requires new exact-head checks and is not
+  yet a completed independent security review or live deployment acceptance.
+
+## 2026-10-20 - Trusted-category stale decisions and batch atomicity
+
+- Four red regressions reproduced a category decision overwritten after an
+  operator correction during backup, and partial writes after extracted-field,
+  review or completion-audit failures. The existing method had no shared writer
+  transaction and consumed the pre-backup candidates without revalidation.
+- Store compact canonical plan fingerprints, release the original payload
+  snapshot, and rebuild candidates under the ledger's immediate writer lock.
+  Changed evidence/category/review state defers that document; new candidates
+  cannot enter an already backed-up batch. Non-category review gates remain.
+- Category, extracted fields, review resolution, processing status, normalized
+  records and per-document/completion audits now commit together or roll back.
+  The additive `deferredDocuments` summary distinguishes skips from successes;
+  the autonomy contract assertion includes its zero value on unchanged work.
+- Expanded processing/autonomy/ledger/API/records/health checks: 289 passed and
+  8 subtests passed in 74.52 seconds. Final focused category/duplicate tests:
+  17 passed, including a separate ledger connection making a same-timestamp
+  correction, post-persistence normalization failure, a second-document field
+  failure, changed evidence/new candidates, and an authenticated synthetic backup.
+  That backup fixture lacks source files and is not production restore proof.
+- The built dashboard/API/SQLite/HAI rehearsal passed with synthetic-only data,
+  loopback-only access, no provider writes and owned children stopped. No UI
+  layout changes or new live browser acceptance are claimed for this follow-up.
+- Prior e344700 completed all nine verification jobs and four-language CodeQL.
+  Its managed sequential diff security review sealed with zero reportable
+  findings; it was not independent and does not cover this newer diff. Fresh
+  exact-head hosted checks remain required. Ngrok stays retired; live host,
+  provider and external HAI-peer acceptance remain separate unresolved gates.
+
+## 2026-10-20 - Category backlog discovery and filtered context reads
+
+- A red regression proved an eligible receipt was invisible behind 5,001 newer
+  unrelated open reviews. Discovery capped all review history before filtering
+  category reasons, so repeated autonomous passes could not reach that receipt.
+- Replace that global-window hydration with category-filtered SQL and stable
+  100-document timestamp/ID cursor pages. Each selected document retains its
+  complete open review group. Existing returned-candidate limits, vendor policy,
+  duplicate/posting guards, backup and locked revalidation remain unchanged.
+  Duplicate/normalized context is no longer loaded just to plan categories.
+- Tests cover beyond-window discovery, 205 equal-timestamp documents across
+  pages, an eligible document behind unsupported vendors, a 503-review group,
+  closed/orphaned review exclusion, and no unrelated payload hydration.
+  The initial full-group fixture was corrected to use distinct review reasons:
+  the ledger intentionally coalesces repeated open reasons on one document.
+- Added opt-in `--category-reviews` to the existing bounded synthetic benchmark;
+  incompatible cycle workloads fail before data creation. Default, cycle and
+  category cases verify equivalent output and preserve operator-path sentinels.
+  On 2,000 documents/reviews, 20 category reviews and 8 KiB OCR/review payloads,
+  five interleaved warm samples measured category-context median 624.82 ms and
+  18,046,561 peak traced Python bytes for the former global-window reference,
+  versus 10.12 ms and 482,243 bytes for the filtered cursor. Both cover the full
+  fixture. These are not process RSS, cold-cache or whole-app measurements.
+- Final expanded checks passed 305 tests and 8 subtests in 158.19 seconds;
+  the focused backlog/category/benchmark group passed 23 tests. The synthetic
+  built dashboard/API/SQLite/HAI rehearsal passed, made no provider writes and
+  stopped its owned children. No live ledger, credentials, schema or deployment
+  changed. Prior 1c75fec completed all nine hosted jobs and CodeQL; this follow-up
+  needs fresh exact-head CI, not a transferred production/security clearance.
+
+## 2026-10-20 - Bounded dashboard review refresh and responsive regressions
+
+- A red deferred-response regression proved every loaded review page started
+  concurrently. Replace unbounded fan-out with four logical workers, ordered
+  result slots and an Operations effect sequence/cleanup predicate. Superseded
+  or failed refreshes stop queued dispatch and cannot return a partial merge.
+  Already-issued reads finish normally; no transport-abort claim is made.
+- Six focused cases cover the ceiling, out-of-order completion, initial/staged
+  cancellation, page failure, duplicate-item merge precedence and first-page-only
+  behavior. The full web suite passed 490 tests with 7 skips; TypeScript and
+  production builds/bundle budgets passed. No dependencies changed.
+- The in-app browser failed twice with a kernel-assets path error. Robert
+  approved standard Playwright fallback. A temporary, uncommitted harness used
+  the existing disposable production dashboard/API/SQLite rehearsal, seeded 350
+  synthetic document reviews, and routed a reserved HTTPS origin only to its
+  owned loopback services. No real provider accounts or operator ledger were used.
+- Browser interaction loaded seven 25-document pages (175 loaded reviews;
+  12 visible rows per UI page), triggered the existing background poll and
+  observed six additional page reads with peak logical concurrency four.
+  Displayed row order was retained. The initial harness assumptions of 50-row
+  server pages and all loaded rows rendered were corrected from actual UI state.
+- Visual inspection and a red browser assertion found the desktop mobile-close
+  control exposed by a later generic icon rule. Move its default hidden rule
+  after that rule, retain mobile media overrides, and fix open-navigation
+  specificity for a previously collapsed desktop sidebar. Both transitions pass.
+  Mobile table cells now keep subsequent values in column two with a stable
+  96-pixel label column rather than wrapping metadata under the labels.
+- Final Chromium fallback checked identity/nonblank content, no framework
+  overlay or console errors, 1280x800 and 390x844 document overflow, navigation
+  open/close after desktop collapse, value-column placement and screenshots.
+  The complete synthetic API/HAI/auth/reconciliation rehearsal also passed and
+  stopped its owned children. Evidence/scripts remain outside committed source.
+- Prior 9967ba0 completed all nine CI jobs and CodeQL. This follow-up still
+  requires fresh hosted checks. This does not prove all browser/device races,
+  whole-app resource percentages, production hosting or live provider acceptance.
+
+## 2026-10-20 - Superseded incremental review-page responses
+
+- Extended the previously approved temporary Chromium fallback harness to hold
+  an actual incremental-page response while the operator refreshes the queue.
+  The red run reset the queue to 25 loaded reviews, then incorrectly appended
+  the obsolete response and displayed 50. The component had no generation check
+  on incremental results and skipped effect invalidation on a first-page-only
+  refresh. This is a view/pagination race, not an external financial mutation.
+- Bind incremental fetches and deferred state updaters to their starting queue
+  generation. Superseded rows, offset tracking, pagination and error toasts are
+  discarded. All first-page effects now advance that generation and clean it
+  up, including the zero-additional-offset branch. A synchronous in-flight ref
+  serializes incremental requests without waiting for React to render a spinner.
+- The same browser loop now passes manual-refresh and background-first-page
+  supersession, preserving 25 loaded reviews after each delayed response. A
+  subsequent legitimate load advances to 50. The earlier seven-page/175-review
+  background test still observed six extra reads at peak logical concurrency
+  four with stable row order. No transport cancellation is claimed.
+- Full web suite: 490 passed, 7 skipped. TypeScript and production build/bundle
+  budgets passed. The actual disposable dashboard/API/SQLite/HAI rehearsal
+  passed and stopped its owned children. Chromium checks again passed identity,
+  meaningful content, no framework overlay/console errors, navigation and
+  document overflow at 1280x800 and 390x844; screenshots remain outside the repo.
+- Test fixtures, credentials and 350 seeded review documents were synthetic;
+  no operator ledger, provider account, production deployment or permissions
+  changed. Fresh exact-head CI and broader multi-tab/device/provider acceptance
+  remain necessary; this is not an error-free or production-complete claim.
+
+## 2026-10-20 - Atomic snapshot-bound failed-retry admission
+
+- Three red regressions reproduced an imported transition left behind when the
+  retry-start audit failed, a newer reviewed status overwritten by a stale
+  retry snapshot, and two competing failed-retry callers both entering processing.
+- Read a compact core snapshot instead of hydrating the full document history.
+  Under the immediate writer lock, require the document to remain failed and its
+  canonical core fingerprint to match. Persist status, retry count/history and
+  audit in that transaction; an audit exception rolls them all back. Competing
+  stale snapshots cannot reclaim a document even if the first retry fails fast
+  and its processing status becomes failed again.
+- A changed claim returns `skipped` with `document_changed_before_retry` and no
+  retry marker. Batch summaries count only actual retry claims as retried;
+  existing single-document and batch API routes expose that state unchanged.
+  OCR and file I/O stay outside the writer transaction to avoid holding the
+  database lock during expensive work. This is admission safety, not a new
+  whole-processing lease, generic-importer exclusion or exactly-once guarantee.
+- Expanded processing/autonomy/ledger/API/records/health checks: 277 passed and
+  8 subtests passed in 87.20 seconds. Final focused suite: 10 passed, covering
+  before/after-insert audit failure, separate-connection operator correction,
+  two-caller contention and fast re-failure, same-timestamp evidence changes,
+  skip counts, no history hydration and authenticated single/batch API behavior.
+- The built dashboard/API/SQLite/auth/HAI/reconciliation synthetic rehearsal
+  passed with loopback-only access, no provider writes and owned children stopped.
+  No web source changed, so no new browser/layout acceptance is claimed here.
+  All ledgers and credentials were synthetic; no production/provider change.
+  New exact-head CI is required; the previous b4b6f9d run was still queued/running
+  when inspected, while c545df1's verification run had been superseded/cancelled.
+
+## 2026-10-20 - Atomic local draft routing and low-storage interruption
+
+- Four red regressions reproduced Wave/MijnGeldzaken routing attempts and
+  document/normalized changes left behind after normalization or completion
+  audit failure. Both public draft-preparation entrypoints now open a writer
+  transaction before reading their source. Existing private target planners,
+  blocked/review branches, normalized state and final audit share that boundary.
+  The transaction is per document or bank record, not the entire batch.
+- Eleven new cases cover both targets' document rollback, bank-record rollback
+  after an inserted completion audit, missing-field review/attempt failure,
+  valid approval-gated non-executing preparation, and a nested failed route that
+  preserves unrelated outer transaction changes. The bank-record fixture uses
+  the real record approval/correction service to select MijnGeldzaken; normalized
+  bank records otherwise default to Wave, so a vendor rule alone was insufficient.
+- Initial focused checks passed 14 tests and 2 subtests. An expanded run then
+  hit SQLite disk-I/O/full-disk errors when the source volume reached zero free
+  bytes; that run is not a code verdict. Stopped source edits/builds, inspected
+  intact files/diff and saved SHA-256-verified source recovery copies separately.
+- No files were deleted. Two cleanup requests for explicitly identified synthetic
+  artifacts remain owner decisions. A separate checkout/dependency setup was
+  attempted on the alternate volume, then stopped when the source volume regained
+  space and an existing offline locked environment was confirmed usable. The
+  alternate volume's exFAT 256 KiB allocation units made small-file setup costly;
+  abandoned clone/cache data and source recovery copies remain outside the repo.
+- Final offline checks with alternate-volume fixtures and bytecode disabled:
+  98 passed, 20 subtests passed in 203.26 seconds across routing, exports,
+  reconciliation, normalized records and autonomy. This is not an application
+  performance measurement. No provider executor was enabled or called; no schema
+  or external financial record changed. No new frontend/browser acceptance is
+  claimed for this Python-only follow-up. New exact-head CI remains required;
+  prior 7f451da verification and CodeQL completed successfully. Host free-space
+  headroom, production/cloud/provider and external HAI acceptance remain open.
+
+## 2026-10-20 - Idempotent prepared-document routing retries
+
+- Four red cases reproduced a normal second preparation being blocked and
+  rewriting normalized export state, including a prior local approval. Prepared
+  documents may now look up a matching existing draft without entering the
+  autonomous batch candidate set. A successful unchanged retry returns the same
+  routing ID without normalized-state, document, timestamp or audit mutations.
+- Match the stored operation, source snapshot excluding machine processing
+  status, and target. Generic provider aliases are equivalent; explicit Wave
+  business and personal targets are not. Missing historical source/target
+  bindings or changed evidence require review instead of silent replacement.
+- Two additional red cases found that this fast path could acknowledge a draft
+  after its normalized record had disappeared. Require that record to exist;
+  otherwise retain the old draft and open review, not a fresh prepared state.
+  This checks local presence, not complete projection consistency or external
+  delivery/receipt verification. Existing export and archival gates remain.
+- Added 23 regression cases covering both providers, prior approval preservation,
+  source drift, target isolation/aliases, open review, missing legacy bindings
+  and normalized records, competing separate-ledger callers and authenticated
+  API retries. Final shared-service checks passed 121 tests and 20 subtests in
+  68.43 seconds. The earlier continuation's final test handle was unavailable
+  after context loss; only this fresh terminal run is the final expanded verdict.
+- The built synthetic dashboard/API/SQLite/auth/HAI/reconciliation rehearsal
+  passed with loopback-only access, provider writes disabled and owned children
+  stopped. No frontend source changed; no new rendered browser acceptance is
+  claimed. No live ledger, provider, permission or deployment was changed.
+- Prior commit 798515e passed verification run 39500276822 (all nine jobs) and
+  CodeQL run 39500268031. This update needs its own exact-head hosted checks.
+  No cleanup was performed. C: had about 9.5 GB free when checked; D: remained
+  low. Live provider/cloud/HAI-peer acceptance and storage headroom remain open.
+
+## 2026-10-24 - Verify and publish bank-record retry safety during cleanup
+
+- Seven initial red cases exposed Wave bank draft reuse before review/evidence
+  checks, approval/metadata rewrites, and MijnGeldzaken retries blocked by their
+  machine-generated prepared status. Removed the early Wave shortcut; both
+  planners now check review/status gates before operation/snapshot/target-bound
+  reuse. Unchanged prepared/approved records are no-ops; mismatched or legacy
+  unbound prepared records require review instead of silent replacement.
+- Scope bounded routing lookup to the bookkeeping record before applying its
+  limit, retaining exact post-filter identity checks for legacy metadata matches.
+  Added 19 cases for approval preservation, evidence/review changes, missing
+  bindings, cross-provider targets, a draft behind 501 unrelated attempts,
+  competing callers and authenticated API retries. Batch eligibility is unchanged.
+- Final shared-service verification passed 144 tests and 20 subtests in 72.68
+  seconds, including MijnGeldzaken control tests. The earlier 52-test focused run
+  and synthetic loopback dashboard/API/SQLite/HAI rehearsal passed, but the later
+  disk-full expanded run was interrupted and was not a valid final verdict.
+- Prior adfea9b completed all nine hosted verification jobs and CodeQL. Fresh
+  exact-head checks are required for this publication. No provider or live
+  financial data was changed; no new frontend/browser acceptance is claimed.
+- The owner requested FAB-only cleanup on both local drives and publication of
+  recoverable code. Unique code and real data are retained; disposable test/cache
+  artifacts are removed only after bounded inventory and consumer/reparse checks.
+  A local cleanup manifest records exact removed paths and preserved recovery
+  copies. Local-profile pre-write storage checks remain an unimplemented gap;
+  cleanup and passing focused tests do not establish production acceptance.

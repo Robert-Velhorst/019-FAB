@@ -13,7 +13,7 @@ from typing import Any, Dict, Optional, Sequence
 
 VENDOR_CATEGORY_RULE_STATUSES = {"suggested", "approved", "rejected", "disabled", "learned"}
 GOVERNED_VENDOR_CATEGORY_RULE_STATUSES = {"approved", "rejected", "disabled"}
-LEDGER_SCHEMA_VERSION = 2
+LEDGER_SCHEMA_VERSION = 4
 MAX_ERROR_DIAGNOSTIC_INPUT_CHARS = 16_384
 MAX_ERROR_DIAGNOSTIC_OUTPUT_CHARS = 2_000
 MISSING_REVIEW_MATCH_REFERENCE_SQL = (
@@ -44,6 +44,18 @@ LEDGER_SCHEMA_MIGRATIONS = {
         "name": "bounded_source_scan_manifest_2026_10_16",
         "checksum": hashlib.sha256(
             b"FAB operations ledger schema v2: resumable indexed local-folder scan manifests"
+        ).hexdigest(),
+    },
+    3: {
+        "name": "remote_telemetry_identity_links_2026_10_20",
+        "checksum": hashlib.sha256(
+            b"FAB operations ledger schema v3: destination-scoped immutable remote identity links"
+        ).hexdigest(),
+    },
+    4: {
+        "name": "remote_telemetry_collision_quarantine_2026_10_20",
+        "checksum": hashlib.sha256(
+            b"FAB operations ledger schema v4: retain quarantine for unlinked collision participants"
         ).hexdigest(),
     },
 }
@@ -960,6 +972,26 @@ class LocalOperationsLedger:
                     created_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS remote_identity_links (
+                    destination_key TEXT NOT NULL,
+                    resource_type TEXT NOT NULL,
+                    local_id INTEGER NOT NULL CHECK(local_id > 0),
+                    remote_id INTEGER NOT NULL CHECK(remote_id > 0),
+                    status TEXT NOT NULL DEFAULT 'verified' CHECK(status IN ('verified', 'conflicted')),
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (destination_key, resource_type, local_id),
+                    UNIQUE (destination_key, resource_type, remote_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS remote_identity_quarantines (
+                    destination_key TEXT NOT NULL,
+                    resource_type TEXT NOT NULL,
+                    local_id INTEGER NOT NULL CHECK(local_id > 0),
+                    remote_id INTEGER NOT NULL CHECK(remote_id > 0),
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (destination_key, resource_type, local_id)
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_local_audit_entity
                     ON audit_events(entity_type, entity_id);
                 CREATE INDEX IF NOT EXISTS idx_local_audit_created
@@ -1231,6 +1263,63 @@ class LocalOperationsLedger:
             )
         connection.execute(f"PRAGMA user_version = {LEDGER_SCHEMA_VERSION}")
         self._validate_schema_migration_history(connection)
+
+    def get_remote_identity(self, destination_key: str, resource_type: str, local_id: int) -> Optional[int]:
+        link = self.get_remote_identity_link(destination_key, resource_type, local_id)
+        return int(link["remote_id"]) if link and link["status"] == "verified" else None
+
+    def get_remote_identity_link(self, destination_key: str, resource_type: str, local_id: int) -> Optional[Dict[str, Any]]:
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT remote_id, status FROM ("
+                "SELECT remote_id, 'conflicted' AS status, 0 AS precedence FROM remote_identity_quarantines "
+                "WHERE destination_key = ? AND resource_type = ? AND local_id = ? "
+                "UNION ALL SELECT remote_id, status, 1 AS precedence FROM remote_identity_links "
+                "WHERE destination_key = ? AND resource_type = ? AND local_id = ?) "
+                "ORDER BY precedence LIMIT 1",
+                (destination_key, resource_type, local_id, destination_key, resource_type, local_id),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def bind_remote_identity(self, destination_key: str, resource_type: str, local_id: int, remote_id: int) -> None:
+        if (not isinstance(destination_key, str) or not re.fullmatch(r"[a-f0-9]{64}", destination_key)
+                or not isinstance(resource_type, str) or not re.fullmatch(r"[a-z_]{1,64}", resource_type)
+                or any(type(value) is not int or not 0 < value <= 2 ** 63 - 1 for value in (local_id, remote_id))):
+            raise ValueError("Invalid remote identity link")
+        conflicted = False
+        with self.write_transaction():
+            connection = self._write_transaction_connection.get()
+            existing = connection.execute(
+                "SELECT local_id, remote_id, status FROM remote_identity_links WHERE destination_key = ? AND resource_type = ? AND (local_id = ? OR remote_id = ?)",
+                (destination_key, resource_type, local_id, remote_id),
+            ).fetchall()
+            quarantined = connection.execute(
+                "SELECT 1 FROM remote_identity_quarantines WHERE destination_key = ? AND resource_type = ? AND local_id = ?",
+                (destination_key, resource_type, local_id),
+            ).fetchone()
+            conflicted = bool(quarantined) or bool(existing and (
+                len(existing) != 1 or existing[0]["local_id"] != local_id
+                or existing[0]["remote_id"] != remote_id or existing[0]["status"] != "verified"
+            ))
+            if conflicted:
+                connection.execute(
+                    "UPDATE remote_identity_links SET status = 'conflicted' WHERE destination_key = ? AND resource_type = ? AND (local_id = ? OR remote_id = ?)",
+                    (destination_key, resource_type, local_id, remote_id),
+                )
+                # A rejected participant has no link row because remote IDs are unique.
+                participants = {local_id: remote_id, **{row["local_id"]: row["remote_id"] for row in existing}}
+                connection.executemany(
+                    "INSERT INTO remote_identity_quarantines (destination_key, resource_type, local_id, remote_id, created_at) "
+                    "VALUES (?, ?, ?, ?, ?) ON CONFLICT(destination_key, resource_type, local_id) DO NOTHING",
+                    [(destination_key, resource_type, identity, remote, self._now()) for identity, remote in participants.items()],
+                )
+            elif not existing:
+                connection.execute(
+                    "INSERT INTO remote_identity_links (destination_key, resource_type, local_id, remote_id, created_at) VALUES (?, ?, ?, ?, ?)",
+                    (destination_key, resource_type, local_id, remote_id, self._now()),
+                )
+        if conflicted:
+            raise ValueError("Remote identity link conflicts with retained evidence")
 
     def acquire_runtime_lease(
         self,
@@ -1961,6 +2050,8 @@ class LocalOperationsLedger:
                 update_values = dict(values)
                 update_values.pop("id", None)
                 update_values.pop("created_at", None)
+                if "contentSha256" not in payload:
+                    update_values.pop("content_sha256", None)
                 self._update_with_connection(connection, "bookkeeping_documents", existing_id, update_values)
                 return existing_id
             return self._insert_with_connection(connection, "bookkeeping_documents", values)
@@ -4649,6 +4740,59 @@ class LocalOperationsLedger:
             rows = connection.execute(query, params).fetchall()
         return [self._row_to_dict(row) for row in rows]
 
+    def count_documents(self, status: Optional[Any] = None, limit: int = 100) -> int:
+        """Count a bounded work batch without loading OCR or evidence metadata."""
+        where, params = [], []
+        self._append_status_filter(where, params, "processing_status", status)
+        query = "SELECT 1 FROM bookkeeping_documents"
+        if where:
+            query += " WHERE " + " AND ".join(where)
+        params.append(self._bounded_limit(limit))
+        with self._connection() as connection:
+            return int(connection.execute("SELECT COUNT(*) FROM (" + query + " LIMIT ?)", params).fetchone()[0])
+
+    def list_document_duplicate_links(self, limit: int = 5000) -> list:
+        """Read only the bounded graph, independently of the 500-row UI limit."""
+        with self._connection() as connection:
+            rows = connection.execute(
+                "SELECT id, duplicate_of_document_id FROM bookkeeping_documents "
+                "ORDER BY updated_at DESC, id DESC LIMIT ?",
+                (max(1, min(self._int(limit, 5000), 5000)),),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def iter_document_duplicate_links(self):
+        """Stream every confirmed link, without OCR, JSON, or unlinked rows."""
+        with self._connection() as connection:
+            cursor = connection.execute(
+                "SELECT id, duplicate_of_document_id FROM bookkeeping_documents "
+                "WHERE duplicate_of_document_id IS NOT NULL"
+            )
+            try:
+                while rows := cursor.fetchmany(500):
+                    for row in rows:
+                        yield dict(row)
+            finally:
+                cursor.close()
+
+    def document_duplicate_targets(self, document_ids: Sequence[int]) -> Dict[int, Optional[int]]:
+        """Read the complete selected graph in bounded SQL batches, without payloads."""
+        if not document_ids:
+            return {}
+        if any(type(value) is not int or not 0 < value <= 2 ** 63 - 1 for value in document_ids):
+            raise ValueError("Duplicate graph document IDs must be positive integers")
+        targets = {}
+        with self._connection() as connection:
+            for offset in range(0, len(document_ids), 500):
+                chunk = document_ids[offset:offset + 500]
+                placeholders = ", ".join("?" for _ in chunk)
+                rows = connection.execute(
+                    "SELECT id, duplicate_of_document_id FROM bookkeeping_documents "
+                    f"WHERE id IN ({placeholders})", chunk,
+                ).fetchall()
+                targets.update((int(row["id"]), row["duplicate_of_document_id"]) for row in rows)
+        return targets
+
     def list_documents(self, status: Optional[Any] = None, limit: int = 100) -> list:
         limit = self._bounded_limit(limit)
         query = "SELECT * FROM bookkeeping_documents"
@@ -5235,6 +5379,57 @@ class LocalOperationsLedger:
                 ).fetchall()
             ]
             return result
+
+    def count_review_items(self, status: Optional[Any] = None, limit: int = 100) -> int:
+        """Count a bounded review batch without parsing correction evidence."""
+        where, params = [], []
+        self._append_status_filter(where, params, "status", status)
+        query = "SELECT 1 FROM review_items"
+        if where:
+            query += " WHERE " + " AND ".join(where)
+        params.append(self._bounded_limit(limit))
+        with self._connection() as connection:
+            return int(connection.execute("SELECT COUNT(*) FROM (" + query + " LIMIT ?)", params).fetchone()[0])
+
+    def iter_category_review_context(self):
+        """Page category-review documents without a global review-history cutoff."""
+        before = None
+        while True:
+            query = """
+                SELECT d.* FROM bookkeeping_documents d
+                WHERE d.id IN (
+                    SELECT document_id FROM review_items
+                    WHERE status IN ('pending', 'in_review')
+                      AND reason IN ('low_confidence_categorization', 'manual_review_category')
+                )
+            """
+            params = []
+            if before is not None:
+                query += " AND (d.updated_at < ? OR (d.updated_at = ? AND d.id < ?))"
+                params.extend((before[0], before[0], before[1]))
+            query += " ORDER BY d.updated_at DESC, d.id DESC LIMIT 100"
+            with self._connection() as connection:
+                documents = connection.execute(query, params).fetchall()
+                if not documents:
+                    return
+                ids = [int(row["id"]) for row in documents]
+                placeholders = ", ".join("?" for _ in ids)
+                reviews = connection.execute(
+                    f"SELECT * FROM review_items WHERE document_id IN ({placeholders}) "
+                    "AND status IN ('pending', 'in_review') ORDER BY created_at DESC, id DESC",
+                    ids,
+                ).fetchall()
+            reviews_by_document = {}
+            for review in reviews:
+                reviews_by_document.setdefault(int(review["document_id"]), []).append(self._row_to_dict(review))
+            before = (documents[-1]["updated_at"], int(documents[-1]["id"]))
+            for document in documents:
+                yield {
+                    "document": self._row_to_dict(document),
+                    "reviewItems": reviews_by_document.get(int(document["id"]), []),
+                }
+            if len(documents) < 100:
+                return
 
     def list_review_items(
         self,

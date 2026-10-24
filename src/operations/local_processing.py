@@ -1,4 +1,5 @@
 import hashlib
+import json
 import os
 import re
 import stat
@@ -69,50 +70,9 @@ def trusted_category_suggestion_candidates(
     """Find exact built-in vendor matches that still have category review gates."""
     config = config or {}
     bounded_limit = max(1, min(_safe_int(limit) or 500, 5000))
-    open_reviews = []
-    while len(open_reviews) < 5000:
-        page = ledger.list_review_items(
-            status=("pending", "in_review"),
-            limit=500,
-            offset=len(open_reviews),
-        )
-        open_reviews.extend(page)
-        if len(page) < 500:
-            break
-    reviews_by_document: Dict[int, list] = {}
-    for review in open_reviews:
-        document_id = _safe_int(review.get("document_id"))
-        if document_id:
-            reviews_by_document.setdefault(document_id, []).append(review)
-    category_document_ids = [
-        document_id
-        for document_id, reviews in reviews_by_document.items()
-        if any(
-            review.get("reason") in {
-                "low_confidence_categorization",
-                "manual_review_category",
-            }
-            for review in reviews
-        )
-    ]
-    documents_by_id = {}
-    for start in range(0, len(category_document_ids), 500):
-        context = ledger.get_review_work_item_context(
-            category_document_ids[start:start + 500],
-        )
-        documents_by_id.update(context["documents"])
-    documents = sorted(
-        documents_by_id.values(),
-        key=lambda document: (
-            str(document.get("updated_at") or ""),
-            int(document.get("id") or 0),
-        ),
-        reverse=True,
-    )
     candidates = []
-    for document in documents:
-        if len(candidates) >= bounded_limit:
-            break
+    for context in ledger.iter_category_review_context():
+        document = context["document"]
         if (
             str(document.get("processing_status") or "") in {"duplicate", "failed"}
             or is_non_posting_document_type(document.get("document_type"))
@@ -130,7 +90,7 @@ def trusted_category_suggestion_candidates(
             and classification.get("reviewRequired") is True
         ):
             continue
-        document_reviews = reviews_by_document.get(int(document["id"]), [])
+        document_reviews = context["reviewItems"]
         if (
             document.get("duplicate_of_document_id")
             and not any(item.get("reason") == "duplicate_candidate" for item in document_reviews)
@@ -154,26 +114,32 @@ def trusted_category_suggestion_candidates(
                 "suggestion": suggestion,
                 "reviewItems": category_reviews,
             })
+            if len(candidates) >= bounded_limit:
+                break
     return candidates
 
 
 def duplicate_link_cycles(
     ledger: LocalOperationsLedger,
-    limit: int = 5000,
+    limit: Optional[int] = None,
 ) -> list:
-    """Return stable document-id groups whose confirmed-duplicate links form cycles."""
-    documents = ledger.list_documents(limit=max(1, min(_safe_int(limit) or 5000, 5000)))
-    document_ids = {int(document["id"]) for document in documents}
-    links = {
-        int(document["id"]): int(document["duplicate_of_document_id"])
-        for document in documents
-        if document.get("duplicate_of_document_id") is not None
-        and int(document["duplicate_of_document_id"]) in document_ids
-    }
+    """Scan full link history by default; explicit limits are diagnostic windows."""
+    if limit is None:
+        links = {int(row["id"]): int(row["duplicate_of_document_id"])
+                 for row in ledger.iter_document_duplicate_links()}
+    else:
+        documents = ledger.list_document_duplicate_links(limit=max(1, min(_safe_int(limit) or 5000, 5000)))
+        document_ids = {int(document["id"]) for document in documents}
+        links = {
+            int(document["id"]): int(document["duplicate_of_document_id"])
+            for document in documents
+            if document.get("duplicate_of_document_id") is not None
+            and int(document["duplicate_of_document_id"]) in document_ids
+        }
     cycles = []
     seen_cycles = set()
     completed = set()
-    for start in sorted(links):
+    for start in links:
         path = []
         positions = {}
         current = start
@@ -316,6 +282,14 @@ def duplicate_candidate_reassessment_plan(
     return plans
 
 
+def _processing_plan_signature(plan: Dict[str, Any]) -> str:
+    digest = hashlib.sha256()
+    encoder = json.JSONEncoder(sort_keys=True, separators=(",", ":"), allow_nan=False, default=str)
+    for chunk in encoder.iterencode(plan):
+        digest.update(chunk.encode("utf-8"))
+    return digest.hexdigest()
+
+
 class LocalDocumentProcessor:
     """Run local ledger documents through FAB's processing interfaces."""
 
@@ -411,6 +385,7 @@ class LocalDocumentProcessor:
         summary = {
             "cyclesFound": len(cycles),
             "cyclesRepaired": 0,
+            "cyclesSkipped": 0,
             "documentsCleared": 0,
             "reviewItemsCreated": 0,
             "cycleDocumentIds": cycles,
@@ -438,57 +413,58 @@ class LocalDocumentProcessor:
             }
 
         for cycle in cycles:
-            before_links = {}
             cycle_review_items_created = 0
-            for document_id in cycle:
-                document = self.ledger.get_document(document_id)
-                if not document:
+            with self.ledger.write_transaction():
+                current_links = self.ledger.document_duplicate_targets(cycle)
+                visited = set()
+                current = cycle[0]
+                while current in current_links and current not in visited:
+                    visited.add(current)
+                    current = current_links[current]
+                # The scan and backup precede the writer lock; do not undo an
+                # intervening correction or repair only part of a changed cycle.
+                if visited != set(cycle) or current != cycle[0]:
+                    summary["cyclesSkipped"] += 1
+                    self.ledger.record_audit_event({
+                        "action": "local_processing.duplicate_cycle_repair_deferred",
+                        "entityType": "bookkeeping_document", "entityId": str(cycle[0]),
+                        "details": {"actor": actor, "cycleDocumentIds": cycle,
+                                    "reason": "links_changed_since_scan", "externalSubmission": "not_executed"},
+                    })
                     continue
-                before_links[str(document_id)] = document.get("duplicate_of_document_id")
-                existing_duplicate_reviews = [
-                    item
-                    for item in document.get("review_items") or []
-                    if item.get("status") in {"pending", "in_review"}
-                    and item.get("reason") == "duplicate_candidate"
-                ]
-                self.ledger.clear_document_duplicate(document_id)
-                self.ledger.update_document(document_id, {
-                    "processingStatus": "needs_review",
-                })
-                if not existing_duplicate_reviews:
-                    self._queue_review(
-                        document,
-                        "duplicate_candidate",
-                        (
+                before_links = {str(key): value for key, value in current_links.items()}
+                for document_id in cycle:
+                    document = self.ledger.get_document(document_id)
+                    if not document:
+                        raise RuntimeError("A cycle document became unavailable during repair")
+                    existing_duplicate_reviews = [
+                        item for item in document.get("review_items") or []
+                        if item.get("status") in {"pending", "in_review"}
+                        and item.get("reason") == "duplicate_candidate"
+                    ]
+                    self.ledger.clear_document_duplicate(document_id)
+                    self.ledger.update_document(document_id, {"processingStatus": "needs_review"})
+                    if not existing_duplicate_reviews:
+                        self._queue_review(
+                            document, "duplicate_candidate",
                             "Cyclic duplicate links were cleared; compare the retained "
-                            "source documents before confirming a canonical record."
-                        ),
-                        corrected_data={
-                            "cycleDocumentIds": cycle,
-                            "actor": actor,
-                        },
-                    )
-                    cycle_review_items_created += 1
-                    summary["reviewItemsCreated"] += 1
-                LocalBookkeepingRecordService(
-                    self.ledger,
-                    self.config,
-                ).upsert_from_document(document_id)
-                summary["documentsCleared"] += 1
+                            "source documents before confirming a canonical record.",
+                            corrected_data={"cycleDocumentIds": cycle, "actor": actor},
+                        )
+                        cycle_review_items_created += 1
+                    LocalBookkeepingRecordService(self.ledger, self.config).upsert_from_document(document_id)
+                self.ledger.record_audit_event({
+                    "action": "local_processing.duplicate_cycle_repaired",
+                    "entityType": "bookkeeping_document", "entityId": str(cycle[0]),
+                    "details": {
+                        "actor": actor, "cycleDocumentIds": cycle, "previousLinks": before_links,
+                        "reviewItemsCreated": cycle_review_items_created,
+                        "externalSubmission": "not_executed", "sourceFilesModified": False,
+                    },
+                })
             summary["cyclesRepaired"] += 1
-            self.ledger.record_audit_event({
-                "action": "local_processing.duplicate_cycle_repaired",
-                "entityType": "bookkeeping_document",
-                "entityId": str(cycle[0]),
-                "details": {
-                    "actor": actor,
-                    "cycleDocumentIds": cycle,
-                    "previousLinks": before_links,
-                    "reviewItemsCreated": cycle_review_items_created,
-                    "externalSubmission": "not_executed",
-                    "sourceFilesModified": False,
-                },
-            })
+            summary["documentsCleared"] += len(cycle)
+            summary["reviewItemsCreated"] += cycle_review_items_created
         if cycles:
             self.ledger.record_audit_event({
                 "action": "local_processing.duplicate_cycle_repair_completed",
@@ -512,6 +488,7 @@ class LocalDocumentProcessor:
         )
         summary = {
             "candidatePairs": len(plans),
+            "deferredPairs": 0,
             "rejectedPairs": 0,
             "retainedPairs": 0,
             "candidateRowsClosed": 0,
@@ -527,6 +504,9 @@ class LocalDocumentProcessor:
         }
         if not plans:
             return summary
+        signatures = {tuple(plan["pair"]): _processing_plan_signature(plan) for plan in plans}
+        # Do not retain a second OCR/evidence snapshot while revalidating later.
+        del plans
         if create_backup:
             backup = LocalBackupService(self.ledger, self.config).create_backup(
                 note="Automatic pre-repair backup before duplicate evidence reassessment"
@@ -547,6 +527,30 @@ class LocalDocumentProcessor:
                 "ledgerBytes": manifest.get("ledgerBytes"),
             }
 
+        with self.ledger.write_transaction():
+            current_plans = {
+                tuple(plan["pair"]): plan
+                for plan in duplicate_candidate_reassessment_plan(self.ledger, self.config, limit=limit)
+            }
+            validated_plans = []
+            for pair, signature in signatures.items():
+                current = current_plans.get(pair)
+                if current is not None and _processing_plan_signature(current) == signature:
+                    validated_plans.append(current)
+                    continue
+                summary["deferredPairs"] += 1
+                self.ledger.record_audit_event({
+                    "action": "local_processing.duplicate_candidate_reassessment_deferred",
+                    "entityType": "bookkeeping_document", "entityId": str(pair[1]),
+                    "details": {"actor": actor, "pairDocumentIds": list(pair),
+                                "reason": "evidence_or_candidate_state_changed", "externalSubmission": "not_executed"},
+                })
+            return self._apply_duplicate_candidate_reassessment(validated_plans, actor, summary)
+
+    def _apply_duplicate_candidate_reassessment(
+        self, plans: list, actor: str, summary: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Apply revalidated decisions while the caller owns the writer transaction."""
         affected_document_ids = set()
         for plan in plans:
             subject = plan["subjectDocument"]
@@ -555,7 +559,7 @@ class LocalDocumentProcessor:
             closed_ids = []
             for row in plan["candidateRows"]:
                 row_id = int(row["id"])
-                if self.ledger.resolve_duplicate_candidate(
+                resolved = self.ledger.resolve_duplicate_candidate(
                     row_id,
                     "rejected",
                     (
@@ -573,8 +577,10 @@ class LocalDocumentProcessor:
                         },
                         "externalSubmission": "not_executed",
                     },
-                ):
-                    closed_ids.append(row_id)
+                )
+                if not resolved:
+                    raise RuntimeError("Duplicate candidate transition could not be retained during reassessment")
+                closed_ids.append(row_id)
                 summary["candidateRowsClosed"] += 1
 
             opened_candidate_id = None
@@ -743,8 +749,13 @@ class LocalDocumentProcessor:
     def apply_trusted_category_suggestions(self, limit: int = 500) -> Dict[str, Any]:
         """Apply exact vendor taxonomy matches while preserving every other gate."""
         candidates = self.trusted_category_suggestion_candidates(limit=limit)
+        signatures = {
+            int(candidate["document"]["id"]): _processing_plan_signature(candidate)
+            for candidate in candidates
+        }
+        del candidates
         pre_mutation_backup = None
-        if candidates:
+        if signatures:
             try:
                 backup_service = LocalBackupService(self.ledger, self.config)
                 backup = backup_service.create_backup(
@@ -768,7 +779,7 @@ class LocalDocumentProcessor:
                     "action": "local_processing.trusted_category_batch_blocked",
                     "entityType": "bookkeeping_document",
                     "details": {
-                        "candidateCount": len(candidates),
+                        "candidateCount": len(signatures),
                         "reason": "pre_mutation_backup_failed",
                         "errorType": type(exc).__name__,
                         "externalSubmission": "not_executed",
@@ -779,7 +790,8 @@ class LocalDocumentProcessor:
                     "pre-mutation backup could not be verified."
                 ) from exc
         summary = {
-            "candidates": len(candidates),
+            "candidates": len(signatures),
+            "deferredDocuments": 0,
             "updatedDocuments": 0,
             "resolvedReviewItems": 0,
             "stillNeedsReview": 0,
@@ -788,6 +800,33 @@ class LocalDocumentProcessor:
             "preMutationBackup": pre_mutation_backup,
             "externalSubmission": "not_executed",
         }
+        if not signatures:
+            return summary
+        with self.ledger.write_transaction():
+            current_candidates = {
+                int(candidate["document"]["id"]): candidate
+                for candidate in self.trusted_category_suggestion_candidates(limit=limit)
+            }
+            validated_candidates = []
+            for document_id, signature in signatures.items():
+                current = current_candidates.get(document_id)
+                if current is not None and _processing_plan_signature(current) == signature:
+                    validated_candidates.append(current)
+                    continue
+                summary["deferredDocuments"] += 1
+                self.ledger.record_audit_event({
+                    "action": "local_processing.trusted_category_deferred",
+                    "entityType": "bookkeeping_document",
+                    "entityId": str(document_id),
+                    "details": {
+                        "reason": "evidence_or_review_state_changed",
+                        "externalSubmission": "not_executed",
+                    },
+                })
+            return self._apply_trusted_category_suggestions(validated_candidates, summary)
+
+    def _apply_trusted_category_suggestions(self, candidates: list, summary: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply only revalidated candidates within the caller's writer transaction."""
         for candidate in candidates:
             document = candidate["document"]
             suggestion = candidate["suggestion"]
@@ -890,12 +929,11 @@ class LocalDocumentProcessor:
             summary["stillNeedsReview"] += int(bool(remaining_reviews))
             summary["readyDocuments"] += int(not remaining_reviews)
             summary["documentIds"].append(document_id)
-        if candidates:
-            self.ledger.record_audit_event({
-                "action": "local_processing.trusted_category_batch_completed",
-                "entityType": "bookkeeping_document",
-                "details": dict(summary),
-            })
+        self.ledger.record_audit_event({
+            "action": "local_processing.trusted_category_batch_completed",
+            "entityType": "bookkeeping_document",
+            "details": dict(summary),
+        })
         return summary
 
     def _replace_trusted_category_extracted_field(
@@ -1440,7 +1478,7 @@ class LocalDocumentProcessor:
         for document in documents:
             result = self.retry_document(int(document["id"]), actor=actor)
             status = result.get("status")
-            summary["retried"] += 1
+            summary["retried"] += int(result.get("retry") is True)
             if result.get("skipped"):
                 summary["skipped"] += 1
             elif status == "processed":
@@ -1467,7 +1505,7 @@ class LocalDocumentProcessor:
         return summary
 
     def retry_document(self, document_id: int, actor: str = "fab_local_processing") -> Dict[str, Any]:
-        document = self.ledger.get_document(document_id)
+        document = self.ledger.get_document_core(document_id)
         if not document:
             return {"documentId": document_id, "status": "not_found", "error": "Document not found"}
         if document.get("processing_status") != "failed":
@@ -1478,6 +1516,14 @@ class LocalDocumentProcessor:
                 "reason": "document_not_failed",
             }
         retry_count = self._mark_retry_started(document, actor)
+        if retry_count is None:
+            current = self.ledger.get_document_core(document_id)
+            return {
+                "documentId": document_id,
+                "status": current.get("processing_status") if current else "not_found",
+                "skipped": True,
+                "reason": "document_changed_before_retry",
+            }
         result = self.process_document(document_id)
         result["retry"] = True
         result["retryCount"] = retry_count
@@ -1997,36 +2043,42 @@ class LocalDocumentProcessor:
             "correctedData": review_data,
         })
 
-    def _mark_retry_started(self, document: Dict[str, Any], actor: str) -> int:
+    def _mark_retry_started(self, document: Dict[str, Any], actor: str) -> Optional[int]:
         document_id = int(document["id"])
-        metadata = dict(document.get("metadata") or {})
-        processing = dict(metadata.get("processing") or {})
-        retry_count = _safe_int(processing.get("retryCount")) + 1
-        retry_history = list(processing.get("retryHistory") or [])
-        retry_history.append({
-            "retryCount": retry_count,
-            "startedAt": _now(),
-            "actor": actor,
-            "previousStatus": document.get("processing_status"),
-            "previousError": metadata.get("processingError"),
-        })
-        processing["retryCount"] = retry_count
-        processing["retryHistory"] = retry_history[-10:]
-        metadata["processing"] = processing
-        self.ledger.update_document(document_id, {
-            "processingStatus": "imported",
-            "metadata": metadata,
-        })
-        self.ledger.record_audit_event({
-            "action": "local_processing.retry_started",
-            "entityType": "bookkeeping_document",
-            "entityId": str(document_id),
-            "details": {
-                "actor": actor,
+        signature = _processing_plan_signature(document)
+        with self.ledger.write_transaction():
+            current = self.ledger.get_document_core(document_id)
+            if (not current or current.get("processing_status") != "failed"
+                    or _processing_plan_signature(current) != signature):
+                return None
+            metadata = dict(current.get("metadata") or {})
+            processing = dict(metadata.get("processing") or {})
+            retry_count = _safe_int(processing.get("retryCount")) + 1
+            retry_history = list(processing.get("retryHistory") or [])
+            retry_history.append({
                 "retryCount": retry_count,
+                "startedAt": _now(),
+                "actor": actor,
+                "previousStatus": current.get("processing_status"),
                 "previousError": metadata.get("processingError"),
-            },
-        })
+            })
+            processing["retryCount"] = retry_count
+            processing["retryHistory"] = retry_history[-10:]
+            metadata["processing"] = processing
+            self.ledger.update_document(document_id, {
+                "processingStatus": "imported",
+                "metadata": metadata,
+            })
+            self.ledger.record_audit_event({
+                "action": "local_processing.retry_started",
+                "entityType": "bookkeeping_document",
+                "entityId": str(document_id),
+                "details": {
+                    "actor": actor,
+                    "retryCount": retry_count,
+                    "previousError": metadata.get("processingError"),
+                },
+            })
         return retry_count
 
     def _resolve_inactive_processing_reviews(

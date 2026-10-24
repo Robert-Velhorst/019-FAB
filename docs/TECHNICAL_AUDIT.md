@@ -21,6 +21,29 @@ Audit date: 2026-08-13
 
 ## Remediated in this audit
 
+- Background refresh of loaded review pages is bounded to four logical reads
+  rather than one request per loaded page at once. Superseded/error batches stop
+  queued work and preserve ordered, all-or-nothing result merging. Synthetic
+  Chromium checks against the real temporary stack observed six additional
+  page reads with peak four while retaining 175 loaded reviews. Desktop mobile
+  navigation-control visibility, collapsed-sidebar mobile reopening and narrow
+  table-value placement were corrected and checked at 1280x800 and 390x844.
+  This is not a whole-app resource or complete browser/device acceptance claim.
+
+- Category candidate discovery no longer takes only the newest 5,000 global
+  reviews. SQL selects documents with open category gates, and a stable
+  timestamp/ID cursor traverses 100-document pages with complete open review
+  groups. This avoids unrelated payload hydration and duplicate/normalized
+  context loading while preserving existing category and posting eligibility.
+  A synthetic 2,000-document/2,000-review fixture with 20 category reviews and
+  8 KiB OCR/review payloads returned identical category context: median
+  624.82 ms / 18,046,561 peak traced Python bytes for the former global-window
+  reference versus 10.12 ms / 482,243 bytes for the filtered cursor, across five
+  interleaved warm samples. The reference covers this entire bounded fixture;
+  separate regressions prove discovery behind 5,001 unrelated reviews. These
+  are read-path measurements, not process RSS, cold-cache or whole-app claims.
+  Reproduce with `python scripts/benchmark_planning_reads.py --category-reviews`.
+
 - Replaced eager `os.walk` directory enumeration in local intake with a deterministic `scandir` traversal capped at 120,000 filesystem entries per source scan. This bounds memory spent listing irrelevant files and directories before the existing document, byte, and directory limits apply; overflow fails closed as `attention_required` without importing a partial manifest.
 
 - Replaced repeated export-attempt list scans and no-op updates with indexed identity lookups, route-without-export queries, explicit changed-state results, and no-op batch behavior.
@@ -155,6 +178,65 @@ Audit date: 2026-08-13
 - Unexpected Flask route exceptions now record `externalSubmission: unknown`; the regression test simulates a provider-side effect before a route throws and verifies the audit does not falsely assert `not_executed`.
 - The fresh Windows production-stack rehearsal passed 30 concurrent authenticated warm-cache `fab.controlCenter` reads at concurrency 6. Removing the unused HAI manifest projection reduced the uncompressed response from 67,105 to 56,750 bytes (15.4%); post-change latency was 31.20 ms median and 37.26 ms p95 on a one-document synthetic ledger. Largest remaining projected fields were `autonomy` (12,081 bytes) and `health` (5,213 bytes). The direct HAI manifest endpoint remains available and passed the rehearsal. The latest 30-request run measured 49.56 ms median / 66.27 ms p95 and 57,768 response bytes on its fixture. Its 50 ms sampler captured six process samples: peak sampled combined API/dashboard working set 189,747,200 bytes (76,197,888 / 113,549,312), dashboard CPU 0.359375 seconds, and API CPU 0.0 seconds at reported precision. The one-document warm-cache, six-sample measurement is diagnostic only and does not measure cold refreshes, scaled-ledger behavior, sustained load, or a representative whole-app resource baseline. The 80-request burst was rate-limited by the existing tRPC policy; the combined rehearsal CLI is now bounded to 30 requests.
 
+## Planning Read Verification (2026-10-20)
+
+Autonomy batch counters now use bounded SQL counts instead of materializing OCR
+and review evidence merely to compute list lengths. Status filters and the
+existing 1-to-500 batch clamp are preserved. Duplicate-cycle detection now
+streams all confirmed links using only document IDs and link IDs, without a
+newest-document cutoff. A regression covers a cycle older than 5,001 newer
+linked documents, across multiple 500-row cursor batches. Explicit caller-
+supplied diagnostic limits retain their bounded-window behavior; autonomous
+planning and repair use the full-history default. Graph memory scales with
+confirmed links rather than document payload size.
+
+Each repair rechecks its selected links in bounded SQL batches after taking
+the writer lock. Changed cycles are deferred rather than undoing an intervening
+correction. Document links/status, review gates, normalized bookkeeping records,
+and the per-cycle audit commit together or roll back. Backup happens before
+the writer transaction; checksum-bound backup and retained-source gates remain.
+
+Candidate reassessment uses compact canonical plan fingerprints and releases
+the initial payload snapshot before backup/revalidation. It recomputes evidence
+under the writer lock, defers changed pairs, and applies accepted changes and
+completion audit in one transaction. Regressions reproduce operator-confirmed
+candidates being rejected by a stale plan and partial writes after normalization
+or audit failure. Same-timestamp evidence edits, replacement candidate/review
+failures, false transition results, mixed fresh/deferred pairs, and a real
+authenticated pre-mutation recovery package are covered. Expanded checks passed
+264 tests and 5 subtests; nine final focused cases passed. No operator data or
+external provider records were used. This is not independent penetration testing.
+
+`python scripts/benchmark_planning_reads.py` uses only a new disposable synthetic
+SQLite ledger, never operator configuration or provider accounts. Its default
+fixture has 2,000 documents and 2,000 reviews, 8,192-byte OCR/review payloads,
+500-row batches, and five alternating warm samples per implementation. Both
+versions returned identical counts and 500-row graph projections in the initial
+`3e46b72` benchmark:
+
+| Read Path | Full-Payload Median | Lightweight Median | Full-Payload / Lightweight Peak Traced Python Bytes |
+| --- | --- | --- | --- |
+| Document/review batch counters | 164.67 ms | 4.58 ms | 7,186,967 / 3,822 |
+| 500-row duplicate graph projection | 88.74 ms | 21.08 ms | 7,186,939 / 170,268 |
+
+These are read-path timings and Python allocation peaks, not process RSS, total
+CPU, cold-cache throughput, or a whole-app resource-reduction percentage. The
+fixture remains bounded to 128 MiB of generated payload and removes its temporary
+data. Expanded ledger/API/health/autonomy/processing checks passed 298 tests and
+5 subtests; a further 47-case focused group includes the large-queue clamp check.
+The built dashboard/API/SQLite/HAI synthetic rehearsal passed with no provider
+writes and both children stopped. Its tiny warm-cache result is not a scaled
+application baseline. Fresh hosted CI is required for this follow-up.
+
+The subsequent full-history follow-up adds `--confirmed-cycle` to seed a cycle
+spanning every synthetic document. A fresh 2,000-link, five-sample run returned
+the same cycle as the complete diagnostic-window reference: 28.36 ms median /
+1,149,040 peak traced Python bytes for that reference versus 12.87 ms / 583,036
+bytes for full-history confirmed-link streaming. Both implementations cover the
+whole fixture in this comparison; separate regression tests prove coverage
+beyond the old window. This remains a graph-path microbenchmark, not a process
+RSS, whole-app, or live-ledger performance claim.
+
 ## Remaining risks
 
 - Live Google and Wave acceptance depends on owner authorization and current provider state.
@@ -179,7 +261,8 @@ Audit date: 2026-08-13
 | Priority | Item | Required action |
 | --- | --- | --- |
 | High | Live provider acceptance | Reauthorize Google, validate the Wave business/token/mapping, and run a synthetic receipt through attachment readback before enabling archival. |
-| High | Independent local/remote telemetry identities | A synthetic collision showed OperationsClient returning remote ID 1 for a new document while local ID 1 still identified a different document; the new local row was not persisted. Strict response/ID validation fixes malformed IDs, not valid cross-store collisions. Establish durable identity mapping and translate foreign keys/updates, or fail closed on identity mismatch, before treating dual-store synchronization as production-ready. |
+| High | Host storage headroom | The Windows source volume exhausted free space during synthetic verification. Keep adequate free space for ledger WAL, evidence and authenticated recovery packages before unattended operation; alternate exFAT storage with large allocation units is inefficient for dependency caches and test checkouts. No user data or backups were deleted to recover space. |
+| High | Remote telemetry recovery and acceptance | Destination-scoped durable identity links, local-first persistence, translated references/updates, and conflict quarantine address the reproduced numeric-ID collision. Schema v4 also quarantines rejected local participants without a link, preventing resubmission after restart; schema v2/v3 upgrade fixtures verify recovery snapshots and retained v3 links. Historical unmapped rows and unknown create outcomes still need verified readback/backfill; replacing a remote database at the same URL requires a new identity_scope generation label. Exercise these recovery boundaries against the intended deployment before calling dual-store synchronization production-ready; exactly-once delivery is not implemented. |
 | Medium | Image optimization | Removed unused OpenCV and its NumPy dependency from the core lock after confirming no source imports. A fresh current dirty-checkout image measured 140,805,983 bytes with ML disabled, versus 242,575,002 bytes for tagged revision `3e74dbcf5bb4158888ef550797c79bc564e5d291` (about 42% smaller). This is not a controlled comparison because the source revisions and Python base versions differ; clean-release, registry-transfer, and process CPU/RSS measurements remain. |
 | Medium | Performance baseline | Initial synthetic concurrent hot-cache dashboard timings are now recorded. Still measure cold refresh, sustained idle/concurrent host load, process CPU/RSS, and cold backup-integrity duration separately; the current one-document fixture is not representative of a populated production ledger. |
 | Medium | Recovery rehearsal | Exercise the documented schema rollback and full source-evidence recovery process on a production-sized copy before unattended upgrades. |

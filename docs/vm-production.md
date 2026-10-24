@@ -95,6 +95,60 @@ own restricted route permissions even when a ledger browser cookie is present.
 The VM dashboard uses one administrator identity. It does not yet implement a
 separate restricted team-operator role.
 
+## Optional HAI Access
+
+HAI access is opt-in and uses a fourth, independent random secret of at least
+32 characters. Never give HAI the operator API, browser sign-in, or session
+signing secret. Provision its secret file outside Git, readable by API UID
+10001, and add its absolute host path to the protected deployment environment:
+
+```text
+FAB_HAI_TOKEN_FILE=/etc/fab/secrets/hai-token
+FAB_HAI_ALLOWED_COMMANDS=refresh_notifications,engage_emergency_stop
+```
+
+Combine the VM profile with its explicit HAI override:
+
+```sh
+docker compose --env-file /etc/fab/deployment.env -f docker-compose.vm.yml -f docker-compose.vm.hai.yml config --quiet
+docker compose --env-file /etc/fab/deployment.env -f docker-compose.vm.yml -f docker-compose.vm.hai.yml up -d --build
+```
+
+Use the same file combination for subsequent `ps`, `logs`, `stop`, and upgrade
+commands. The override mounts the HAI secret only into API, retains the normal
+API secret, and does not change loopback port bindings, container privileges,
+encryption preflight, or the reverse-proxy trust policy. Omitting the override
+does not mount or enable its dedicated credential. Do not create a new public
+port for HAI; use the authenticated ledger HTTPS origin through the existing
+TLS ingress.
+
+Configure the HAI peer's own protected credential store with the dedicated
+token and the ledger origin. It sends `Authorization: Bearer <dedicated token>`
+to `/api/hai/manifest`, `/api/hai/status`, and the POST endpoints
+`/api/hai/commands/plan` and `/api/hai/commands/execute`. Do not put tokens into
+URLs, source files, chat, or request logs. Inspect the manifest before execution;
+the default override permits only notification refresh and emergency stop.
+Expand `FAB_HAI_ALLOWED_COMMANDS` only after reviewing the command's input,
+approval, and external-submission policy. HAI cannot clear an emergency stop,
+change operator settings, or bypass financial approval gates.
+
+Each execution must carry a durable unique `requestId`, its `commandId`, and an
+optional `payload`. Reuse the same request ID for an identical request whose
+response was lost; do not invent a new ID to retry a failed or indeterminate
+operation. FAB retains the outcome and does not execute the same request twice.
+Operator settings and other non-allowlisted API routes reject the HAI token.
+
+Startup rejects weak HAI tokens or a token equal to the operator API token.
+To rotate HAI access, replace its protected file and recreate API with the same
+Compose file combination; verify the old token is denied and the new manifest
+request succeeds. Removing the override alone does not remove previously
+created containers: recreate API using only the base VM profile to revoke the
+mount and credential. Do not remove ledger, backup, or credential volumes.
+
+Configuration-rendering and synthetic authenticated API checks are automated.
+They do not prove target-host TLS, file ownership, actual peer interoperability,
+or live provider permission. Verify those separately before enabling a peer.
+
 ## Health and Recovery
 
 API health probes check authenticated liveness. Worker probes check that the

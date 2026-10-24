@@ -52,6 +52,17 @@ jobs:
           FAB_SESSION_SECRET_FILE: /tmp/fab-synthetic-session-secret
           FAB_OPERATOR_TOKEN_FILE: /tmp/fab-synthetic-operator-token
         run: docker compose -f docker-compose.vm.yml config --quiet
+      - name: Validate optional restricted HAI deployment configuration
+        env:
+          FAB_OPERATOR_PUBLIC_ORIGIN: https://fab.example.test
+          FAB_LEDGER_PUBLIC_ORIGIN: https://ledger.example.test
+          FAB_TRUSTED_PROXY_ADDRESSES: 127.0.0.1
+          FAB_INTAKE_DIR: /tmp/fab-synthetic-intake
+          FAB_API_TOKEN_FILE: /tmp/fab-synthetic-api-token
+          FAB_SESSION_SECRET_FILE: /tmp/fab-synthetic-session-secret
+          FAB_OPERATOR_TOKEN_FILE: /tmp/fab-synthetic-operator-token
+          FAB_HAI_TOKEN_FILE: /tmp/fab-synthetic-hai-token
+        run: docker compose -f docker-compose.vm.yml -f docker-compose.vm.hai.yml config --quiet
 
   backend-windows:
     name: Backend (Windows ${{ matrix.shard }}/4)

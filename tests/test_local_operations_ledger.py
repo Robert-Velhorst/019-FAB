@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from src.operations.local_ledger import (
     LEDGER_SCHEMA_MIGRATIONS,
+    LEDGER_SCHEMA_VERSION,
     LocalOperationsLedger,
     SourceScanManifestLimitError,
 )
@@ -192,10 +193,10 @@ class TestLocalOperationsLedger(unittest.TestCase):
                 connection.close()
 
             self.assertEqual(status["status"], "current")
-            self.assertEqual(status["currentVersion"], 2)
+            self.assertEqual(status["currentVersion"], LEDGER_SCHEMA_VERSION)
             self.assertTrue(status["historyComplete"])
-            self.assertEqual(user_version, 2)
-            self.assertEqual([migration[0] for migration in migrations], [1, 2])
+            self.assertEqual(user_version, LEDGER_SCHEMA_VERSION)
+            self.assertEqual([migration[0] for migration in migrations], list(range(1, LEDGER_SCHEMA_VERSION + 1)))
             self.assertTrue(all(len(migration[2]) == 64 for migration in migrations))
 
     def test_version_one_ledger_gets_verified_backup_before_scan_manifest_upgrade(self):
@@ -242,10 +243,10 @@ class TestLocalOperationsLedger(unittest.TestCase):
                 integrity = backup.execute("PRAGMA integrity_check").fetchone()[0]
             finally:
                 backup.close()
-            self.assertEqual(status["currentVersion"], 2)
+            self.assertEqual(status["currentVersion"], LEDGER_SCHEMA_VERSION)
             self.assertTrue(status["historyComplete"])
             self.assertEqual(backup_manifest["sourceSchemaVersion"], 1)
-            self.assertEqual(backup_manifest["targetSchemaVersion"], 2)
+            self.assertEqual(backup_manifest["targetSchemaVersion"], LEDGER_SCHEMA_VERSION)
             self.assertEqual(retained, "retained")
             self.assertIsNone(old_manifest_table)
             self.assertEqual(integrity, "ok")
@@ -277,7 +278,7 @@ class TestLocalOperationsLedger(unittest.TestCase):
                 backup.close()
 
             self.assertEqual(manifest["sourceSchemaVersion"], 0)
-            self.assertEqual(manifest["targetSchemaVersion"], 2)
+            self.assertEqual(manifest["targetSchemaVersion"], LEDGER_SCHEMA_VERSION)
             self.assertEqual(manifest["sha256"], digest)
             self.assertEqual(retained, "retained")
             self.assertEqual(integrity, "ok")

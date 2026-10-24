@@ -1202,7 +1202,7 @@ class LocalAutonomousService:
         pending_export_attempts = self.ledger.list_export_attempts(status=("approval_required", "prepared"), limit=500)
         approved_export_attempts = self.ledger.list_export_attempts(status="approved", limit=500)
         return {
-            "importedDocuments": len(self.ledger.list_documents(status=IMPORTED_DOCUMENT_STATUSES, limit=limit)),
+            "importedDocuments": self.ledger.count_documents(status=IMPORTED_DOCUMENT_STATUSES, limit=limit),
             "duplicateLinkCycles": len(duplicate_link_cycles(self.ledger)),
             "duplicateCandidateReassessments": len(
                 duplicate_candidate_reassessments
@@ -1219,7 +1219,7 @@ class LocalAutonomousService:
             "reconciliableDocuments": metrics["unreconciled_documents"],
             "bankTransactions": metrics.get("bank_transactions", 0),
             "unreconciledBankTransactions": metrics.get("unreconciled_bank_transactions", 0),
-            "openReviewItems": len(self.ledger.list_review_items(status=OPEN_REVIEW_STATUSES, limit=500)),
+            "openReviewItems": self.ledger.count_review_items(status=OPEN_REVIEW_STATUSES, limit=500),
             "pendingRoutingDrafts": len(pending_routing_attempts),
             "pendingRoutingTargets": _target_breakdown(pending_routing_attempts, _routing_target_system),
             "pendingExportApprovals": len(pending_export_attempts),

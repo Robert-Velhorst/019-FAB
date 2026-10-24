@@ -19,12 +19,15 @@ from src.operations.local_targets import resolve_document_target_system
 
 
 ROUTABLE_DOCUMENT_STATUSES = ("processed", "reviewed", "validated", "ready_to_route")
+DRAFT_LOOKUP_DOCUMENT_STATUSES = (*ROUTABLE_DOCUMENT_STATUSES, "export_draft_prepared")
 OPEN_REVIEW_STATUSES = {"pending", "in_review"}
 PREPARED_ROUTING_STATUSES = ("draft_prepared", "needs_confirmation", "queued")
 WAVE_TARGET_SYSTEMS = {"wave", "waveapps", "waveapps_business", "waveapps_personal"}
 MIJNGELDZAKEN_TARGET_SYSTEMS = {"mijngeldzaken", "mijngeldzaken_nl", "mijngeldzaken.nl", "category_a", "personal"}
 ROUTABLE_BOOKKEEPING_RECORD_STATUSES = ("draft", "ready_to_route", "reviewed", "validated")
 ROUTABLE_BOOKKEEPING_EXPORT_STATUSES = ("not_started", "ready")
+PREPARED_RECORD_STATUSES = ("export_draft_prepared", "export_approved")
+PREPARED_RECORD_EXPORT_STATUSES = ("draft_prepared", "approved_not_submitted")
 
 
 class LocalRoutingService:
@@ -49,6 +52,15 @@ class LocalRoutingService:
         self.mijngeldzaken_operator = mijngeldzaken_operator or MijngeldzakenAutonomousOperator(self.config)
 
     def prepare_document_route(
+        self,
+        document_id: int,
+        target_system: Optional[str] = None,
+        workflow_run_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        with self.ledger.write_transaction():
+            return self._prepare_document_route(document_id, target_system, workflow_run_id)
+
+    def _prepare_document_route(
         self,
         document_id: int,
         target_system: Optional[str] = None,
@@ -97,7 +109,7 @@ class LocalRoutingService:
                 workflow_run_id=workflow_run_id,
             )
 
-        if document.get("processing_status") not in ROUTABLE_DOCUMENT_STATUSES:
+        if document.get("processing_status") not in DRAFT_LOOKUP_DOCUMENT_STATUSES:
             return self._record_blocked_attempt(
                 document,
                 "blocked_status",
@@ -157,15 +169,16 @@ class LocalRoutingService:
             surface=destination["target_surface"],
             actor="fab_local_router",
         )
-        existing_attempt = _find_existing_attempt(document, operation["operation_id"])
+        existing_attempt = _find_existing_attempt(document, operation["operation_id"], target_system)
         if existing_attempt:
-            LocalBookkeepingRecordService(self.ledger, self.config).record_export_state(
-                int(document["id"]),
-                "draft_prepared",
-                status="export_draft_prepared",
-                routing_attempt_id=int(existing_attempt["id"]),
-                details={"status": "already_prepared"},
-            )
+            if document.get("processing_status") != "export_draft_prepared":
+                LocalBookkeepingRecordService(self.ledger, self.config).record_export_state(
+                    int(document["id"]),
+                    "draft_prepared",
+                    status="export_draft_prepared",
+                    routing_attempt_id=int(existing_attempt["id"]),
+                    details={"status": "already_prepared"},
+                )
             return {
                 "success": True,
                 "status": "already_prepared",
@@ -174,6 +187,15 @@ class LocalRoutingService:
                 "target": existing_attempt["target"],
                 "operation": existing_attempt.get("metadata", {}).get("operation"),
             }
+
+        if document.get("processing_status") == "export_draft_prepared":
+            message = "The prepared draft no longer matches this source, target, or local record; review it before preparing a replacement."
+            self._queue_review_once(
+                document, "routing_plan_incomplete", message, {"targetSystem": target_system},
+            )
+            return self._record_blocked_attempt(
+                document, "needs_review", message, {"targetSystem": target_system}, workflow_run_id,
+            )
 
         plan = operation["plan"]
         if plan.get("status") != "planned":
@@ -276,6 +298,15 @@ class LocalRoutingService:
         target_system: Optional[str] = None,
         workflow_run_id: Optional[int] = None,
     ) -> Dict[str, Any]:
+        with self.ledger.write_transaction():
+            return self._prepare_bookkeeping_record_route(record_id, target_system, workflow_run_id)
+
+    def _prepare_bookkeeping_record_route(
+        self,
+        record_id: int,
+        target_system: Optional[str] = None,
+        workflow_run_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
         record = self.ledger.get_bookkeeping_record(record_id)
         if not record:
             return {"success": False, "status": "not_found", "error": "Bookkeeping record not found"}
@@ -301,29 +332,6 @@ class LocalRoutingService:
                 workflow_run_id=workflow_run_id,
             )
 
-        existing_attempt = _find_existing_record_attempt(
-            self.ledger,
-            int(record["id"]),
-            statuses=PREPARED_ROUTING_STATUSES,
-        )
-        if existing_attempt:
-            _update_record_export_state(
-                self.ledger,
-                record,
-                "draft_prepared",
-                status="export_draft_prepared",
-                routing_attempt_id=int(existing_attempt["id"]),
-                details={"status": "already_prepared"},
-            )
-            return {
-                "success": True,
-                "status": "already_prepared",
-                "routingAttemptId": existing_attempt["id"],
-                "bookkeepingRecordId": record["id"],
-                "target": existing_attempt["target"],
-                "operation": existing_attempt.get("metadata", {}).get("operation"),
-            }
-
         if record.get("review_required"):
             return self._record_blocked_record_attempt(
                 record,
@@ -333,7 +341,7 @@ class LocalRoutingService:
                 workflow_run_id=workflow_run_id,
             )
 
-        if record.get("status") not in ROUTABLE_BOOKKEEPING_RECORD_STATUSES:
+        if record.get("status") not in (*ROUTABLE_BOOKKEEPING_RECORD_STATUSES, *PREPARED_RECORD_STATUSES):
             return self._record_blocked_record_attempt(
                 record,
                 "blocked_status",
@@ -342,7 +350,7 @@ class LocalRoutingService:
                 workflow_run_id=workflow_run_id,
             )
 
-        if record.get("export_status") not in ROUTABLE_BOOKKEEPING_EXPORT_STATUSES:
+        if record.get("export_status") not in (*ROUTABLE_BOOKKEEPING_EXPORT_STATUSES, *PREPARED_RECORD_EXPORT_STATUSES):
             return self._record_blocked_record_attempt(
                 record,
                 "blocked_export_status",
@@ -382,16 +390,15 @@ class LocalRoutingService:
             int(record["id"]),
             operation_id=operation["operation_id"],
             statuses=PREPARED_ROUTING_STATUSES,
+            record=record,
+            target_system=target_system,
         )
         if operation_existing_attempt:
-            _update_record_export_state(
-                self.ledger,
-                record,
-                "draft_prepared",
-                status="export_draft_prepared",
-                routing_attempt_id=int(operation_existing_attempt["id"]),
-                details={"status": "already_prepared"},
-            )
+            if not _record_has_prepared_state(record):
+                _update_record_export_state(
+                    self.ledger, record, "draft_prepared", status="export_draft_prepared",
+                    routing_attempt_id=int(operation_existing_attempt["id"]), details={"status": "already_prepared"},
+                )
             return {
                 "success": True,
                 "status": "already_prepared",
@@ -400,6 +407,12 @@ class LocalRoutingService:
                 "target": operation_existing_attempt["target"],
                 "operation": operation_existing_attempt.get("metadata", {}).get("operation"),
             }
+
+        if _record_has_prepared_state(record):
+            return self._record_blocked_record_attempt(
+                record, "needs_review", "Prepared bank draft no longer matches its source or target; review before replacement.",
+                {"targetSystem": target_system}, workflow_run_id=workflow_run_id,
+            )
 
         plan = operation["plan"]
         if plan.get("status") != "planned":
@@ -575,15 +588,16 @@ class LocalRoutingService:
             surface=destination["target_surface"],
             actor="fab_local_router",
         )
-        existing_attempt = _find_existing_attempt(document, operation["operation_id"])
+        existing_attempt = _find_existing_attempt(document, operation["operation_id"], target_system)
         if existing_attempt:
-            LocalBookkeepingRecordService(self.ledger, self.config).record_export_state(
-                int(document["id"]),
-                "draft_prepared",
-                status="export_draft_prepared",
-                routing_attempt_id=int(existing_attempt["id"]),
-                details={"status": "already_prepared"},
-            )
+            if document.get("processing_status") != "export_draft_prepared":
+                LocalBookkeepingRecordService(self.ledger, self.config).record_export_state(
+                    int(document["id"]),
+                    "draft_prepared",
+                    status="export_draft_prepared",
+                    routing_attempt_id=int(existing_attempt["id"]),
+                    details={"status": "already_prepared"},
+                )
             return {
                 "success": True,
                 "status": "already_prepared",
@@ -592,6 +606,15 @@ class LocalRoutingService:
                 "target": existing_attempt["target"],
                 "operation": existing_attempt.get("metadata", {}).get("operation"),
             }
+
+        if document.get("processing_status") == "export_draft_prepared":
+            message = "The prepared draft no longer matches this source, target, or local record; review it before preparing a replacement."
+            self._queue_review_once(
+                document, "mijngeldzaken_routing_plan_incomplete", message, {"targetSystem": target_system},
+            )
+            return self._record_mijngeldzaken_blocked_attempt(
+                document, "needs_review", message, {"targetSystem": target_system}, workflow_run_id,
+            )
 
         plan = operation["plan"]
         if plan.get("status") != "planned":
@@ -689,7 +712,7 @@ class LocalRoutingService:
                 {"reviewRequired": True},
                 workflow_run_id=workflow_run_id,
             )
-        if record.get("status") not in ROUTABLE_BOOKKEEPING_RECORD_STATUSES:
+        if record.get("status") not in (*ROUTABLE_BOOKKEEPING_RECORD_STATUSES, *PREPARED_RECORD_STATUSES):
             return self._record_mijngeldzaken_blocked_record_attempt(
                 record,
                 "blocked_status",
@@ -697,7 +720,7 @@ class LocalRoutingService:
                 {"recordStatus": record.get("status")},
                 workflow_run_id=workflow_run_id,
             )
-        if record.get("export_status") not in ROUTABLE_BOOKKEEPING_EXPORT_STATUSES:
+        if record.get("export_status") not in (*ROUTABLE_BOOKKEEPING_EXPORT_STATUSES, *PREPARED_RECORD_EXPORT_STATUSES):
             return self._record_mijngeldzaken_blocked_record_attempt(
                 record,
                 "blocked_export_status",
@@ -744,16 +767,15 @@ class LocalRoutingService:
             int(record["id"]),
             operation_id=operation["operation_id"],
             statuses=PREPARED_ROUTING_STATUSES,
+            record=record,
+            target_system=target_system,
         )
         if existing_attempt:
-            _update_record_export_state(
-                self.ledger,
-                record,
-                "draft_prepared",
-                status="export_draft_prepared",
-                routing_attempt_id=int(existing_attempt["id"]),
-                details={"status": "already_prepared"},
-            )
+            if not _record_has_prepared_state(record):
+                _update_record_export_state(
+                    self.ledger, record, "draft_prepared", status="export_draft_prepared",
+                    routing_attempt_id=int(existing_attempt["id"]), details={"status": "already_prepared"},
+                )
             return {
                 "success": True,
                 "status": "already_prepared",
@@ -762,6 +784,11 @@ class LocalRoutingService:
                 "target": existing_attempt["target"],
                 "operation": existing_attempt.get("metadata", {}).get("operation"),
             }
+        if _record_has_prepared_state(record):
+            return self._record_mijngeldzaken_blocked_record_attempt(
+                record, "needs_review", "Prepared bank draft no longer matches its source or target; review before replacement.",
+                {"targetSystem": target_system}, workflow_run_id=workflow_run_id,
+            )
         plan = operation["plan"]
         if plan.get("status") != "planned":
             return self._record_mijngeldzaken_blocked_record_attempt(
@@ -996,7 +1023,7 @@ class LocalRoutingService:
                 "message": f"Document duplicates #{document['duplicate_of_document_id']}; resolve duplicate review before routing.",
                 "metadata": {"duplicateOfDocumentId": document.get("duplicate_of_document_id")},
             }
-        if document.get("processing_status") not in ROUTABLE_DOCUMENT_STATUSES:
+        if document.get("processing_status") not in DRAFT_LOOKUP_DOCUMENT_STATUSES:
             return {
                 "status": "blocked_status",
                 "message": f"Document status {document.get('processing_status')} is not ready for master-ledger draft preparation.",
@@ -1370,10 +1397,26 @@ def _blocked_export_status(status: str) -> str:
     return "blocked"
 
 
-def _find_existing_attempt(document: Dict[str, Any], operation_id: str) -> Optional[Dict[str, Any]]:
+def _find_existing_attempt(
+    document: Dict[str, Any], operation_id: str, target_system: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    if document.get("processing_status") == "export_draft_prepared" and not document.get("bookkeeping_record"):
+        return None
+    snapshot = _document_snapshot(document)
     for attempt in document.get("routing_attempts") or []:
-        metadata = attempt.get("metadata") or {}
-        operation = metadata.get("operation") or {}
+        metadata = attempt.get("metadata") if isinstance(attempt.get("metadata"), dict) else {}
+        operation = metadata.get("operation") if isinstance(metadata.get("operation"), dict) else {}
+        stored_snapshot = metadata.get("documentSnapshot")
+        if not isinstance(stored_snapshot, dict):
+            continue
+        # Preparation changes status, not the source snapshot used for identity.
+        if any(stored_snapshot.get(key) != value for key, value in snapshot.items() if key != "processingStatus"):
+            continue
+        stored_target = metadata.get("targetSystem")
+        if target_system is not None and (
+            not stored_target or _routing_target_key(stored_target) != _routing_target_key(target_system)
+        ):
+            continue
         if operation.get("operation_id") == operation_id and attempt.get("status") in PREPARED_ROUTING_STATUSES:
             return attempt
     return None
@@ -1384,17 +1427,36 @@ def _find_existing_record_attempt(
     record_id: int,
     operation_id: Optional[str] = None,
     statuses: Optional[tuple] = None,
+    record: Optional[Dict[str, Any]] = None,
+    target_system: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
-    for attempt in ledger.list_routing_attempts(status=statuses, limit=500):
-        metadata = attempt.get("metadata") or {}
+    for attempt in ledger.list_routing_attempts(status=statuses, bookkeeping_record_id=record_id, limit=500):
+        metadata = attempt.get("metadata") if isinstance(attempt.get("metadata"), dict) else {}
         attempt_record_id = attempt.get("bookkeeping_record_id") or metadata.get("bookkeepingRecordId")
         if attempt_record_id != record_id:
             continue
         operation = metadata.get("operation") if isinstance(metadata.get("operation"), dict) else {}
         if operation_id and operation.get("operation_id") != operation_id:
             continue
+        if target_system is not None and (
+            not metadata.get("targetSystem")
+            or _routing_target_key(metadata["targetSystem"]) != _routing_target_key(target_system)
+        ):
+            continue
+        if record is not None:
+            snapshot = metadata.get("bookkeepingRecordSnapshot")
+            if not isinstance(snapshot, dict) or any(
+                snapshot.get(key) != value for key, value in _bookkeeping_record_snapshot(record).items()
+                if key not in {"status", "exportStatus"}
+            ):
+                continue
         return attempt
     return None
+
+
+def _record_has_prepared_state(record: Dict[str, Any]) -> bool:
+    return (record.get("status") in PREPARED_RECORD_STATUSES
+            or record.get("export_status") in PREPARED_RECORD_EXPORT_STATUSES)
 
 
 def _document_snapshot(document: Dict[str, Any]) -> Dict[str, Any]:
@@ -1443,6 +1505,13 @@ def _target_system(document: Dict[str, Any]) -> str:
 
 def _normalize_target_system(value: Any) -> str:
     return str(value or "waveapps").strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def _routing_target_key(value: Any) -> str:
+    target = _normalize_target_system(value)
+    if target in MIJNGELDZAKEN_TARGET_SYSTEMS:
+        return "mijngeldzaken"
+    return "waveapps" if target in {"wave", "waveapps"} else target
 
 
 def _merged_metadata(document: Dict[str, Any], updates: Dict[str, Any]) -> Dict[str, Any]:

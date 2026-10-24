@@ -68,6 +68,7 @@ export default function AdminOperations() {
   const [loadingMoreReviews, setLoadingMoreReviews] = useState(false);
   const loadedReviewOffsets = useRef<number[]>([]);
   const reviewRefreshSequence = useRef(0);
+  const reviewPageInFlight = useRef(false);
   const isAdmin = user?.role === "admin";
   const utils = trpc.useUtils();
   const operatorAccess = trpc.fab.access.useQuery(undefined, {
@@ -324,23 +325,28 @@ export default function AdminOperations() {
   const connected = Boolean(data?.connection.connected);
 
   useEffect(() => {
+    let cancelled = false;
+    const sequence = ++reviewRefreshSequence.current;
+    const cancel = () => {
+      cancelled = true;
+      if (sequence === reviewRefreshSequence.current) reviewRefreshSequence.current += 1;
+    };
     const firstPage = data?.reviews.workItems || [];
     const firstPagePagination = data?.reviews.pagination || {};
     const offsets = [...loadedReviewOffsets.current];
     if (offsets.length === 0) {
       setReviewWorkItems(firstPage);
       setReviewPagination(firstPagePagination);
-      return;
+      return cancel;
     }
 
-    let cancelled = false;
-    const sequence = ++reviewRefreshSequence.current;
     const limit = Math.max(1, count(firstPagePagination.limit) || 50);
     void refreshFabReviewPages(
       { workItems: firstPage, pagination: firstPagePagination },
       offsets,
       limit,
       (offset, pageLimit) => utils.fab.reviewPage.fetch({ offset, limit: pageLimit }),
+      { isCurrent: () => !cancelled && sequence === reviewRefreshSequence.current },
     ).then((refreshed) => {
       if (cancelled || sequence !== reviewRefreshSequence.current) return;
       setReviewWorkItems(refreshed.workItems);
@@ -348,20 +354,22 @@ export default function AdminOperations() {
     }).catch(() => {
       // Keep the last successfully loaded pages if a background refresh fails.
     });
-    return () => {
-      cancelled = true;
-    };
+    return cancel;
   }, [data?.connection.checkedAt, data?.reviews.pagination, data?.reviews.workItems, utils.fab.reviewPage]);
 
   const loadMoreReviews = useCallback(async () => {
-    if (loadingMoreReviews || reviewPagination.hasMore !== true) return;
+    if (reviewPageInFlight.current || reviewPagination.hasMore !== true) return;
+    reviewPageInFlight.current = true;
+    const sequence = reviewRefreshSequence.current;
     const nextOffset = count(reviewPagination.nextOffset);
     const limit = Math.max(1, count(reviewPagination.limit) || 50);
     setLoadingMoreReviews(true);
     try {
       const page = await utils.fab.reviewPage.fetch({ offset: nextOffset, limit });
+      if (sequence !== reviewRefreshSequence.current) return;
       const nextItems = records(page.workItems);
       setReviewWorkItems((current) => {
+        if (sequence !== reviewRefreshSequence.current) return current;
         const merged = new Map(current.map((item) => [text(item.id), item]));
         nextItems.forEach((item) => merged.set(text(item.id), item));
         return Array.from(merged.values());
@@ -369,15 +377,17 @@ export default function AdminOperations() {
       if (!loadedReviewOffsets.current.includes(nextOffset)) {
         loadedReviewOffsets.current.push(nextOffset);
       }
-      setReviewPagination(asRecord(page.pagination));
+      setReviewPagination((current) => sequence === reviewRefreshSequence.current ? asRecord(page.pagination) : current);
     } catch (error) {
+      if (sequence !== reviewRefreshSequence.current) return;
       toast.error(error instanceof Error
         ? error.message
         : copy("More reviews could not be loaded.", "Meer controles konden niet worden geladen."));
     } finally {
+      reviewPageInFlight.current = false;
       setLoadingMoreReviews(false);
     }
-  }, [copy, loadingMoreReviews, reviewPagination, utils.fab.reviewPage]);
+  }, [copy, reviewPagination, utils.fab.reviewPage]);
 
   useEffect(() => {
     document.documentElement.classList.add("fab-operator-active");

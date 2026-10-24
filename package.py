@@ -42,6 +42,8 @@ class PackageBuilder:
             "Dockerfile",
             "docker-compose.maintenance.yml",
             "docker-compose.yml",
+            "docker-compose.vm.yml",
+            "docker-compose.vm.hai.yml",
             "config/config_template.ini",
             "requirements.txt",
             "requirements.lock",

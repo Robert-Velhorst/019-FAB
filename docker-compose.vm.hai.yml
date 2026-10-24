@@ -1,0 +1,13 @@
+# Explicit opt-in: combine only with docker-compose.vm.yml.
+services:
+  api:
+    environment:
+      FAB_HAI_CONNECTOR_ENABLED: "true"
+      FAB_HAI_API_TOKEN_FILE: /run/secrets/hai_token
+      FAB_HAI_ALLOWED_COMMANDS: ${FAB_HAI_ALLOWED_COMMANDS:-refresh_notifications,engage_emergency_stop}
+    secrets:
+      - hai_token
+
+secrets:
+  hai_token:
+    file: ${FAB_HAI_TOKEN_FILE:?Set the absolute dedicated HAI token file path}

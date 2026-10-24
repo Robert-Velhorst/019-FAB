@@ -66,9 +66,31 @@ an optional `success` flag must be boolean and cannot be false. Returned IDs
 must be positive signed 64-bit integers (or their ASCII decimal strings), not
 booleans or coerced floating-point values. Malformed responses are failures,
 allowing the existing local-ledger fallback without reusing an invalid ID.
-This validation does not establish identity mapping between independent local
-and remote databases: valid numeric ID collisions remain a separate production
-blocker for dual-store synchronization.
+When the local ledger is configured, it is persisted first and its IDs remain
+authoritative. Successful remote creations establish destination-scoped links
+in the schema-v3 `remote_identity_links` table. Update URLs and document,
+workflow, routing, duplicate-document, and audit entity references are translated
+through verified links, never through numeric equality. Audit detail references
+are explicitly retained as scoped local evidence rather than remote IDs.
+
+Missing links defer remote writes while preserving local records. Conflicting
+links are quarantined and cannot trigger further creates or updates. Schema v4
+also retains a quarantine for a rejected local record that could not obtain a
+unique link, so both sides of a collision remain blocked after restart. Healthy
+records, other resources, and other destinations remain independent. Failures
+and deferrals are recorded in the local audit trail. Non-document upserts with
+an existing verified link are not submitted as additional remote creates.
+Document registration can refresh its idempotent source identity without
+discarding an intake checksum omitted by telemetry.
+
+Destination scope includes the configured URL, endpoint paths, and optional
+`operations.identity_scope` generation label. When replacing/resetting a remote
+database at the same address, operators must change that label before enabling
+mirroring; the client cannot automatically detect an unrelated database behind
+an unchanged URL. Historical unmapped rows, unknown write outcomes, unsupported
+remote resources, and non-idempotent create replay still require readback or
+an explicit reconciliation plan. This is not a historical backfill or an
+exactly-once delivery protocol.
 
 ## Provider APIs
 
