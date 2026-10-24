@@ -46,9 +46,9 @@ Robust error handling is implemented to prevent security vulnerabilities arising
 
 ## 6. Backup and Disaster Recovery
 
-- **Automated Backups**: Regular, automated backups of critical data and configurations are performed.
-- **Encrypted Backups**: Backups are encrypted to protect data confidentiality.
-- **Disaster Recovery Plan**: A clear plan is in place for recovering data and restoring system operations in the event of a disaster.
+- **Backup creation and integrity**: FAB can create ZIP backups of the ledger and configured source evidence. Its manifest integrity signature detects tampering; it does not encrypt the archive.
+- **Confidentiality and retention**: Protect backup directories and off-host copies with host or volume encryption and restrictive access controls. Backup frequency, off-host retention, key recovery, and restore acceptance must be configured and verified by the deployment operator.
+- **Restore safety**: Inspect backups and rehearse restores in an isolated environment before relying on them for disaster recovery. A completed backup or integrity check alone does not prove recoverability.
 
 ## 7. User Interaction Security
 

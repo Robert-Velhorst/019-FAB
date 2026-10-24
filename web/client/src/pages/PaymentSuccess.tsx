@@ -58,12 +58,6 @@ export default function PaymentSuccess() {
                 <p className="text-lg text-charcoal-light leading-relaxed mb-8">
                   {t("payment.success.desc")}
                 </p>
-                {session.customerEmail && (
-                  <p className="text-sm text-charcoal-light mb-8">
-                    {t("payment.success.emailNote")}{" "}
-                    <strong>{session.customerEmail}</strong>
-                  </p>
-                )}
                 <div className="flex flex-wrap justify-center gap-4">
                   <Link href="/">
                     <Button

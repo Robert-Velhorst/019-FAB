@@ -115,10 +115,6 @@ export type FabControlCenter = {
   notifications: JsonRecord[];
   reconciliation: JsonRecord[];
   activity: JsonRecord[];
-  hai: {
-    status: JsonRecord;
-    manifest: JsonRecord;
-  };
   resourceStates: Record<FabResourceKey, FabResourceState>;
   partialErrors: Array<{ resource: FabResourceKey; error: string; state: FabDataState; updatedAt: string | null }>;
 };
@@ -167,7 +163,6 @@ const READ_PATHS = {
   sourceReadiness: "/api/sources/readiness",
   driveAuthorization: "/api/connectors/google-drive/authorization",
   haiStatus: "/api/hai/status",
-  haiManifest: "/api/hai/manifest",
   cloudStatus: "/api/cloud/status",
   gmailAuthorization: "/api/connectors/gmail/authorization",
 } as const;
@@ -196,20 +191,20 @@ let controlCenterSnapshot: { value: FabControlCenter; expiresAt: number } | null
 let controlCenterInFlight: Promise<FabControlCenter> | null = null;
 let controlCenterCacheGeneration = 0;
 
-const COMMAND_PATHS: Record<FabOperatorCommandId, { path: string; body: JsonRecord; method?: "POST" | "DELETE" }> = {
-  run_safe_cycle: { path: "/api/autonomy/run", body: { limit: 25, includeWavePlan: true, includeWaveSync: true, includeConnectorSync: true } },
+const COMMAND_PATHS: Record<FabOperatorCommandId, { path: string; body: JsonRecord; method?: "POST" | "DELETE"; timeoutMs?: number }> = {
+  run_safe_cycle: { path: "/api/autonomy/run", body: { limit: 25, includeWavePlan: true, includeWaveSync: true, includeConnectorSync: true }, timeoutMs: 120_000 },
   engage_emergency_stop: { path: "/api/autonomy/emergency-stop", body: { reason: "Operator stopped autonomous processing from the FAB dashboard." } },
   clear_emergency_stop: { path: "/api/autonomy/emergency-stop", method: "DELETE", body: {} },
-  rescan_intake: { path: "/api/intake/rescan", body: {} },
-  process_imported: { path: "/api/documents/process-imported", body: { limit: 25 } },
-  reprocess_incomplete: { path: "/api/documents/reprocess-incomplete", body: { limit: 25 } },
-  reprocess_review_queue: { path: "/api/documents/reprocess-review-queue", body: { limit: 25 } },
-  sync_sources: { path: "/api/sources/sync", body: {} },
-  run_due_recovery: { path: "/api/workflows/recovery/run-due", body: { limit: 5 } },
-  run_reconciliation: { path: "/api/reconciliation/run", body: { limit: 100 } },
-  refresh_notifications: { path: "/api/notifications/refresh", body: {} },
-  run_due_reports: { path: "/api/report-runs/run-due", body: {} },
-  assess_compliance: { path: "/api/compliance/assessments", body: {} },
+  rescan_intake: { path: "/api/intake/rescan", body: {}, timeoutMs: 120_000 },
+  process_imported: { path: "/api/documents/process-imported", body: { limit: 25 }, timeoutMs: 120_000 },
+  reprocess_incomplete: { path: "/api/documents/reprocess-incomplete", body: { limit: 25 }, timeoutMs: 120_000 },
+  reprocess_review_queue: { path: "/api/documents/reprocess-review-queue", body: { limit: 25 }, timeoutMs: 120_000 },
+  sync_sources: { path: "/api/sources/sync", body: {}, timeoutMs: 120_000 },
+  run_due_recovery: { path: "/api/workflows/recovery/run-due", body: { limit: 5 }, timeoutMs: 120_000 },
+  run_reconciliation: { path: "/api/reconciliation/run", body: { limit: 100 }, timeoutMs: 120_000 },
+  refresh_notifications: { path: "/api/notifications/refresh", body: {}, timeoutMs: 20_000 },
+  run_due_reports: { path: "/api/report-runs/run-due", body: {}, timeoutMs: 120_000 },
+  assess_compliance: { path: "/api/compliance/assessments", body: {}, timeoutMs: 120_000 },
 };
 
 export function getFabLocalApiBaseUrl(
@@ -707,10 +702,6 @@ async function buildFabControlCenter(generation: number): Promise<FabControlCent
     notifications: arrayValue(resources.notifications?.notifications),
     reconciliation: arrayValue(resources.reconciliation?.reconciliationMatches),
     activity: arrayValue(resources.activity?.auditEvents),
-    hai: {
-      status: resources.haiStatus || {},
-      manifest: resources.haiManifest || {},
-    },
     resourceStates,
     partialErrors,
   };
@@ -737,7 +728,7 @@ export async function runFabOperatorCommand(
   return fabLocalRequest(command.path, {
     method: command.method || "POST",
     body: JSON.stringify({ ...command.body, ...payload, actor: safeActor }),
-  });
+  }, { timeoutMs: command.timeoutMs });
 }
 
 export async function createFabBackup(actor: string): Promise<JsonRecord> {
@@ -1025,7 +1016,6 @@ function disconnectedControlCenter(endpoint: string, checkedAt: string, error: s
     notifications: [],
     reconciliation: [],
     activity: [],
-    hai: { status: {}, manifest: {} },
     resourceStates,
     partialErrors: [],
   };

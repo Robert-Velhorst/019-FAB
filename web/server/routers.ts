@@ -32,9 +32,11 @@ import {
   automationWorkflowMasterLedgerSchema,
 } from "@shared/validation";
 import { getSessionCookieOptions } from "./_core/cookies";
+import { isFabManagedAuthEnabled, logoutFabManagedOperator } from "./fabManagedAuth";
 import { systemRouter } from "./_core/systemRouter";
 import { stripeRouter } from "./routers/stripe";
 import { publicProcedure, router, adminProcedure } from "./_core/trpc";
+import { sdk } from "./_core/sdk";
 import {
   addToWaitlist,
   getWaitlistCount,
@@ -422,7 +424,14 @@ export const appRouter = router({
 
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
-    logout: publicProcedure.mutation(({ ctx }) => {
+    logout: publicProcedure.mutation(async ({ ctx }) => {
+      if (isFabManagedAuthEnabled()) {
+        if (!await logoutFabManagedOperator(ctx.req, ctx.res)) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "A same-origin HTTPS request is required" });
+        }
+        return { success: true } as const;
+      }
+      await sdk.revokeSessionFromRequest(ctx.req);
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
       return { success: true } as const;

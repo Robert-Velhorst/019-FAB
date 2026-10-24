@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+import uuid
 import zipfile
 
 from src.backup.backup_manager import BackupManager
@@ -62,6 +63,26 @@ class TestCorrectionLearningAndBackup(unittest.TestCase):
         self.assertTrue(os.path.exists(result["path"]))
         backups = manager.list_backups()
         self.assertEqual(len(backups), 1)
+
+    def test_backup_manager_restore_rejects_archive_path_traversal(self):
+        backup_dir = os.path.join(self.tempdir.name, "backups")
+        restore_dir = os.path.join(backup_dir, "restore")
+        manager = BackupManager({
+            **self.config,
+            "backup_base_dir": backup_dir,
+            "backup_restore_dir": restore_dir,
+        })
+        archive_path = os.path.join(backup_dir, "hostile.zip")
+        escaped_name = f"fab-restore-path-probe-{uuid.uuid4().hex}.txt"
+        escaped_path = os.path.join(backup_dir, escaped_name)
+        with zipfile.ZipFile(archive_path, "w") as archive:
+            archive.writestr(f"../../{escaped_name}", b"must not be extracted")
+
+        result = manager.restore_backup(archive_path, "restored")
+
+        self.assertEqual(result["status"], "failure")
+        self.assertFalse(os.path.exists(escaped_path))
+        self.assertFalse(os.path.exists(os.path.join(restore_dir, "restored", escaped_name)))
 
     def test_default_backup_includes_mijngeldzaken_supervised_artifacts(self):
         export_dir = os.path.join(self.tempdir.name, "mijngeldzaken-exports")

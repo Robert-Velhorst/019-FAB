@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import sqlite3
+import stat
 import struct
 import tempfile
 import uuid
@@ -362,9 +363,6 @@ class LocalBackupService:
             raise ValueError("Only .zip local FAB backups are supported")
         signature = _file_signature(resolved_path)
         cached = _INSPECTION_CACHE.get(resolved_path)
-        cached_result = _verify_cached_manifest(cached, signature, self._verify_manifest_integrity)
-        if cached_result is not None:
-            return cached_result
         with _open_preflighted_archive(resolved_path) as archive:
             names = archive.namelist()
             self._validate_member_names(names)
@@ -391,14 +389,6 @@ class LocalBackupService:
                 raise ValueError("Backup manifest has no valid ledger SHA-256")
             if backup_format in SOURCE_EVIDENCE_FORMATS:
                 self._verify_source_evidence_bytes(manifest, archive)
-            cached_result = _authenticated_cached_result(
-                cached,
-                signature,
-                manifest,
-                integrity_status,
-            )
-            if cached_result is not None:
-                return cached_result
             with tempfile.TemporaryDirectory() as temp_dir:
                 inspected_ledger_path = os.path.join(temp_dir, BACKUP_LEDGER_NAME)
                 digest = hashlib.sha256()
@@ -421,6 +411,15 @@ class LocalBackupService:
                     connection.close()
                 if not integrity or str(integrity[0]).lower() != "ok":
                     raise ValueError("Backup ledger failed SQLite integrity validation")
+
+        cached_result = _authenticated_cached_result(
+            cached,
+            signature,
+            manifest,
+            integrity_status,
+        )
+        if cached_result is not None:
+            return cached_result
 
         result = {
             "success": True,
@@ -1071,6 +1070,10 @@ class LocalBackupService:
             connection.close()
 
         trusted_roots = self._source_evidence_roots()
+        canonical_roots = [
+            os.path.realpath(os.path.abspath(os.path.expanduser(root)))
+            for root in trusted_roots
+        ]
         entries = []
         gaps = []
         evidence_files: Dict[str, str] = {}
@@ -1083,8 +1086,14 @@ class LocalBackupService:
             if not source_path:
                 gaps.append({"documentId": document_id, "reason": "storage_path_missing"})
                 continue
-            resolved_path = os.path.abspath(os.path.expanduser(source_path))
-            if not _path_within_roots(resolved_path, trusted_roots):
+            candidate_path = os.path.abspath(os.path.expanduser(source_path))
+            try:
+                _assert_no_reparse_points(candidate_path)
+            except ValueError:
+                gaps.append({"documentId": document_id, "reason": "source_path_is_link_or_reparse_point"})
+                continue
+            resolved_path = os.path.realpath(candidate_path)
+            if not _path_within_roots(resolved_path, canonical_roots):
                 gaps.append({"documentId": document_id, "reason": "outside_trusted_source_roots"})
                 continue
             if not os.path.isfile(resolved_path):
@@ -1099,6 +1108,7 @@ class LocalBackupService:
             actual_sha256, captured_bytes = _copy_with_sha256(
                 resolved_path,
                 captured_path,
+                max_bytes=MAX_BACKUP_EVIDENCE_FILE_BYTES,
             )
             expected_sha256 = str(row["content_sha256"] or "").strip().lower()
             if expected_sha256 and not _valid_sha256(expected_sha256):
@@ -1544,14 +1554,35 @@ def _sha256_file(path: str) -> str:
     return digest.hexdigest()
 
 
-def _copy_with_sha256(source_path: str, destination_path: str) -> Tuple[str, int]:
+def _copy_with_sha256(
+    source_path: str,
+    destination_path: str,
+    *,
+    max_bytes: int = MAX_BACKUP_EVIDENCE_FILE_BYTES,
+) -> Tuple[str, int]:
     digest = hashlib.sha256()
     byte_count = 0
-    with open(source_path, "rb") as source, open(destination_path, "wb") as destination:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(chunk)
-            destination.write(chunk)
-            byte_count += len(chunk)
+    before = os.stat(source_path, follow_symlinks=False)
+    if not stat.S_ISREG(before.st_mode):
+        raise ValueError("Source evidence must be a regular file")
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(source_path, flags)
+    try:
+        with os.fdopen(descriptor, "rb", closefd=False) as source, open(destination_path, "xb") as destination:
+            opened = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(opened.st_mode)
+                or (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino)
+            ):
+                raise ValueError("Source evidence changed while it was opened")
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                byte_count += len(chunk)
+                if byte_count > max_bytes:
+                    raise ValueError("Source evidence exceeds the configured size limit")
+                digest.update(chunk)
+                destination.write(chunk)
+    finally:
+        os.close(descriptor)
     return digest.hexdigest(), byte_count
 
 

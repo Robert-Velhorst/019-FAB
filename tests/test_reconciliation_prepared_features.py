@@ -135,6 +135,24 @@ def test_amount_index_falls_back_for_decimal_ranges_exceeding_context_precision(
     assert AutomatedReconciliation(config).reconcile(bank, documents)[0]["type"] == "match"
 
 
+def test_amount_index_preserves_zero_in_positive_exponent_precision_guard(monkeypatch):
+    config = {"reconciliation_amount_tolerance": "1E+3", "reconciliation_match_threshold": 0.6}
+    bank = [{"id": "bank", "amount": "1E+27"}]
+    documents = [{
+        "document_id": "positive-exponent",
+        "total_amount": "9.99999999999999999999999E+26",
+    }]
+    expected = UnpreparedReconciliation(config).reconcile(bank, documents)
+
+    def unexpected_bisect(*_args):
+        pytest.fail("Wide positive exponent range must use the conservative full-scan fallback")
+
+    monkeypatch.setattr("src.reconciliation.automated_reconciliation.bisect_left", unexpected_bisect)
+    monkeypatch.setattr("src.reconciliation.automated_reconciliation.bisect_right", unexpected_bisect)
+
+    assert AutomatedReconciliation(config).reconcile(bank, documents) == expected
+
+
 def test_prepared_features_do_not_survive_between_runs():
     engine = AutomatedReconciliation({})
     bank = [{"id": "bank", "amount": -4.28, "date": "2026-09-30", "description": "Synthetic Shop"}]

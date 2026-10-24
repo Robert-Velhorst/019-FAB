@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -7,11 +8,23 @@ from src.config_loader import ConfigLoader
 from src.operations.deployment_preflight import deployment_preflight, require_deployment_ready
 from src.security.deployment_secrets import read_secret, strong_secret
 
+
+def test_unavailable_disk_capacity_errors_are_documented(tmp_path):
+    with patch("src.operations.deployment_preflight.shutil.disk_usage", side_effect=OSError):
+        report = deployment_preflight(production(tmp_path))
+    codes = {issue["code"] for issue in report["issues"]}
+    assert {"deployment_ledger_disk_unknown", "deployment_backup_disk_unknown"} <= codes
+
+    catalog = (Path(__file__).parents[1] / "docs" / "ERROR_CATALOG.md").read_text(encoding="utf-8")
+    assert "`deployment_ledger_disk_unknown`, `deployment_backup_disk_unknown`" in catalog
+    assert "do not treat an unknown result as sufficient capacity" in catalog
 TOKEN = "D7pH8sAk3C5nZ9wL2tB6eQ0rV1mF4yUj"
+HAI_TOKEN = "J3qR7mV2xK9pL5wN8cF1yB4sD6hA0tZg"
 
 
 def production(tmp_path, profile="windows"):
     return {"fab_deployment_profile": profile, "fab_local_api_token": TOKEN,
+            "fab_hai_api_token": HAI_TOKEN,
             "fab_instance_root": str(tmp_path / "code"),
             "fab_local_ledger_path": str(tmp_path / "data" / "ledger.sqlite3"),
             "fab_local_backup_dir": str(tmp_path / "backups"),
@@ -27,8 +40,34 @@ def test_profiles_and_redaction(tmp_path):
         report = require_deployment_ready(config)
         assert report["status"] == "ready"
         assert TOKEN not in json.dumps(report)
+        assert HAI_TOKEN not in json.dumps(report)
     assert deployment_preflight({})["profile"] == "local"
     assert deployment_preflight({"fab_deployment_profile": "typo"})["status"] == "blocked"
+
+
+@pytest.mark.parametrize("profile", ["windows", "vm"])
+def test_production_profiles_require_distinct_strong_hai_token(tmp_path, profile):
+    config = production(tmp_path, profile)
+    config.pop("fab_hai_api_token")
+    assert any(issue["id"] == "deployment_hai_secret" for issue in deployment_preflight(config)["issues"])
+
+    for invalid_token in ("weak", TOKEN):
+        config["fab_hai_api_token"] = invalid_token
+        assert any(issue["id"] == "deployment_hai_secret" for issue in deployment_preflight(config)["issues"])
+
+    config["fab_hai_api_token"] = HAI_TOKEN
+    assert not any(issue["id"] == "deployment_hai_secret" for issue in deployment_preflight(config)["issues"])
+
+
+@pytest.mark.parametrize("profile", ["windows", "vm"])
+def test_create_app_blocks_missing_production_hai_token_before_ledger_creation(tmp_path, profile):
+    from src.operations.local_api import create_app
+
+    config = production(tmp_path, profile)
+    config.pop("fab_hai_api_token")
+    with pytest.raises(ValueError, match="HAI token"):
+        create_app(config)
+    assert not Path(config["fab_local_ledger_path"]).exists()
 
 
 def test_vm_requires_explicit_parent_session_authority(tmp_path):

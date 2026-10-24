@@ -257,7 +257,6 @@ export const stripeRouter = router({
         return {
           success: false,
           status: "disabled",
-          customerEmail: null,
         };
       }
       try {
@@ -265,7 +264,6 @@ export const stripeRouter = router({
         return {
           success: (session.mode === "setup" && session.status === "complete") || session.payment_status === "paid",
           status: session.mode === "setup" ? session.status : session.payment_status,
-          customerEmail: session.customer_details?.email || null,
         };
       } catch (err) {
         log.error(
@@ -276,7 +274,6 @@ export const stripeRouter = router({
         return {
           success: false,
           status: "error",
-          customerEmail: null,
         };
       }
     }),

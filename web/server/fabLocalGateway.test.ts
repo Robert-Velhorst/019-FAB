@@ -1048,7 +1048,7 @@ describe("FAB local API gateway", () => {
     expect(result.connection.connected).toBe(true);
     expect(paths).toContain("/api/live");
     expect(paths.filter(path => path === "/api/control-center/resources")).toHaveLength(1);
-    expect(paths.length).toBe(30);
+    expect(paths.length).toBe(29);
   });
 
   it("does not fan out after a real HTTP service-unavailable response", async () => {
@@ -1118,7 +1118,7 @@ describe("FAB local API gateway", () => {
       "workflows", "masterLedger", "metrics", "notifications", "settings",
       "bankTransactions", "reconciliation", "activity", "sources",
       "waveReceiptExecutor", "sourceReadiness", "driveAuthorization",
-      "haiStatus", "haiManifest", "gmailAuthorization",
+      "haiStatus", "gmailAuthorization",
     ];
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const path = new URL(String(input)).pathname;
@@ -1142,6 +1142,8 @@ describe("FAB local API gateway", () => {
     const requestedPaths = fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname);
 
     expect(result.connection.connected).toBe(true);
+    expect(result).not.toHaveProperty("hai");
+    expect(result.connections.some((connection) => connection.id === "hai")).toBe(true);
     expect(requestedPaths).toContain("/api/control-center/resources");
     expect(requestedPaths).not.toContain("/api/dashboard");
     expect(requestedPaths).not.toContain("/api/health");
@@ -1461,6 +1463,20 @@ describe("FAB local API gateway", () => {
       path: "/api/documents/reprocess-review-queue",
       body: { limit: 20, actor: "operator-14" },
     });
+  });
+
+  it("gives document processing a bounded long-running command timeout", async () => {
+    const timeoutSpy = vi.spyOn(globalThis, "setTimeout");
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => new Response(
+      JSON.stringify({ status: "completed", path: new URL(String(input)).pathname }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await runFabOperatorCommand("process_imported", "operator-process");
+
+    expect(result).toMatchObject({ status: "completed", path: "/api/documents/process-imported" });
+    expect(timeoutSpy.mock.calls.some(([, delay]) => delay === 120_000)).toBe(true);
   });
 
   it("uploads intake files only through the fixed local API path", async () => {

@@ -187,15 +187,16 @@ class AutomatedReconciliation:
         document_min_exponent = 0
         document_max_adjusted = 0
         if prepare:
-            document_amounts = [features[0] for features in prepared_documents if features[0] is not None]
-            if document_amounts:
-                document_min_exponent = min(amount.as_tuple().exponent for amount in document_amounts)
-                document_max_adjusted = max(amount.adjusted() for amount in document_amounts)
-            amount_index = [
-                (abs(features[0]) if self.use_absolute_amounts else features[0], index)
-                for index, features in enumerate(prepared_documents)
-                if features[0] is not None
-            ]
+            for index, features in enumerate(prepared_documents):
+                amount = features[0]
+                if amount is None:
+                    continue
+                exponent = amount.as_tuple().exponent
+                adjusted = amount.adjusted()
+                document_min_exponent = min(document_min_exponent, exponent)
+                document_max_adjusted = max(document_max_adjusted, adjusted)
+                comparable_amount = abs(amount) if self.use_absolute_amounts else amount
+                amount_index.append((comparable_amount, index))
             amount_index.sort()
 
         for bt in bank_transactions:

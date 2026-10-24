@@ -1,21 +1,36 @@
 import csv
 import os
-from typing import Any, Dict, List
+from typing import Any
 
 from src.storage.database import Database
 from src.utils.csv_safety import neutralize_csv_row
+
+EXPORT_TABLE_QUERIES = {
+    "documents": 'SELECT * FROM "documents"',
+    "manual_review_items": 'SELECT * FROM "manual_review_items"',
+    "audit_log": 'SELECT * FROM "audit_log"',
+    "posting_attempts": 'SELECT * FROM "posting_attempts"',
+    "vendors": 'SELECT * FROM "vendors"',
+    "category_decisions": 'SELECT * FROM "category_decisions"',
+    "exceptions": 'SELECT * FROM "exceptions"',
+    "bank_transactions": 'SELECT * FROM "bank_transactions"',
+    "reconciliation_results": 'SELECT * FROM "reconciliation_results"',
+    "missing_receipt_alerts": 'SELECT * FROM "missing_receipt_alerts"',
+    "outreach_reminders": 'SELECT * FROM "outreach_reminders"',
+    "document_corrections": 'SELECT * FROM "document_corrections"',
+}
 
 
 class ReportingService:
     """Builds local FAB reports from the SQLite database."""
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         self.config = config or {}
         self.database = Database(config)
         self.export_dir = self.config.get("report_export_dir", "data/reports")
         os.makedirs(self.export_dir, exist_ok=True)
 
-    def summary(self) -> Dict[str, Any]:
+    def summary(self) -> dict[str, Any]:
         return {
             "document_states": self.database.fetch_all("SELECT current_state, COUNT(*) AS count FROM documents GROUP BY current_state ORDER BY current_state"),
             "manual_review": self.database.fetch_all("SELECT status, COUNT(*) AS count FROM manual_review_items GROUP BY status ORDER BY status"),
@@ -26,7 +41,7 @@ class ReportingService:
             "exceptions": self.database.fetch_all("SELECT exception_type, active, COUNT(*) AS count FROM exceptions GROUP BY exception_type, active ORDER BY exception_type"),
         }
 
-    def expense_by_vendor(self) -> List[Dict[str, Any]]:
+    def expense_by_vendor(self) -> list[dict[str, Any]]:
         return self.database.fetch_all(
             """
             SELECT vendor.field_value AS vendor_name,
@@ -42,7 +57,7 @@ class ReportingService:
             """
         )
 
-    def expense_by_category(self) -> List[Dict[str, Any]]:
+    def expense_by_category(self) -> list[dict[str, Any]]:
         return self.database.fetch_all(
             """
             SELECT cd.category AS category,
@@ -57,15 +72,11 @@ class ReportingService:
             """
         )
 
-    def export_table_csv(self, table_name: str) -> Dict[str, Any]:
-        allowed_tables = {
-            "documents", "manual_review_items", "audit_log", "posting_attempts", "vendors",
-            "category_decisions", "exceptions", "bank_transactions", "reconciliation_results",
-            "missing_receipt_alerts", "outreach_reminders", "document_corrections",
-        }
-        if table_name not in allowed_tables:
+    def export_table_csv(self, table_name: str) -> dict[str, Any]:
+        query = EXPORT_TABLE_QUERIES.get(table_name)
+        if query is None:
             return {"status": "failure", "message": f"Table is not exportable: {table_name}"}
-        rows = self.database.fetch_all(f"SELECT * FROM {table_name}")
+        rows = self.database.fetch_all(query)
         output_path = os.path.join(self.export_dir, f"{table_name}.csv")
         with open(output_path, "w", newline="", encoding="utf-8") as handle:
             if rows:
@@ -76,7 +87,7 @@ class ReportingService:
                 handle.write("")
         return {"status": "success", "path": output_path, "row_count": len(rows)}
 
-    def export_all_core_csv(self) -> Dict[str, Any]:
+    def export_all_core_csv(self) -> dict[str, Any]:
         tables = [
             "documents", "manual_review_items", "posting_attempts", "vendors",
             "category_decisions", "exceptions", "bank_transactions", "reconciliation_results",

@@ -117,16 +117,31 @@ class GmailFetcher(BaseFetcher):
             1024,
             50 * 1024 * 1024,
         )
+        max_run_attachment_bytes = _bounded_int(
+            self.config.get("gmail_max_run_attachment_bytes"),
+            250 * 1024 * 1024,
+            1024 * 1024,
+            1024 * 1024 * 1024,
+        )
+        max_run_attachments = _bounded_int(
+            self.config.get("gmail_max_run_attachments"),
+            100,
+            1,
+            5000,
+        )
 
         documents = []
+        downloaded_bytes = 0
         skipped = 0
         pages = 0
+        resource_limit_reached = False
         rejected = {
             "untrusted_sender": 0,
             "not_pdf": 0,
             "invalid_pdf": 0,
             "oversized": 0,
             "missing_attachment": 0,
+            "run_budget": 0,
         }
         first_error = None
         try:
@@ -169,6 +184,10 @@ class GmailFetcher(BaseFetcher):
                     skipped += 1
                     continue
                 for part in _attachment_parts(payload):
+                    if len(documents) >= max_run_attachments:
+                        rejected["run_budget"] += 1
+                        resource_limit_reached = True
+                        break
                     file_name = str(part.get('filename') or '').strip()
                     body = part.get('body') if isinstance(part.get('body'), dict) else {}
                     attachment_id = str(body.get('attachmentId') or '').strip()
@@ -191,6 +210,15 @@ class GmailFetcher(BaseFetcher):
                         rejected["not_pdf"] += 1
                         skipped += 1
                         continue
+                    max_encoded_bytes = 4 * ((max_attachment_bytes + 2) // 3)
+                    if len(encoded) > max_encoded_bytes:
+                        rejected["oversized"] += 1
+                        skipped += 1
+                        first_error = first_error or RuntimeError(
+                            "Gmail scan skipped an attachment above its configured per-attachment byte limit; "
+                            "increase the limit before advancing the source checkpoint."
+                        )
+                        continue
                     try:
                         encoded += "=" * (-len(encoded) % 4)
                         file_data = base64.urlsafe_b64decode(encoded)
@@ -201,7 +229,16 @@ class GmailFetcher(BaseFetcher):
                     if len(file_data) > max_attachment_bytes:
                         rejected["oversized"] += 1
                         skipped += 1
+                        first_error = first_error or RuntimeError(
+                            "Gmail scan skipped an attachment above its configured per-attachment byte limit; "
+                            "increase the limit before advancing the source checkpoint."
+                        )
                         continue
+                    if downloaded_bytes + len(file_data) > max_run_attachment_bytes:
+                        rejected["run_budget"] += 1
+                        skipped += 1
+                        resource_limit_reached = True
+                        break
                     if scanner_mode and not _is_pdf(file_data):
                         rejected["invalid_pdf"] += 1
                         skipped += 1
@@ -235,6 +272,12 @@ class GmailFetcher(BaseFetcher):
                             'delivery_path': 'gmail_to_fab_direct' if scanner_mode else None,
                         }
                     })
+                    downloaded_bytes += len(file_data)
+                if resource_limit_reached:
+                    first_error = first_error or RuntimeError(
+                        "Gmail scan reached its configured attachment byte or file cap; increase the cap before advancing the source checkpoint."
+                    )
+                    break
             if first_error:
                 self._fail_run(first_error, fetched=len(documents), skipped=skipped, pages=pages)
             else:
@@ -246,6 +289,9 @@ class GmailFetcher(BaseFetcher):
                 "incrementalAfter": incremental_after,
                 "truncated": truncated,
                 "rejected": rejected,
+                "attachmentBytesDownloaded": downloaded_bytes,
+                "attachmentBytesLimit": max_run_attachment_bytes,
+                "attachmentCountLimit": max_run_attachments,
             })
         except Exception as error:
             self._fail_run(error, fetched=len(documents), skipped=skipped, pages=pages)
@@ -256,6 +302,9 @@ class GmailFetcher(BaseFetcher):
                 "incrementalAfter": incremental_after,
                 "truncated": bool(page_token),
                 "rejected": rejected,
+                "attachmentBytesDownloaded": downloaded_bytes,
+                "attachmentBytesLimit": max_run_attachment_bytes,
+                "attachmentCountLimit": max_run_attachments,
             })
         return documents
 

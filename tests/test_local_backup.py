@@ -552,6 +552,40 @@ class TestLocalBackupService(unittest.TestCase):
                 evidence_name = source_evidence["entries"][0]["archivePath"]
                 self.assertEqual(archive.read(evidence_name), source_bytes)
 
+    def test_source_snapshot_canonicalizes_trusted_roots_once_for_many_documents(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger_path = os.path.join(temp_dir, "fab.sqlite3")
+            ledger = LocalOperationsLedger(ledger_path)
+            for index in range(3):
+                source_path = os.path.join(temp_dir, f"receipt-{index}.pdf")
+                source_bytes = f"receipt {index}".encode("utf-8")
+                with open(source_path, "wb") as handle:
+                    handle.write(source_bytes)
+                ledger.register_document({
+                    "source": "scanner",
+                    "sourceDocumentId": f"snapshot-{index}",
+                    "originalFilename": os.path.basename(source_path),
+                    "storagePath": source_path,
+                    "contentSha256": hashlib.sha256(source_bytes).hexdigest(),
+                })
+            service = LocalBackupService(ledger, {
+                "fab_local_backup_dir": os.path.join(temp_dir, "backups"),
+            })
+            original_realpath = os.path.realpath
+
+            with patch(
+                "src.operations.local_backup.os.path.realpath",
+                wraps=original_realpath,
+            ) as realpath:
+                result, _ = service._snapshot_source_evidence(ledger_path, temp_dir, False)
+
+            canonical_root_calls = [
+                call for call in realpath.call_args_list
+                if call.args and os.fspath(call.args[0]) == temp_dir
+            ]
+            self.assertEqual(result["includedDocuments"], 3)
+            self.assertEqual(len(canonical_root_calls), 1)
+
     def test_source_complete_backup_blocks_missing_evidence_without_partial_archive(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             ledger_path = os.path.join(temp_dir, "fab.sqlite3")
@@ -568,6 +602,68 @@ class TestLocalBackupService(unittest.TestCase):
                 ledger,
                 {"fab_local_backup_dir": backup_dir},
             )
+
+            with self.assertRaisesRegex(ValueError, "Source-complete backup blocked"):
+                service.create_backup(require_complete_source_evidence=True)
+
+            self.assertEqual(os.listdir(backup_dir), [])
+
+    def test_source_complete_backup_rejects_symlink_outside_trusted_roots(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fab_root = os.path.join(temp_dir, "fab")
+            intake_root = os.path.join(fab_root, "intake")
+            outside_root = os.path.join(temp_dir, "outside")
+            os.makedirs(intake_root)
+            os.makedirs(outside_root)
+            ledger_path = os.path.join(fab_root, "fab.sqlite3")
+            backup_dir = os.path.join(fab_root, "backups")
+            outside_path = os.path.join(outside_root, "private.pdf")
+            source_path = os.path.join(intake_root, "receipt.pdf")
+            outside_bytes = b"private source outside trusted roots"
+            with open(outside_path, "wb") as handle:
+                handle.write(outside_bytes)
+            try:
+                os.symlink(outside_path, source_path)
+            except OSError as exc:
+                self.skipTest(f"File symlinks are unavailable: {exc}")
+
+            ledger = LocalOperationsLedger(ledger_path)
+            ledger.register_document({
+                "source": "scanner",
+                "sourceDocumentId": "symlink-backup",
+                "originalFilename": "receipt.pdf",
+                "storagePath": source_path,
+                "contentSha256": hashlib.sha256(outside_bytes).hexdigest(),
+            })
+            service = LocalBackupService(ledger, {
+                "fab_local_backup_dir": backup_dir,
+                "fab_local_intake_paths": [intake_root],
+            })
+
+            with self.assertRaisesRegex(ValueError, "Source-complete backup blocked"):
+                service.create_backup(require_complete_source_evidence=True)
+
+            self.assertEqual(os.listdir(backup_dir), [])
+
+    def test_source_complete_backup_rejects_source_outside_trusted_roots(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fab_root = os.path.join(temp_dir, "fab")
+            outside_root = os.path.join(temp_dir, "outside")
+            os.makedirs(fab_root)
+            os.makedirs(outside_root)
+            ledger_path = os.path.join(fab_root, "fab.sqlite3")
+            backup_dir = os.path.join(fab_root, "backups")
+            outside_path = os.path.join(outside_root, "private.pdf")
+            with open(outside_path, "wb") as handle:
+                handle.write(b"private source outside trusted roots")
+            ledger = LocalOperationsLedger(ledger_path)
+            ledger.register_document({
+                "source": "scanner",
+                "sourceDocumentId": "outside-root-backup",
+                "originalFilename": "private.pdf",
+                "storagePath": outside_path,
+            })
+            service = LocalBackupService(ledger, {"fab_local_backup_dir": backup_dir})
 
             with self.assertRaisesRegex(ValueError, "Source-complete backup blocked"):
                 service.create_backup(require_complete_source_evidence=True)

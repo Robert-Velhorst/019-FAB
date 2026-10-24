@@ -161,7 +161,7 @@ export default function AdminOperations() {
       ));
     },
   });
-  const uploadIntake = trpc.fab.uploadIntake.useMutation();
+  const uploadIntake = trpc.fab.uploadIntake.useMutation({ gcTime: 0 });
   const importBankStatement = trpc.fab.importBankStatement.useMutation();
   const installGmailCredentials = trpc.fab.installGmailCredentials.useMutation();
   const startGmailAuthorization = trpc.fab.startGmailAuthorization.useMutation();
@@ -180,11 +180,15 @@ export default function AdminOperations() {
 
   const uploadDocument = useCallback(async (file: File): Promise<FabRecord> => {
     if (!controlCenter.data?.connection.connected) throw new Error(copy("FAB local API is disconnected.", "De lokale FAB-API is niet verbonden."));
-    return uploadIntake.mutateAsync({
-      filename: file.name,
-      mimeType: file.type || "application/octet-stream",
-      contentBase64: await readFileBase64(file),
-    });
+    try {
+      return await uploadIntake.mutateAsync({
+        filename: file.name,
+        mimeType: file.type || "application/octet-stream",
+        contentBase64: await readFileBase64(file),
+      });
+    } finally {
+      uploadIntake.reset();
+    }
   }, [controlCenter.data?.connection.connected, uploadIntake]);
 
   const finishIntake = useCallback(async (uploadedCount: number) => {

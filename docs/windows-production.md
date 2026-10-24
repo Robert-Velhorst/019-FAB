@@ -219,9 +219,12 @@ Set `FAB_LOCAL_API_PUBLIC_URL` to the HTTPS ledger origin reachable by the remot
 browser. The launcher preserves this configured address while keeping
 `FAB_LOCAL_API_URL` pointed at the actual loopback API. Without a public address,
 the browser ledger address defaults to that loopback URL. Neither setting opens
-a port or provisions a tunnel; the managed ngrok scripts expose only the API,
-not the React dashboard. See [ngrok setup](local_windows_ngrok_setup.md) for the
-existing-credential and endpoint ownership requirements.
+a port or provisions a tunnel. The managed ngrok scripts expose the API by
+default; supplying a separate reserved `-DashboardUrl` explicitly adds a second
+HTTPS dashboard endpoint protected by ngrok Basic Auth and startup checks. This
+does not replace FAB operator sign-in when managed dashboard authentication is
+enabled. See [ngrok setup](local_windows_ngrok_setup.md) for endpoint ownership,
+authentication, and exposure requirements.
 
 Dashboard logout, expiry and restart revoke subsequent linked ledger requests.
 If the dashboard authority cannot be reached, linked browser access is denied;

@@ -320,10 +320,21 @@ function Test-FabWebBuildCurrent {
         return $false
     }
 
-    $outputTime = @(
-        (Get-Item -LiteralPath $serverOutput).LastWriteTimeUtc,
-        (Get-Item -LiteralPath $clientOutput).LastWriteTimeUtc
-    ) | Sort-Object | Select-Object -First 1
+    $outputTime = $null
+    for ($attempt = 0; $attempt -lt 3 -and $null -eq $outputTime; $attempt++) {
+        try {
+            $outputTime = @(
+                (Get-Item -LiteralPath $serverOutput -Force -ErrorAction Stop).LastWriteTimeUtc,
+                (Get-Item -LiteralPath $clientOutput -Force -ErrorAction Stop).LastWriteTimeUtc
+            ) | Sort-Object | Select-Object -First 1
+        }
+        catch {
+            if ($attempt -eq 2) {
+                return $false
+            }
+            Start-Sleep -Milliseconds 100
+        }
+    }
     $sourcePaths = @(
         (Join-Path $ExpectedWebRoot "client"),
         (Join-Path $ExpectedWebRoot "server"),

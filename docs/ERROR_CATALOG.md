@@ -9,7 +9,7 @@ provider diagnostics. A failing check does not authorise deleting evidence.
 | `deployment_profile` | Choose `local`, `windows`, or `vm`; unknown names fail startup. |
 | `deployment_api_secret` | Replace missing/placeholder configuration with a random token of at least 32 characters. Managed session validation requires this even in the `local` profile. |
 | `deployment_parent_session` | Set `FAB_OPERATOR_SESSION_VALIDATION_URL` to the actual Node listener's `/api/fab/operator-session/status` URL. VM Compose supplies its internal URL. Do not bypass this check to restore anonymous access. |
-| `deployment_hai_secret` | HAI needs a separate random credential; never reuse the operator API token. |
+| `deployment_hai_secret` | Windows and VM production require a separate random HAI credential; never reuse the operator API token. |
 | `deployment_bind` | Windows requires loopback; VM permits internal container binding. Check the explicit profile. |
 | `deployment_port` | Use one integer port from 1 through 65535. Production does not silently change ports. |
 | `deployment_https` | Set the HTTPS operator dashboard URL for the VM deployment. |
@@ -19,11 +19,13 @@ provider diagnostics. A failing check does not authorise deleting evidence.
 | `deployment_ledger_writable`, `deployment_backup_writable` | Check permissions for the service account and its mounted volume. |
 | `deployment_backup_directory` | The configured backup target is a file; choose a directory. |
 | `deployment_ledger_disk`, `deployment_backup_disk` | Less than 256 MiB is free. Restore sufficient capacity without deleting unverified documents. |
+| `deployment_ledger_disk_unknown`, `deployment_backup_disk_unknown` | FAB could not determine free space for the ledger or backup volume. Check the volume and service-account access with Windows storage tools, then rerun preflight; do not treat an unknown result as sufficient capacity. |
 | `deployment_backups_disabled`, `deployment_backup_evidence` | Enable scheduled backups with complete source evidence. |
 | `deployment_ledger_disabled` | Enable the authoritative operations ledger; scheduled recovery requires it. |
 | `deployment_storage_encryption` | Check host disk/volume encryption and record the operator attestation. This is a readiness warning. |
 | Secret-file error | Use either a value or an absolute readable `_FILE`, never both; files must contain a bounded UTF-8 secret. |
 | ngrok cannot load existing API/HAI credentials | Use the same configuration/environment as the running FAB instance. Both scripts read configured secrets/files first and otherwise reuse existing encrypted credentials; they never provision replacements. Resolve missing, weak or identical credentials through the normal startup configuration before retrying. |
+| `api_auth_not_verified` | FAB could not confirm that its managed public HTTPS API still rejects requests without credentials. Cloud access remains inactive; stop the managed tunnel and investigate API authentication before recreating it. The status probe sends no credentials and does not follow redirects. |
 | Remote ledger link opens localhost | Configure `FAB_LOCAL_API_PUBLIC_URL` with the owned HTTPS ledger origin before starting the dashboard. The internal API stays on loopback. A public address alone does not start a tunnel or expose the dashboard. |
 | `EADDRINUSE` | The selected web port is occupied. Check ownership, then choose an explicit free port or stop the owned service. |
 | Windows startup/build/registration failed | The launcher attempts to stop only services created by the failed launch, preserves existing runtime metadata and reports the original failure. Correct the reported cause before retrying. Retained metadata alone does not prove a process is alive. |
@@ -48,7 +50,7 @@ provider diagnostics. A failing check does not authorise deleting evidence.
 | Reconciliation evidence changed or another match owns the completed decision | Exception disposition returns HTTP 409 when current bank facts disagree with the reviewed snapshot or a different match owns the bank/document decision. Refresh matching for changed open missing-receipt evidence; the same review is updated rather than discarded. Reopening your own ignored/confirmed decision remains supported, but an older exception cannot take over a newer candidate. No source archival is authorized by a local disposition. |
 | Missing-receipt exception after a receipt arrives | An unconfirmed candidate intentionally leaves the exception open. Confirmation against the same imported bank row resolves open missing-receipt exceptions and records their confirming match/document link without deleting original snapshots. Other accounts, closed human decisions and malformed/conflicting review links remain untouched. Ad-hoc bank data has no independent stored-row identity proof and is not auto-superseded. Local confirmation does not authorize source archival. |
 | `blocked_processing`, `blocked_duplicate`, `blocked_by_review` during export approval/execution | The current source is failed, duplicate or marked for review; an older draft does not override this. The export is removed from automatic execution and requires attention. Preserve the source and draft, resolve the source issue, compare the draft against the corrected evidence and regenerate it if necessary, then explicitly approve again. |
-| Attachment/archive blocked | Verify the actual provider attachment and checksum. Keep the Drive source until every archive gate passes. |
+| Attachment/archive blocked | Verify trusted provider-origin attachment bytes and checksum. Keep the Drive source until every archive gate passes; legacy browser-submitted readback evidence is not accepted. |
 | Backup incomplete | Restore access to every referenced source file before treating the package as complete. |
 | Backup manifest exceeds size/depth limits or contains invalid/non-finite JSON | Preserve the package. Inspection allows at most an 8 MiB manifest and 32 container levels. Inspect the generating system and recover through a controlled migration; do not delete the archive or turn off validation. |
 | Backup exceeds maximum uncompressed size / oversized source-evidence file | Archive metadata declares more than the supported 20 GiB total or 250 MiB per evidence file. This is rejected before member decompression. Preserve the original package and arrange a supported recovery path. |
@@ -190,6 +192,13 @@ bookkeeping record through the normal review path, then obtain fresh readback.
 Do not change evidence merely to make a match appear true. Matching metadata
 still does not replace exact attachment bytes, source identity, unique finished
 transaction, fresh observation, business, approval or archive gates.
+
+`wave_attachment_readback_origin_untrusted` means stored bytes were not
+retrieved by a trusted provider integration. Browser-submitted copies and
+pre-upgrade `wave_browser_download` evidence cannot authorize new archival.
+If the record already says the Drive file was archived, FAB flags it as
+`archive_needs_reconciliation` and does not move or delete anything; verify the
+archived Drive object and Wave attachment together before confirming it.
 
 ### Invalid Receipt Byte Size
 

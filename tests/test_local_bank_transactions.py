@@ -5,12 +5,56 @@ from unittest.mock import patch
 
 from src.operations.local_bank_transactions import (
     MAX_BANK_STATEMENT_BYTES,
+    MAX_BANK_STATEMENT_TRANSACTIONS,
     LocalBankTransactionImportService,
 )
 from src.operations.local_ledger import LocalOperationsLedger
 
 
 class TestLocalBankTransactionImportService(unittest.TestCase):
+    def test_import_rejects_transaction_limit_before_opening_write_transaction(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            service = LocalBankTransactionImportService(ledger, {})
+            statement = "Date,Amount,Description\n" + "".join(
+                f"2026-06-28,1,Row {index}\n"
+                for index in range(MAX_BANK_STATEMENT_TRANSACTIONS + 1)
+            )
+
+            self.assertLess(len(statement.encode("utf-8")), MAX_BANK_STATEMENT_BYTES)
+            with self.assertRaisesRegex(ValueError, "transaction import limit"):
+                service.import_statement_text(statement, format="csv")
+            self.assertEqual(ledger.list_bank_transactions(), [])
+            self.assertEqual(ledger.list_bank_statement_imports(), [])
+
+    def test_direct_import_bounds_iterables_and_returned_id_samples(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            service = LocalBankTransactionImportService(ledger, {})
+            consumed = []
+            over_limit = ((consumed.append(index) or {}) for index in range(
+                MAX_BANK_STATEMENT_TRANSACTIONS + 1
+            ))
+
+            with self.assertRaisesRegex(ValueError, "transaction import limit"):
+                service.import_transactions(over_limit)
+            self.assertEqual(len(consumed), MAX_BANK_STATEMENT_TRANSACTIONS + 1)
+            self.assertEqual(ledger.list_bank_transactions(), [])
+
+            rows = [
+                {
+                    "id": f"bounded-{index}",
+                    "date": "2026-06-28",
+                    "amount": str(index + 1),
+                }
+                for index in range(101)
+            ]
+            result = service.import_transactions(rows)
+
+            self.assertEqual(result["rowsImported"], 101)
+            self.assertEqual(len(result["bankTransactionIds"]), 100)
+            self.assertTrue(result["bankTransactionIdsTruncated"])
+
     def test_import_transactions_is_idempotent_and_reconciliation_ready(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
@@ -219,6 +263,63 @@ class TestLocalBankTransactionImportService(unittest.TestCase):
             self.assertEqual(transaction["transaction_id"], "camt-1")
             self.assertEqual(transaction["amount"], -42.5)
             self.assertEqual(transaction["counterparty"], "Office Shop")
+
+    def test_import_camt_splits_batched_entry_when_detail_amounts_reconcile(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            service = LocalBankTransactionImportService(ledger, {})
+
+            result = service.import_statement_text(
+                """
+                <Document><BkToCstmrStmt><Stmt><Ntry>
+                  <Amt Ccy="EUR">42.50</Amt><CdtDbtInd>DBIT</CdtDbtInd>
+                  <BookgDt><Dt>2026-06-28</Dt></BookgDt><AcctSvcrRef>batch-1</AcctSvcrRef>
+                  <NtryDtls><TxDtls><Refs><EndToEndId>purchase-1</EndToEndId></Refs>
+                    <AmtDtls><TxAmt><Amt Ccy="EUR">25.00</Amt></TxAmt></AmtDtls>
+                    <RltdPties><Cdtr><Nm>Office Shop</Nm></Cdtr></RltdPties>
+                    <RmtInf><Ustrd>Paper</Ustrd></RmtInf>
+                  </TxDtls><TxDtls><Refs><EndToEndId>purchase-2</EndToEndId></Refs>
+                    <AmtDtls><TxAmt><Amt Ccy="EUR">17.50</Amt></TxAmt></AmtDtls>
+                    <RltdPties><Cdtr><Nm>Stationery BV</Nm></Cdtr></RltdPties>
+                    <RmtInf><Ustrd>Ink</Ustrd></RmtInf>
+                  </TxDtls></NtryDtls>
+                </Ntry></Stmt></BkToCstmrStmt></Document>
+                """,
+                format="camt",
+                account_identifier="camt-batch",
+            )
+
+            transactions = ledger.list_bank_transactions(account_identifier="camt-batch")
+
+            self.assertEqual(result["rowsImported"], 2)
+            self.assertEqual({row["transaction_id"] for row in transactions}, {"purchase-1", "purchase-2"})
+            self.assertEqual({row["amount"] for row in transactions}, {-25.0, -17.5})
+            self.assertEqual({row["counterparty"] for row in transactions}, {"Office Shop", "Stationery BV"})
+
+    def test_import_camt_keeps_batched_entry_aggregate_when_details_do_not_reconcile(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            service = LocalBankTransactionImportService(ledger, {})
+
+            result = service.import_statement_text(
+                """
+                <Document><BkToCstmrStmt><Stmt><Ntry>
+                  <Amt Ccy="EUR">42.50</Amt><CdtDbtInd>DBIT</CdtDbtInd>
+                  <BookgDt><Dt>2026-06-28</Dt></BookgDt><AcctSvcrRef>batch-unsafe</AcctSvcrRef>
+                  <NtryDtls><TxDtls><AmtDtls><TxAmt><Amt Ccy="EUR">25.00</Amt></TxAmt></AmtDtls></TxDtls>
+                    <TxDtls><AmtDtls><TxAmt><Amt Ccy="EUR">16.00</Amt></TxAmt></AmtDtls></TxDtls></NtryDtls>
+                </Ntry></Stmt></BkToCstmrStmt></Document>
+                """,
+                format="camt",
+                account_identifier="camt-unsafe-batch",
+            )
+
+            transactions = ledger.list_bank_transactions(account_identifier="camt-unsafe-batch")
+
+            self.assertEqual(result["rowsImported"], 1)
+            self.assertEqual(len(transactions), 1)
+            self.assertEqual(transactions[0]["transaction_id"], "batch-unsafe")
+            self.assertEqual(transactions[0]["amount"], -42.5)
 
     def test_import_mt940_statement_extracts_amount_date_and_description(self):
         with tempfile.TemporaryDirectory() as temp_dir:

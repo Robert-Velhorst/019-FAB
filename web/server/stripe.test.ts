@@ -294,7 +294,7 @@ describe("stripe.verifySession", () => {
 
     expect(result.success).toBe(true);
     expect(result.status).toBe("paid");
-    expect(result.customerEmail).toBe("paid@example.com");
+    expect(result).not.toHaveProperty("customerEmail");
   });
 
   it("verifies a completed usage-billing setup session", async () => {
@@ -311,6 +311,7 @@ describe("stripe.verifySession", () => {
 
     expect(result.success).toBe(true);
     expect(result.status).toBe("complete");
+    expect(result).not.toHaveProperty("customerEmail");
   });
 
   it("returns failure for unpaid session", async () => {
@@ -344,6 +345,7 @@ describe("stripe.verifySession", () => {
 
     expect(result.success).toBe(false);
     expect(result.status).toBe("error");
+    expect(result).not.toHaveProperty("customerEmail");
   });
 });
 
@@ -399,9 +401,14 @@ describe("stripe deployment gate", () => {
       const caller = appRouter.createCaller(createAuthContext());
       const products = await caller.stripe.products();
       const status = await caller.stripe.subscriptionStatus();
+      const session = await appRouter
+        .createCaller(createPublicContext())
+        .stripe.verifySession({ sessionId: "cs_test_disabled" });
 
       expect(products.every((product) => product.billingAvailable === false)).toBe(true);
       expect(status.billingAvailable).toBe(false);
+      expect(session).toEqual({ success: false, status: "disabled" });
+      expect(retrieveCheckoutSession).not.toHaveBeenCalled();
       await expect(caller.stripe.createCheckout({
         origin: "https://example.com",
         productKey: "payAsYouGo",

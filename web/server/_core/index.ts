@@ -7,7 +7,8 @@ import { registerOAuthRoutes } from "./oauth";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic } from "./static";
-import { webhookLimiter, relaxedLimiter } from "../lib/rateLimiter";
+import { webhookLimiter, relaxedLimiter, standardLimiter } from "../lib/rateLimiter";
+import { registerFabRequestBodyParsers } from "../lib/requestBodyParsers";
 import { createLogger } from "../lib/logger";
 import { registerFabOperationsRoutes } from "../fabOperations";
 import { registerFabRuntimeRoute } from "../fabRuntime";
@@ -15,10 +16,11 @@ import { registerFabManagedAuthRoutes } from "../fabManagedAuth";
 import { registerFabSourcePreviewRoutes } from "../fabSourcePreview";
 import { registerFabOperatorSessionRoutes } from "../fabOperatorSession";
 import { ENV } from "./env";
-import { createFabSecurityMiddleware } from "./security";
+import { createCookieMutationOriginGuard, createFabSecurityMiddleware } from "./security";
 import { configureFabProxyTrust } from "./deployment";
 import { createFabServerLifecycle, listenFabServer } from "./lifecycle";
 import { closeDb } from "../db";
+import { COOKIE_NAME } from "@shared/const";
 
 const log = createLogger("Server");
 
@@ -30,6 +32,7 @@ async function startServer() {
   configureFabProxyTrust(app, ENV.fabOperatorTrustedProxyAddresses);
 
   app.use(...createFabSecurityMiddleware(ENV.isProduction));
+  app.use("/api/trpc", createCookieMutationOriginGuard(COOKIE_NAME));
 
   // Compress JSON and static responses for remote/ngrok clients. Small
   // responses stay uncompressed to avoid spending CPU for negligible savings.
@@ -54,8 +57,7 @@ async function startServer() {
 
   // ── Body parsers ──────────────────────────────────────────────
   // 10mb limit is generous for form data; file uploads go to S3
-  app.use(express.json({ limit: "10mb" }));
-  app.use(express.urlencoded({ limit: "10mb", extended: true }));
+  registerFabRequestBodyParsers(app, standardLimiter);
 
   registerFabRuntimeRoute(app);
 

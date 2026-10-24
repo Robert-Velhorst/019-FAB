@@ -1,9 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import mysql from "mysql2/promise";
 import {
   auditEvents,
   bookkeepingDocuments,
+  oauthSessions,
   reviewItems,
   workflowRuns,
 } from "../drizzle/schema";
@@ -45,6 +48,90 @@ describe.skipIf(!integrationUrl)("MySQL database integration", () => {
     if (dbModule) await dbModule.closeDb();
     if (previousDatabaseUrl === undefined) delete process.env.DATABASE_URL;
     else process.env.DATABASE_URL = previousDatabaseUrl;
+  });
+
+  it("deduplicates case-equivalent source identities using the schema collation", async () => {
+    const connection = await mysql.createConnection(integrationUrl!);
+    const schema = `fab_migration_casefold_${randomUUID().replace(/-/g, "")}`;
+    try {
+      await connection.query(
+        `CREATE DATABASE \`${schema}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`
+      );
+      await connection.query(`USE \`${schema}\``);
+      await connection.query(`
+        CREATE TABLE bookkeeping_documents (
+          id int NOT NULL PRIMARY KEY,
+          source varchar(64) COLLATE utf8mb4_0900_ai_ci NOT NULL,
+          sourceDocumentId varchar(255) COLLATE utf8mb4_0900_ai_ci,
+          duplicateOfDocumentId int,
+          KEY idx_bookkeeping_docs_source (source, sourceDocumentId)
+        )
+      `);
+      await connection.query(
+        `CREATE TABLE review_items (id int PRIMARY KEY, documentId int NOT NULL)`
+      );
+      await connection.query(
+        `CREATE TABLE routing_attempts (id int PRIMARY KEY, documentId int NOT NULL)`
+      );
+      await connection.query(
+        `CREATE TABLE reconciliation_matches (id int PRIMARY KEY, documentId int NOT NULL)`
+      );
+      await connection.query(`
+        CREATE TABLE audit_events (
+          id int PRIMARY KEY,
+          entityType varchar(64) NOT NULL,
+          entityId varchar(64) NOT NULL
+        )
+      `);
+      await connection.query(`
+        INSERT INTO bookkeeping_documents (id, source, sourceDocumentId, duplicateOfDocumentId)
+        VALUES (1, 'Drive', 'ABC', NULL), (2, 'drive', 'abc', NULL), (3, 'Drive', 'other', 2)
+      `);
+      await connection.query(`INSERT INTO review_items VALUES (1, 2)`);
+      await connection.query(`INSERT INTO routing_attempts VALUES (1, 2)`);
+      await connection.query(
+        `INSERT INTO reconciliation_matches VALUES (1, 2)`
+      );
+      await connection.query(
+        `INSERT INTO audit_events VALUES (1, 'bookkeeping_document', '2')`
+      );
+
+      const migration = await readFile(
+        new URL(
+          "../drizzle/0007_idempotent_document_registration.sql",
+          import.meta.url
+        ),
+        "utf8"
+      );
+      for (const statement of migration.split(/--> statement-breakpoint/)) {
+        if (statement.trim()) await connection.query(statement);
+      }
+
+      const [documents] = await connection.query(
+        `SELECT id, duplicateOfDocumentId FROM bookkeeping_documents ORDER BY id`
+      );
+      expect(documents).toEqual([
+        { id: 1, duplicateOfDocumentId: null },
+        { id: 3, duplicateOfDocumentId: 1 },
+      ]);
+      for (const table of [
+        "review_items",
+        "routing_attempts",
+        "reconciliation_matches",
+      ]) {
+        const [references] = await connection.query(
+          `SELECT documentId FROM ${table}`
+        );
+        expect(references).toEqual([{ documentId: 1 }]);
+      }
+      const [events] = await connection.query(
+        `SELECT entityId FROM audit_events`
+      );
+      expect(events).toEqual([{ entityId: "1" }]);
+    } finally {
+      await connection.query(`DROP DATABASE IF EXISTS \`${schema}\``);
+      await connection.end();
+    }
   });
 
   it("keeps source registration idempotent and commits its audit event", async () => {
@@ -110,6 +197,25 @@ describe.skipIf(!integrationUrl)("MySQL database integration", () => {
     expect(stored?.vendorName).toBe("Original reviewed vendor");
     expect(String(stored?.totalAmount)).toBe("12.34");
     expect(events).toHaveLength(2);
+  });
+
+  it("persists OAuth sessions and makes logout revoke copied cookies", async () => {
+    const tokenHash = randomUUID().replace(/-/g, "").padEnd(64, "a").slice(0, 64);
+    const openId = `mysql-oauth-${randomUUID()}`;
+    const expiresAt = new Date(Date.now() + 60_000);
+    await dbModule.createOAuthSession({ tokenHash, openId, expiresAt });
+
+    await expect(dbModule.isOAuthSessionActive(tokenHash, openId)).resolves.toBe(true);
+    await dbModule.revokeOAuthSession(tokenHash);
+    await expect(dbModule.isOAuthSessionActive(tokenHash, openId)).resolves.toBe(false);
+
+    const database = (await dbModule.getDb())!;
+    const [stored] = await database
+      .select({ revokedAt: oauthSessions.revokedAt })
+      .from(oauthSessions)
+      .where(eq(oauthSessions.tokenHash, tokenHash))
+      .limit(1);
+    expect(stored?.revokedAt).toBeInstanceOf(Date);
   });
 
   it("routes an authenticated dashboard registration through tRPC into MySQL with audit evidence", async () => {

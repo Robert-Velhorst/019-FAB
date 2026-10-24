@@ -7,6 +7,8 @@ import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { decodeJwt, SignJWT } from "jose";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ENV } from "./_core/env";
+import { createContext } from "./_core/context";
+import { appRouter } from "./routers";
 import { createFabContext } from "./fabContext";
 import { fabStandaloneRouter } from "./fabRouter";
 import { resolveFabOperatorAccess } from "./fabOperatorAccess";
@@ -69,6 +71,31 @@ async function fixture() {
     body: new URLSearchParams({ accessToken: token }),
   });
   return { auth, request, login, upstreamCalls };
+}
+
+async function generalRouterFixture() {
+  const ledger = express();
+  ledger.use(express.json());
+  ledger.use((_req, res) => res.json({ success: true }));
+  ENV.fabLocalApiUrl = await listen(ledger);
+  ENV.fabLocalApiToken = "test-ledger-token";
+  const auth = await import("./fabManagedAuth");
+  const app = express();
+  app.set("trust proxy", ["127.0.0.1", "::ffff:127.0.0.1"]);
+  auth.registerFabManagedAuthRoutes(app);
+  app.use(express.json());
+  app.use("/api/trpc", createExpressMiddleware({ router: appRouter, createContext }));
+  const baseUrl = await listen(app);
+  const request = (path: string, init: RequestInit = {}) => fetch(`${baseUrl}${path}`, {
+    ...init, redirect: "manual", headers: {
+      "x-forwarded-host": "fab.example.test", "x-forwarded-proto": "https", ...init.headers,
+    },
+  });
+  const login = () => request("/operator/login", {
+    method: "POST", headers: { origin, "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ accessToken }),
+  });
+  return { request, login };
 }
 
 function sessionCookie(response: Response) {
@@ -437,4 +464,18 @@ describe("FAB managed operator authentication", () => {
       ENV[property] = saved;
     }
   });
+});
+
+it("revokes managed sessions when the general app router handles logout", async () => {
+  const { request, login } = await generalRouterFixture();
+  const cookie = sessionCookie(await login());
+  const logout = await request("/api/trpc/auth.logout", {
+    method: "POST",
+    headers: { cookie, origin, "content-type": "application/json" },
+    body: '{"json":null}',
+  });
+
+  expect(logout.status).toBe(200);
+  expect(logout.headers.get("set-cookie")).toContain(`${cookieName}=;`);
+  expect((await request("/api/trpc/fab.access", { headers: { cookie } })).status).toBe(403);
 });

@@ -76,6 +76,7 @@ def test_opened_size_cannot_bypass_the_limit_and_descriptor_closes(retained_sour
     client, route, source, _data = retained_source
     original_open = os.open
     original_stat = os.fstat
+    source_stat = os.stat(source)
     opened = []
 
     def record_open(path, flags, *args, **kwargs):
@@ -86,7 +87,12 @@ def test_opened_size_cannot_bypass_the_limit_and_descriptor_closes(retained_sour
 
     def enlarged_stat(descriptor):
         if descriptor in opened:
-            return SimpleNamespace(st_mode=stat.S_IFREG, st_size=local_api.LOCAL_SOURCE_PREVIEW_MAX_BYTES + 1)
+            return SimpleNamespace(
+                st_mode=stat.S_IFREG,
+                st_size=local_api.LOCAL_SOURCE_PREVIEW_MAX_BYTES + 1,
+                st_dev=source_stat.st_dev,
+                st_ino=source_stat.st_ino,
+            )
         return original_stat(descriptor)
 
     monkeypatch.setattr(local_api.os, "open", record_open)
@@ -116,8 +122,9 @@ def test_source_descriptor_closes_when_wrapper_creation_fails(retained_source, m
 
 
 def test_growing_source_reads_only_one_byte_past_limit(retained_source, monkeypatch):
-    client, route, _source, _data = retained_source
+    client, route, source, _data = retained_source
     original_wrapper = os.fdopen
+    source_stat = os.stat(source)
     requested_sizes = []
 
     class ObservedFile:
@@ -137,7 +144,12 @@ def test_growing_source_reads_only_one_byte_past_limit(retained_source, monkeypa
 
     monkeypatch.setattr(local_api, "LOCAL_SOURCE_PREVIEW_MAX_BYTES", 8)
     monkeypatch.setattr(local_api.os, "fdopen", ObservedFile)
-    monkeypatch.setattr(local_api.os, "fstat", lambda _fd: SimpleNamespace(st_mode=stat.S_IFREG, st_size=1))
+    monkeypatch.setattr(local_api.os, "fstat", lambda _fd: SimpleNamespace(
+        st_mode=stat.S_IFREG,
+        st_size=1,
+        st_dev=source_stat.st_dev,
+        st_ino=source_stat.st_ino,
+    ))
     response = client.get(route)
     assert response.status_code == 413
     assert requested_sizes == [9]

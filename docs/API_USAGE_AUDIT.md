@@ -13,7 +13,7 @@ The Flask API is the source of operational truth. Major endpoint groups are:
 | Autonomy/workflows | `/api/autonomy/plan`, `/api/autonomy/run`, `/api/workflows/*` | Lease, safety, recovery, and emergency-stop gated. |
 | Emergency control | `/api/autonomy/emergency-stop` | Any operator/HAI may stop; only operator DELETE with exact phrase may resume. |
 | Routing/exports | `/api/routing/*`, `/api/exports/*` | Preparation, approval, execution, and verification remain distinct states. |
-| Wave | `/api/wave/*`, `/api/drive-wave/*` | Capability and business mapping gated; attachment verification required before archival. Work-order lists accept `view=summary` for queue rendering while the default and per-document endpoints retain complete executor/evidence payloads. |
+| Wave | `/api/wave/*`, `/api/drive-wave/*` | Capability and business mapping gated; Drive archival requires verified attachment evidence with `trusted_provider_download` provenance. The multipart `attachment-readback` endpoint returns `409 trusted_provider_readback_unavailable` until FAB can retrieve and verify the stored attachment through a trusted provider path; browser-submitted bytes and legacy browser-origin readbacks never authorize archival. Previously archived records without trusted provenance are flagged for reconciliation, not reported as verified completion. Work-order lists accept `view=summary` for queue rendering while the default and per-document endpoints retain complete executor/evidence payloads. |
 | Reconciliation/reporting | `/api/reconciliation/*`, `/api/report-runs/*`, `/api/compliance/*`, `/api/master-ledger` | Local computation; provisional findings are labeled. `summaryOnly=true` returns the exact checksum and aggregate projection without serializing rows to the caller. |
 | Recovery/support | `/api/backups`, `/api/backups/restore-plan`, `/api/backups/restore`, `/api/support-bundles` | Restore is local-maintenance-only, exact-confirmation-gated, and worker-lock protected; support output is sanitized. |
 | HAI | `/api/hai/status`, `/api/hai/manifest`, `/api/hai/commands/execute` | Fixed command allowlist, normalized payloads, no external approval, emergency-stop clear, or restore. All commands are disabled during maintenance; redacted recovery status remains readable. |
@@ -25,9 +25,9 @@ The Express/tRPC gateway calls fixed local paths from `web/server/fabLocalGatewa
 
 - validates endpoint scheme/origin;
 - adds the local API bearer token server-side;
-- applies timeouts, a four-read concurrency bound, and a bounded projection before returning data;
+- applies timeouts, an eight-read fallback concurrency bound, and a bounded projection before returning data;
 - caches only read resources for degraded/stale display;
-- coalesces identical control-center reads for two seconds and invalidates that snapshot after every successful mutation;
+- caches the control-center snapshot for up to 65 seconds and coalesces concurrent refreshes; each gateway mutation invalidates it before execution and after completion, including uncertain failures;
 - compresses responses larger than 1 KiB for browser/ngrok clients;
 - does not convert an API error into success;
 - uses role-gated `fabOperatorProcedure` for financial operations.
@@ -37,7 +37,7 @@ Operator-facing links into the protected Flask ledger use `GET /api/fab/operator
 ## Provider APIs
 
 - Google connectors use owner OAuth and scoped read operations against configured sources.
-- Wave GraphQL coverage is capability-based. Receipt attachment work can require a supervised executor when the API cannot provide the necessary action/readback.
+- Wave GraphQL coverage is capability-based. A supervised browser executor can prepare/perform Wave work, but FAB does not currently have a trusted server-side attachment retrieval path for purchase transactions. The published Wave schema exposes attachment fields for receivables invoices and estimates, while its `Transaction` object exposes only an ID and the published mutations do not include a transaction-receipt attachment upload/readback operation ([Wave API reference](https://developer.waveapps.com/hc/en-us/articles/360019968212-API-Reference), checked 2026-10-18). The attachment-readback HTTP endpoint intentionally fails closed; a browser-uploaded copy of the local source is not proof of a Wave attachment and cannot authorize Drive archival.
 - MijnGeldzaken is an artifact export with supervised completion tracking.
 - Direct PSD2 and SVB mutation APIs are absent and are not advertised as live.
 
@@ -46,7 +46,7 @@ Operator-facing links into the protected Flask ledger use `GET /api/fab/operator
 The API applies a 2 MiB default request-stream limit to mutating API requests,
 after authentication and before JSON or multipart parsing. Larger legitimate
 contracts have explicit limits: document intake, bank imports, OAuth credentials,
-Wave attachment readback, Drive relay, autonomy bank-transaction input,
+Drive relay, autonomy bank-transaction input,
 Wave report-result capture, reconciliation, and HAI. Wave report results allow
 up to 16 MiB of source data and 10,000 rows; optional reconciliation remains
 limited to its existing 500-row batch size and rejects oversized combined

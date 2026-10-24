@@ -26,6 +26,7 @@ import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
 import { Button } from "./ui/button";
+import { readLocalStorage, writeLocalStorage } from "@/lib/safeLocalStorage";
 
 const menuItems = [
   { icon: LayoutDashboard, label: "Page 1", path: "/" },
@@ -43,13 +44,17 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const [sidebarWidth, setSidebarWidth] = useState(() => {
-    const saved = localStorage.getItem(SIDEBAR_WIDTH_KEY);
-    return saved ? parseInt(saved, 10) : DEFAULT_WIDTH;
+    const saved = readLocalStorage(SIDEBAR_WIDTH_KEY);
+    if (!saved) return DEFAULT_WIDTH;
+    const parsed = Number.parseInt(saved, 10);
+    return Number.isFinite(parsed)
+      ? Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, parsed))
+      : DEFAULT_WIDTH;
   });
   const { loading, user } = useAuth();
 
   useEffect(() => {
-    localStorage.setItem(SIDEBAR_WIDTH_KEY, sidebarWidth.toString());
+    writeLocalStorage(SIDEBAR_WIDTH_KEY, sidebarWidth.toString());
   }, [sidebarWidth]);
 
   if (loading) {

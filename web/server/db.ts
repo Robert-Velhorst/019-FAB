@@ -1,8 +1,9 @@
-import { eq, sql, desc, and, gte, lte, isNull } from "drizzle-orm";
+import { eq, sql, desc, and, gte, gt, lte, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   InsertUser,
   users,
+  oauthSessions,
   waitlist,
   InsertWaitlistEntry,
   contactMessages,
@@ -160,6 +161,53 @@ export async function getUserByOpenId(openId: string) {
   const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
 
   return result.length > 0 ? result[0] : undefined;
+}
+
+export async function createOAuthSession(session: {
+  tokenHash: string;
+  openId: string;
+  expiresAt: Date;
+}): Promise<void> {
+  const database = await getDb();
+  if (!database) throw new Error("Database not available");
+
+  const now = new Date();
+  await database.delete(oauthSessions).where(lte(oauthSessions.expiresAt, now));
+  await database.insert(oauthSessions).values(session);
+}
+
+export async function isOAuthSessionActive(
+  tokenHash: string,
+  openId: string,
+  now = new Date(),
+): Promise<boolean> {
+  const database = await getDb();
+  if (!database) throw new Error("Database not available");
+
+  const active = await database
+    .select({ tokenHash: oauthSessions.tokenHash })
+    .from(oauthSessions)
+    .where(and(
+      eq(oauthSessions.tokenHash, tokenHash),
+      eq(oauthSessions.openId, openId),
+      isNull(oauthSessions.revokedAt),
+      gt(oauthSessions.expiresAt, now),
+    ))
+    .limit(1);
+  return active.length > 0;
+}
+
+export async function revokeOAuthSession(tokenHash: string): Promise<void> {
+  const database = await getDb();
+  if (!database) throw new Error("Database not available");
+
+  await database
+    .update(oauthSessions)
+    .set({ revokedAt: new Date() })
+    .where(and(
+      eq(oauthSessions.tokenHash, tokenHash),
+      isNull(oauthSessions.revokedAt),
+    ));
 }
 
 // ── Waitlist ──────────────────────────────────────────────────

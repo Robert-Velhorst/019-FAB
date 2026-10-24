@@ -230,6 +230,43 @@ class TestComponents(unittest.TestCase):
         leftovers = [name for name in os.listdir(manager.backup_base_dir) if name.startswith(".fab-sqlite-")]
         self.assertEqual(leftovers, [])
 
+    def test_backup_manager_snapshots_nested_sqlite_database_without_wal_sidecars(self):
+        data_dir = os.path.join(self.temp_dir.name, "data")
+        os.makedirs(data_dir)
+        database_path = os.path.join(data_dir, "fab.sqlite3")
+        writer = sqlite3.connect(database_path)
+        self.addCleanup(writer.close)
+        writer.execute("PRAGMA journal_mode=WAL")
+        writer.execute("PRAGMA wal_autocheckpoint=0")
+        writer.execute("CREATE TABLE ledger_entries (id INTEGER PRIMARY KEY, amount TEXT NOT NULL)")
+        writer.execute("INSERT INTO ledger_entries (amount) VALUES ('42.50')")
+        writer.commit()
+        self.assertGreater(os.path.getsize(database_path + "-wal"), 0)
+
+        manager = BackupManager({
+            "backup_base_dir": os.path.join(self.temp_dir.name, "nested-database-backups"),
+            "backup_paths": [data_dir],
+            "database_path": database_path,
+        })
+        result = manager.perform_backup([data_dir])
+
+        self.assertEqual(result["status"], "success", result)
+        with zipfile.ZipFile(result["path"]) as archive:
+            names = {name.replace("\\", "/") for name in archive.namelist()}
+            self.assertIn("data/fab.sqlite3", names)
+            self.assertNotIn("data/fab.sqlite3-wal", names)
+            self.assertNotIn("data/fab.sqlite3-shm", names)
+            snapshot_path = os.path.join(self.temp_dir.name, "nested-restored.sqlite3")
+            with archive.open("data/fab.sqlite3") as source, open(snapshot_path, "wb") as target:
+                shutil.copyfileobj(source, target)
+
+        with closing(sqlite3.connect(snapshot_path)) as snapshot:
+            rows = snapshot.execute("SELECT amount FROM ledger_entries").fetchall()
+            integrity = snapshot.execute("PRAGMA integrity_check").fetchone()
+
+        self.assertEqual(rows, [("42.50",)])
+        self.assertEqual(integrity, ("ok",))
+
     def test_backup_manager_rejects_sibling_prefix_zip_traversal(self):
         manager = BackupManager(self.config)
         archive_path = os.path.join(manager.backup_base_dir, "malicious.zip")

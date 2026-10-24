@@ -41,6 +41,18 @@ export const users = mysqlTable(
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 
+export const oauthSessions = mysqlTable(
+  "oauth_sessions",
+  {
+    tokenHash: varchar("tokenHash", { length: 64 }).primaryKey(),
+    openId: varchar("openId", { length: 64 }).notNull(),
+    expiresAt: timestamp("expiresAt").notNull(),
+    revokedAt: timestamp("revokedAt"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (table) => [index("idx_oauth_sessions_expiry").on(table.expiresAt)]
+);
+
 /**
  * Waitlist signups.
  * Unique constraint on email prevents duplicates.

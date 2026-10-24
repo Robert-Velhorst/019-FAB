@@ -7,10 +7,16 @@ from unittest.mock import patch
 from src.operations.local_ledger import LocalOperationsLedger
 from src.operations.local_processing import (
     LocalDocumentProcessor,
+    _read_text_file,
     STORED_OCR_REASSESSMENT_VERSION,
     duplicate_candidate_reassessment_plan,
     duplicate_link_cycles,
 )
+from src.document_processors.document_resource_limits import (
+    MAX_SOURCE_DOCUMENT_BYTES,
+    MAX_TEXT_DOCUMENT_BYTES,
+)
+from src.operations.local_intake import LocalFolderIntake
 
 
 class StaticCategorizer:
@@ -69,6 +75,121 @@ class StaticPipeline:
 
 
 class TestLocalDocumentProcessor(unittest.TestCase):
+    def test_processing_read_loads_only_open_reviews_and_document_facts(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            document_id = ledger.register_document({
+                "source": "local_folder",
+                "sourceDocumentId": "processing-read-1",
+                "originalFilename": "receipt.txt",
+                "mimeType": "text/plain",
+                "storagePath": os.path.join(temp_dir, "receipt.txt"),
+                "documentType": "text",
+                "processingStatus": "imported",
+            })
+            ledger.create_review_item({
+                "documentId": document_id,
+                "reason": "needs_review",
+                "details": "Open review",
+            })
+
+            document = ledger.get_document_for_processing(document_id)
+
+            self.assertEqual([item["reason"] for item in document["review_items"]], ["needs_review"])
+            self.assertNotIn("export_attempts", document)
+            self.assertNotIn("audit_events", document)
+
+    def test_processing_rejects_bytes_changed_since_intake(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            intake_dir = os.path.join(temp_dir, "sort-out")
+            os.makedirs(intake_dir)
+            source_path = os.path.join(intake_dir, "receipt.txt")
+            with open(source_path, "w", encoding="utf-8") as handle:
+                handle.write("Original registered receipt")
+            LocalFolderIntake(ledger).rescan([intake_dir])
+            document_id = ledger.list_documents(limit=1)[0]["id"]
+            with open(source_path, "w", encoding="utf-8") as handle:
+                handle.write("Changed receipt content")
+            pipeline = StaticPipeline()
+
+            result = LocalDocumentProcessor(
+                ledger,
+                processor_pipeline=pipeline,
+                categorizer=StaticCategorizer(),
+                validator=StaticValidator(),
+            ).process_document(document_id)
+
+            self.assertEqual(result["status"], "needs_review")
+            self.assertEqual(result["reviewReasons"], ["source_file_hash_mismatch"])
+            self.assertEqual(pipeline.paths, [])
+            self.assertEqual(ledger.get_document(document_id)["processing_status"], "needs_review")
+
+    def test_processing_snapshot_enforces_binary_document_limit(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_path = os.path.join(temp_dir, "oversized.pdf")
+            with open(source_path, "wb") as handle:
+                handle.truncate(MAX_SOURCE_DOCUMENT_BYTES + 1)
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            document_id = ledger.register_document({
+                "source": "gmail",
+                "sourceDocumentId": "oversized-binary",
+                "originalFilename": "oversized.pdf",
+                "mimeType": "application/pdf",
+                "storagePath": source_path,
+                "documentType": "pdf",
+                "processingStatus": "imported",
+            })
+            pipeline = StaticPipeline()
+
+            result = LocalDocumentProcessor(
+                ledger,
+                processor_pipeline=pipeline,
+                categorizer=StaticCategorizer(),
+                validator=StaticValidator(),
+            ).process_document(document_id)
+
+            self.assertEqual(result["status"], "needs_review")
+            self.assertEqual(result["reviewReasons"], ["document_exceeds_limit"])
+            self.assertEqual(pipeline.paths, [])
+
+    def test_processing_snapshot_enforces_text_limit_before_copy(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_path = os.path.join(temp_dir, "oversized.txt")
+            with open(source_path, "wb") as handle:
+                handle.truncate(MAX_TEXT_DOCUMENT_BYTES + 1)
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            document_id = ledger.register_document({
+                "source": "gmail",
+                "sourceDocumentId": "oversized-text",
+                "originalFilename": "oversized.txt",
+                "mimeType": "text/plain",
+                "storagePath": source_path,
+                "documentType": "text",
+                "processingStatus": "imported",
+            })
+            pipeline = StaticPipeline()
+
+            result = LocalDocumentProcessor(
+                ledger,
+                processor_pipeline=pipeline,
+                categorizer=StaticCategorizer(),
+                validator=StaticValidator(),
+            ).process_document(document_id)
+
+            self.assertEqual(result["status"], "needs_review")
+            self.assertEqual(result["reviewReasons"], ["text_document_exceeds_limit"])
+            self.assertEqual(pipeline.paths, [])
+
+    def test_text_reader_bounds_bytes_even_if_file_changes_after_intake(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = os.path.join(temp_dir, "receipt.txt")
+            with open(path, "wb") as handle:
+                handle.truncate(MAX_TEXT_DOCUMENT_BYTES + 1)
+
+            with self.assertRaisesRegex(ValueError, "text_document_exceeds_limit"):
+                _read_text_file(path)
+
     def test_process_text_document_updates_ledger_fields_and_audit(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             receipt_path = os.path.join(temp_dir, "receipt.txt")
@@ -826,7 +947,11 @@ class TestLocalDocumentProcessor(unittest.TestCase):
             self.assertEqual(summary["skippedMissingSource"], 0)
             self.assertEqual(summary["externalSubmission"], "not_executed")
             self.assertFalse(summary["sourceFilesModified"])
-            self.assertEqual(pipeline.paths, [blank_path])
+            self.assertEqual(len(pipeline.paths), 1)
+            self.assertNotEqual(pipeline.paths[0], blank_path)
+            self.assertTrue(pipeline.paths[0].endswith(".pdf"))
+            self.assertFalse(os.path.exists(pipeline.paths[0]))
+            self.assertTrue(os.path.isfile(blank_path))
             document = ledger.get_document(blank_id)
             self.assertEqual(document["processing_status"], "needs_review")
             self.assertIn("Vendor: Retry Vendor", document["ocr_text"])

@@ -19,6 +19,43 @@ Audit date: 2026-08-13
 - External submissions are represented separately from local preparation and require supported capabilities and approvals.
 - Worker leases, idempotency keys, rate limits, recovery candidates, and dead-letter-style export deferral are present.
 
+## 2026-10-17 Follow-up
+
+- Drive archival compensation now revalidates the active lease before moving a
+  source back. If ownership has transferred or cannot be confirmed, FAB avoids
+  a competing provider mutation, marks the result `unknown`, and keeps the
+  document in review. A failed local audit commit also reports an unknown
+  external state when source restoration is unconfirmed.
+- Deterministic lease-transfer and aggregate-status regressions failed before
+  their fixes. The complete Drive-to-Wave delivery module then passed 55 tests
+  and 35 subtests.
+- Intake upload completion now catches dashboard refresh failures after the
+  files have been registered and displays a recovery message instead of
+  leaving an unhandled promise rejection. Full web verification passed 478
+  tests (6 skipped), TypeScript, and the production client/server bundles;
+  four local API upload-boundary tests passed.
+- MySQL migration `0007` now uses the schema's own collation consistently for
+  source identity grouping, dependent-reference remapping, duplicate removal,
+  and the unique index. A case-variant duplicate regression failed against
+  MySQL 8.4 before the fix and passed after it, verifying all migrated
+  references. All tracked migrations then applied to a fresh disposable MySQL
+  8.4 database and all six database integration tests passed. The default web
+  suite passed 478 tests with 6 skipped; the added database integration test
+  is skipped there when no MySQL URL is configured.
+- Path and error-response boundaries were rechecked against the PR review
+  findings. Intake uses canonical-root containment and symlink/race checks;
+  backup restore validates archive members before staged writes; unexpected
+  API exceptions return a generic correlated response. Regressions now verify
+  traversal rejection and traceback/path redaction. The full local API module
+  passed 119 tests and 2 subtests; related intake/backup suites passed 45 tests
+  with 4 environment-dependent skips. This is not a new hosted CodeQL scan.
+- A fresh Windows production-bundle rehearsal passed all 71 synthetic checks
+  across the dashboard, SQLite ledger, managed session handoff, source-byte
+  verification, and HAI authorization/replay boundaries. One bounded 30-request,
+  six-client warm-cache run measured 51.25 ms median, 69.86 ms p95, 70.63 ms
+  max, and 57,768 response bytes; sampled peak combined working set was
+  195,387,392 bytes. No provider writes or ngrok tunnel were involved.
+
 ## Remediated in this audit
 
 - Replaced repeated export-attempt list scans and no-op updates with indexed identity lookups, route-without-export queries, explicit changed-state results, and no-op batch behavior.
@@ -43,6 +80,7 @@ Audit date: 2026-08-13
 - On the real 441-issue ledger, bounded serialization reduced health payload bytes by 84.3% and doctor bytes by 68.3%; short concurrent acceptance improved health throughput 8.3x with exact counts in every response.
 - Added queue-specific Drive/Wave and master-ledger summary views. The live 150-work-order response fell from 988,287 to 141,040 bytes, while the ledger dashboard read fell from 202,949 to 918 bytes and retained the same checksum.
 - Added a two-second, mutation-invalidated control-center single-flight cache, HTTP compression above 1 KiB, and longest-read-first scheduling within the existing four-request bound. Live cold refresh fell from 2.04-2.64 seconds to 1.35-1.65 seconds across the complete optimization and dependency-upgrade runs, immediate refresh fell to 36-54 ms, and the 508 KB browser response transfers as about 78 KB with gzip.
+- Replaced eager `os.walk` directory enumeration in local intake with a deterministic `scandir` traversal capped at 120,000 filesystem entries per scan. This bounds memory spent listing irrelevant files and directories before the existing document, byte, and directory limits apply; overflow fails closed as `attention_required` without importing a partial manifest.
 - Upgraded the complete web dependency surface, including Express, Vite, Vitest, Recharts, Drizzle, Axios, AWS SDK, Tailwind, PostCSS, and the rate limiter. `pnpm audit` fell from 86 findings (25 high, 53 moderate, eight low) to zero and the peer-dependency check reports no issues.
 - Removed the obsolete JSX-location plugin and migrated the shared chart wrapper to the current Recharts tooltip and legend contracts, including the full-payload formatter contract.
 - Found and fixed an Express 5 production-only SPA fallback incompatibility. A real TCP regression test now proves nested routes such as `/admin/operations` resolve to the built application.
@@ -122,6 +160,10 @@ Audit date: 2026-08-13
   CSV, JSON, CAMT/XML, and MT940 files are limited to 4 MB; binary content,
   mismatched extensions, malformed XML/JSON/base64, and CSV files without a
   recognizable transaction date plus amount/debit/credit header fail closed.
+- CAMT entries containing multiple transaction details are split only when
+  every detail has a parseable amount in the entry currency and the signed
+  detail amounts exactly reconcile to the entry total; otherwise FAB retains
+  the original entry-level amount rather than inventing a transaction split.
 - Corrected Dutch bank-export normalization for `Datum`, `Boekingsdatum`,
   `Valutadatum`, `Valuta`, and counterparty-name headers. Invalid dates or
   missing amounts can no longer create ledger rows or false completed imports.
@@ -131,6 +173,27 @@ Audit date: 2026-08-13
 - Corrected the dashboard's unreconciled-value read: it no longer sends the
   invalid `status=unreconciled` filter and excludes only finalized
   reconciliation states from the local amount projection.
+
+## Verification snapshot (2026-10-17)
+
+- Latest complete Python suite on the current working tree: 1,993 passed, 6 skipped, and 222 subtests passed in 934.92 seconds. This includes source-root containment, HAI result validation, backup archive traversal, and exception path/traceback redaction regressions.
+- Fresh web verification passed TypeScript, all 478 Vitest tests (6 skipped), Vite production build and asset budgets, and general plus standalone server bundles via `npm run build`. All six MySQL integration tests also passed after applying the complete migration chain to a fresh disposable MySQL 8.4 database. `pnpm run build` failed before running the build because Windows denied writing `web/node_modules/.package-map.json`; the equivalent npm build completed without downloading packages.
+- Follow-up verification: the complete Python suite passed 1,996 tests, skipped 8, and passed 222 subtests in 824.74 seconds. The two initial failures were incomplete `fstat` test doubles; fixtures now preserve the real file device/inode while simulating size changes, and the entire suite passed on rerun. The web suite passed 479 tests (6 skipped), TypeScript and production build/bundle checks passed, and the synthetic Windows stack rehearsal passed with authenticated dashboard document upload, source hash verification, idempotent replay, exactly-one-row persistence, processing, dashboard refresh, and owned-child cleanup. No MySQL integration URL was configured for this follow-up, so MySQL migration integration was not reverified in that run.
+- MySQL follow-up on 2026-10-17: all tracked migrations applied successfully to a new disposable MySQL 8.4 `fab_test` database, then all six MySQL integration tests passed. The test used a fixed loopback port after Docker Desktop's dynamically assigned localhost port timed out; the disposable container was stopped and removed afterward. `pnpm exec` attempted dependency installation and hit a Windows `EPERM`, so the already-installed Drizzle and Vitest launchers were invoked directly. This is local verification, not a hosted CI result.
+- PR #125 is open at live head `892f790`. CodeQL passed for that head. Its FAB verification workflow failed to start; manual rerun `38985828203` remains queued with zero jobs. Earlier successful hosted runs were attached to prior PR commits and are not current-head verification.
+- Read-only GitHub audit on 2026-10-17: all 101 open code-scanning alerts are attached to `refs/heads/main` at commit `6445f876`; PR #125's head `892f790` has a passing CodeQL check, but that does not clear the main-branch backlog. Manual FAB verification run `38985828203` is still queued with zero jobs, so hosted FAB tests have not executed on this head.
+
+- Latest full Python suite on the current worktree: 1,976 passed, 6 skipped, and 219 subtests passed in 748.66 seconds. The changed API, Drive archive, autonomy, processing, report-export, and anomaly-analysis areas were covered by this run.
+- Python lock regeneration/verification passed for all four hash-locked sets. `pip-audit` reported no known vulnerabilities for the production, local, ML, and test locks.
+- Web TypeScript check passed. The latest Vitest run: 39 files passed, 1 skipped; 471 tests passed, 5 skipped. The Vite production build and production asset budget check passed, as did both web-server bundles (general and standalone).
+- The `pnpm check` wrapper attempted dependency installation and hit `EPERM` writing pnpm's generated `web/node_modules/.package-map.json`; the already-installed TypeScript, Vitest, Vite, and esbuild binaries were invoked directly. No tracked dependency manifests were changed.
+- Codex Security diff review completed for 27 changed code files with zero reportable findings. Coverage is partial: no live Google/Wave account, public ngrok deployment, external HAI peer, production-sized restore, or independent penetration test was exercised. Report: `C:\Users\NO\.codex\state\plugins\codex-security\scans\019-FAB\dbe3a8a6383c88ad926a707ff7d8975561c99327_20261016T115022Z_5npeimmp\report.md`.
+- Fresh synthetic 2,000-bank-row x 400-document reconciliation benchmark: 1.395 seconds unprepared versus 19.78 ms indexed, with identical results. Traced Python peak was 651,704 versus 848,007 bytes; this matcher-only allocation metric is not process RAM or an application-wide resource result.
+- A controlled service-level anomaly comparison used identical 400-row synthetic input and interleaved 15-run measurements against the original checkout implementation. Results were identical; median decreased from 42.022 ms to 9.719 ms and max from 64.491 ms to 11.207 ms. For 100 below-threshold rows, amount-parser calls fell from 20,000 to 200. This does not measure control-center throughput or process CPU/RSS.
+- A separate 40-request/16-client synthetic warm-cache dashboard rehearsal passed at 125.49 ms median and 139.01 ms p95 with a 57,768-byte JSON body. This fixture and concurrency differ from the prior 30-request/6-client run, so the results are not a controlled speed comparison and do not measure CPU/RSS.
+- Local Bandit scan reported 0 high, 29 medium, and 16 low heuristic findings across `src`. All 26 B608 findings are in `local_ledger.py`; manual source tracing found fixed query templates, internally built filters, identifier validation, and bound values rather than request/document data used as SQL syntax. The legacy `ReportingService` CSV export now selects from fixed SQL statements, with regression tests rejecting hostile table names before database access. The two B104 findings are the explicitly configured VM/container wildcard-bind paths; remote binding requires a strong API token in deployment preflight. The B113 finding is a Photos download request with `timeout=self._request_timeout()`. These were manually reviewed as bounded heuristic matches, not automatically suppressed. The managed Codex Security Deep Scan could not start because this session lacks its required filesystem permission profile. Do not treat these checks as a clean penetration-test result.
+- Unexpected Flask route exceptions now record `externalSubmission: unknown`; the regression test simulates a provider-side effect before a route throws and verifies the audit does not falsely assert `not_executed`.
+- After restoring intake root containment and HAI malformed-result handling, three separate Windows stack rehearsals each passed the synthetic integration checks and 30 concurrent authenticated warm-cache `fab.controlCenter` reads at concurrency 6. The response was consistently 57,768 bytes. Latency varied materially: median 61.89-105.67 ms, p95 81.34-221.80 ms, and max 81.99-248.59 ms. Seven to thirteen 50 ms samples measured combined API/dashboard peak working set 189,505,536-196,145,152 bytes; dashboard CPU 0.328125-0.5625 seconds and API CPU 0.0 seconds at reported precision. This one-document, warm-cache sample is diagnostic, noisy, and not a cold, scaled, sustained or whole-app baseline. The 80-request burst was rate-limited by the existing tRPC policy; the combined rehearsal CLI is bounded to 30 requests.
 
 ## Remaining risks
 
@@ -156,8 +219,8 @@ Audit date: 2026-08-13
 | Priority | Item | Required action |
 | --- | --- | --- |
 | High | Live provider acceptance | Reauthorize Google, validate the Wave business/token/mapping, and run a synthetic receipt through attachment readback before enabling archival. |
-| Medium | Image optimization | The OCR/PDF-capable API image baseline is 1.52 GB. Pandas has now been removed after replacing its runtime uses; rebuild and measure before claiming an image-size reduction. A separate API/OCR worker image remains a candidate if transfer or cold-start cost is still material. |
-| Medium | Performance baseline | Run sustained idle-host and concurrent-refresh tests, and track cold backup-integrity scan time separately from warm bounded-health latency and payload size. |
+| Medium | Image optimization | Removed unused OpenCV and its NumPy dependency from the core lock after confirming no source imports. A fresh current dirty-checkout image measured 140,805,983 bytes with ML disabled, versus 242,575,002 bytes for tagged revision `3e74dbcf5bb4158888ef550797c79bc564e5d291` (about 42% smaller). This is not a controlled comparison because the source revisions and Python base versions differ; clean-release, registry-transfer, and process CPU/RSS measurements remain. |
+| Medium | Performance baseline | Initial synthetic concurrent hot-cache dashboard timings are now recorded. Still measure cold refresh, sustained idle/concurrent host load, process CPU/RSS, and cold backup-integrity duration separately; the current one-document fixture is not representative of a populated production ledger. |
 | Medium | Recovery rehearsal | Exercise the documented schema rollback and full source-evidence recovery process on a production-sized copy before unattended upgrades. |
 | Medium | Legacy compatibility retirement | External and internal duplicate workflow entrypoints and placeholder helpers are retired. Continue removing retained `posting_attempts` compatibility only after any deployed pre-ledger database has been migrated. |
 | Medium | Privacy governance | Complete a signed DPIA and data-processing inventory before multi-user production use. |

@@ -20,6 +20,7 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: read
+      actions: read
       packages: write
     strategy:
       fail-fast: false
@@ -53,6 +54,37 @@ jobs:
             echo "The tagged commit must be reachable from main." >&2
             exit 1
           fi
+
+      - name: Require successful FAB verification for tagged commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS + 1800))
+          while (( SECONDS < deadline )); do
+            run_state="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${RELEASE_SHA}&event=push&branch=main&per_page=20" \
+              --jq "[.workflow_runs[] | select(.head_sha == \"${RELEASE_SHA}\" and .head_branch == \"main\")] | sort_by([.run_number, .run_attempt]) | last | if . == null then empty else [.status, (.conclusion // \"\")] | @tsv end")"
+            if [[ -z "$run_state" ]]; then
+              sleep 15
+              continue
+            fi
+
+            IFS=$'\t' read -r status conclusion <<< "$run_state"
+            if [[ "$status" == "completed" ]]; then
+              if [[ "$conclusion" == "success" ]]; then
+                echo "FAB verification passed for ${RELEASE_SHA}."
+                exit 0
+              fi
+              echo "Refusing to publish: FAB verification concluded ${conclusion:-without success}." >&2
+              exit 1
+            fi
+            sleep 15
+          done
+
+          echo "Refusing to publish: no successful FAB verification completed for ${RELEASE_SHA} within 30 minutes." >&2
+          exit 1
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3

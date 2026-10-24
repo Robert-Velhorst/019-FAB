@@ -183,6 +183,7 @@ class DriveWaveDeliveryService:
             "waveReceiptExecutorReady": receipt_executor.get("ready") is True,
             "waveReceiptExecutorStatus": receipt_executor.get("status"),
             "waveReceiptExecutorNextAction": receipt_executor.get("nextAction"),
+            "trustedProviderReadbackAvailable": receipt_executor.get("trustedProviderReadbackAvailable") is True,
             "waveReceiptExecutorLastSeenAt": receipt_executor.get("lastSeenAt"),
             "waveReceiptExecutorMissingCapabilities": receipt_executor.get("missingCapabilities") or [],
             "driveTokenPresent": token_present,
@@ -303,6 +304,7 @@ class DriveWaveDeliveryService:
                 "requiredFieldMatches": list(REQUIRED_FIELD_MATCHES),
                 "sourceHashRequired": True,
                 "attachmentReadbackRequired": True,
+                "trustedProviderReadbackAvailable": False,
                 "attachmentRoundTripHashRequired": True,
                 "attachmentOpenRequired": True,
                 "attachmentTransactionBindingRequired": True,
@@ -604,11 +606,10 @@ class DriveWaveDeliveryService:
                     "haiCommandId": "record_wave_attachment_verification",
                 },
                 "binaryReadbackSubmission": {
-                    "method": "POST",
-                    "path": f"/api/drive-wave/documents/{document_id}/attachment-readback",
-                    "contentType": "multipart/form-data",
-                    "fileField": "attachment",
-                    "metadataField": "evidence",
+                    "available": False,
+                    "status": "unavailable",
+                    "reason": "trusted_provider_readback_unavailable",
+                    "path": None,
                     "requiredForArchive": source_provider == "google_drive",
                     "requiredForCompletion": True,
                 },
@@ -633,6 +634,11 @@ class DriveWaveDeliveryService:
         evidence: Dict[str, Any],
         actor: str = "hai-wave-browser",
     ) -> Dict[str, Any]:
+        """Record bytes already fetched by a trusted provider integration.
+
+        Never pass HTTP/client-supplied bytes here. The public readback route
+        deliberately does not call this method while no trusted reader exists.
+        """
         document = self.ledger.get_document(int(document_id))
         if not document:
             return {"success": False, "status": "not_found", "reasons": ["document_not_found"]}
@@ -675,6 +681,42 @@ class DriveWaveDeliveryService:
             readback_bytes_verified=True,
         )
 
+    def reject_untrusted_attachment_readback(
+        self,
+        document_id: int,
+        *,
+        actor: str = "local_api_wave_browser",
+    ) -> Dict[str, Any]:
+        document = self.ledger.get_document(int(document_id))
+        if not document:
+            return {"success": False, "status": "not_found", "reasons": ["document_not_found"]}
+        if not self._is_configured_source(document):
+            return {
+                "success": False,
+                "status": "outside_configured_source",
+                "reasons": ["document_outside_configured_source"],
+                "externalSubmission": "not_executed",
+            }
+        reason = "trusted_provider_readback_unavailable"
+        audit_event_id = self.ledger.record_audit_event({
+            "action": "drive_wave.attachment_readback_rejected",
+            "entityType": "bookkeeping_document",
+            "entityId": str(document_id),
+            "details": {
+                "actor": str(actor or "local_api_wave_browser")[:200],
+                "reason": reason,
+                "binaryContentConsumed": False,
+                "externalSubmission": "not_executed",
+            },
+        })
+        return {
+            "success": False,
+            "status": "blocked",
+            "reasons": [reason],
+            "auditEventId": audit_event_id,
+            "externalSubmission": "not_executed",
+        }
+
     def record_attachment_evidence(
         self,
         document_id: int,
@@ -695,7 +737,7 @@ class DriveWaveDeliveryService:
         normalized = _normalize_evidence(evidence)
         normalized["attachmentReadbackVerified"] = bool(readback_bytes_verified)
         normalized["readbackOrigin"] = (
-            "wave_browser_download" if readback_bytes_verified else "metadata_attestation"
+            "trusted_provider_download" if readback_bytes_verified else "metadata_attestation"
         )
         record = self.ledger.get_bookkeeping_record_by_document(int(document_id))
         required_fields = _required_wave_fields(document, record)
@@ -810,9 +852,27 @@ class DriveWaveDeliveryService:
         metadata = document.get("metadata") or {}
         lifecycle = metadata.get("driveWaveLifecycle") if isinstance(metadata.get("driveWaveLifecycle"), dict) else {}
         if lifecycle.get("status") == "archived":
+            evidence = (evidence_event or {}).get("details") or {}
+            evidence_reasons = self._evidence_reasons(document, evidence)
+            if not evidence:
+                evidence_reasons.append("wave_attachment_evidence_missing")
+            if evidence_reasons:
+                return {
+                    "status": "archive_verification_required",
+                    "canArchive": False,
+                    "evidenceVerified": False,
+                    "reasons": sorted(set([
+                        "archived_source_requires_attachment_reconciliation",
+                        *evidence_reasons,
+                    ])),
+                    "archiveFolderId": lifecycle.get("archiveFolderId"),
+                    "externalTransactionId": lifecycle.get("externalTransactionId"),
+                    "externalSubmission": "unknown",
+                }
             return {
                 "status": "already_archived",
                 "canArchive": False,
+                "evidenceVerified": True,
                 "reasons": [],
                 "archiveFolderId": lifecycle.get("archiveFolderId"),
                 "externalTransactionId": lifecycle.get("externalTransactionId"),
@@ -907,6 +967,7 @@ class DriveWaveDeliveryService:
             self.drive_archiver = DriveArchiveClient(self.config)
         archiver = self.drive_archiver
         move_result = None
+        move_started = False
         try:
             current = archiver.inspect_file(provider_id)
             current_sha256 = archiver.download_sha256(provider_id)
@@ -921,6 +982,7 @@ class DriveWaveDeliveryService:
                 return {"success": False, **final_plan, "externalSubmission": "not_executed"}
             plan = final_plan
             heartbeat.assert_owned()
+            move_started = True
             move_result = archiver.move_file(
                 provider_id,
                 str(plan["sourceFolderId"]),
@@ -940,16 +1002,29 @@ class DriveWaveDeliveryService:
         except Exception as exc:
             reason = _safe_reason(exc)
             rollback = None
-            if move_result is not None and hasattr(archiver, "restore_file"):
-                try:
-                    rollback = archiver.restore_file(
-                        provider_id,
-                        str(plan["sourceFolderId"]),
-                        str(plan["archiveFolderId"]),
-                    )
-                except Exception as rollback_exc:
-                    rollback = {"status": "failed", "reason": _safe_reason(rollback_exc)}
-            self._ensure_review_item(document_id, [reason])
+            if move_started and hasattr(archiver, "restore_file"):
+                rollback = _restore_drive_source_if_owned(
+                    archiver,
+                    provider_id,
+                    str(plan["sourceFolderId"]),
+                    str(plan["archiveFolderId"]),
+                    heartbeat,
+                )
+            rollback_status = (
+                str(rollback.get("status") or "").lower()
+                if isinstance(rollback, dict)
+                else ""
+            )
+            rollback_confirmed = rollback_status in {
+                "restored", "already_restored", "moved", "ok", "success"
+            }
+            external_submission = (
+                "unknown" if move_started and not rollback_confirmed else "not_executed"
+            )
+            reasons = [reason]
+            if move_started and not rollback_confirmed:
+                reasons.append("archive_source_restore_failed")
+            self._ensure_review_item(document_id, reasons)
             audit_event_id = self.ledger.record_audit_event({
                 "action": "drive_wave.archive_failed",
                 "entityType": "bookkeeping_document",
@@ -957,17 +1032,18 @@ class DriveWaveDeliveryService:
                 "details": {
                     "actor": actor,
                     "reason": reason,
-                    "moveStarted": move_result is not None,
+                    "moveStarted": move_started,
                     "rollback": rollback,
-                    "externalSubmission": "not_executed",
+                    "externalSubmission": external_submission,
                 },
             })
             return {
                 "success": False,
                 "status": "blocked",
-                "reasons": [reason],
+                "reasons": reasons,
+                "rollback": rollback,
                 "auditEventId": audit_event_id,
-                "externalSubmission": "not_executed",
+                "externalSubmission": external_submission,
             }
 
         evidence = (
@@ -1014,18 +1090,24 @@ class DriveWaveDeliveryService:
             reason = "archive_ledger_commit_failed"
             rollback = None
             if hasattr(archiver, "restore_file"):
-                try:
-                    rollback = archiver.restore_file(
-                        provider_id,
-                        str(plan["sourceFolderId"]),
-                        str(plan["archiveFolderId"]),
-                    )
-                except Exception as rollback_exc:
-                    rollback = {"status": "failed", "reason": _safe_reason(rollback_exc)}
-            reasons = [reason]
-            if rollback is None or str(rollback.get("status") or "").lower() not in {
+                rollback = _restore_drive_source_if_owned(
+                    archiver,
+                    provider_id,
+                    str(plan["sourceFolderId"]),
+                    str(plan["archiveFolderId"]),
+                    heartbeat,
+                )
+            rollback_status = (
+                str(rollback.get("status") or "").lower()
+                if isinstance(rollback, dict)
+                else ""
+            )
+            rollback_confirmed = rollback_status in {
                 "restored", "already_restored", "moved", "ok", "success"
-            }:
+            }
+            external_submission = "not_executed" if rollback_confirmed else "unknown"
+            reasons = [reason]
+            if not rollback_confirmed:
                 reasons.append("archive_source_restore_failed")
             failure_audit_id = None
             try:
@@ -1040,7 +1122,7 @@ class DriveWaveDeliveryService:
                             "reason": reason,
                             "moveStarted": True,
                             "rollback": rollback,
-                            "externalSubmission": "not_executed",
+                            "externalSubmission": external_submission,
                         },
                     })
             except Exception:
@@ -1052,7 +1134,7 @@ class DriveWaveDeliveryService:
                 "reasons": reasons,
                 "rollback": rollback,
                 "auditEventId": failure_audit_id,
-                "externalSubmission": "not_executed",
+                "externalSubmission": external_submission,
             }
         return {
             "success": True,
@@ -1095,6 +1177,15 @@ class DriveWaveDeliveryService:
                 "externalSubmission": "not_executed",
             }
         results = [self.archive_document(int(item["documentId"]), actor=actor) for item in ready]
+        external_states = {str(item.get("externalSubmission") or "") for item in results}
+        if "unknown" in external_states:
+            external_submission = "unknown"
+        elif "executed" in external_states:
+            external_submission = "executed"
+        elif "already_executed" in external_states:
+            external_submission = "already_executed"
+        else:
+            external_submission = "not_executed"
         return {
             "success": all(item.get("success") for item in results),
             "status": "completed" if all(item.get("success") for item in results) else "completed_with_errors",
@@ -1102,7 +1193,7 @@ class DriveWaveDeliveryService:
             "archived": sum(1 for item in results if item.get("success")),
             "blocked": len(candidates) - len(ready),
             "results": results,
-            "externalSubmission": "executed" if results else "not_executed",
+            "externalSubmission": external_submission,
         }
 
     def _plan_gmail_retention(
@@ -1260,6 +1351,8 @@ class DriveWaveDeliveryService:
         attachment_hash = str(evidence.get("attachmentSha256") or "").lower()
         if evidence.get("attachmentReadbackVerified") is not True:
             reasons.append("wave_attachment_readback_bytes_missing")
+        if evidence.get("readbackOrigin") != "trusted_provider_download":
+            reasons.append("wave_attachment_readback_origin_untrusted")
         if attachment_hash != source_hash:
             reasons.append("wave_attachment_hash_mismatch")
         attachment_size = _optional_int(evidence.get("attachmentSizeBytes"))
@@ -1770,6 +1863,8 @@ def _work_order_stage(
     }:
         return "needs_processing"
     if lifecycle.get("status") == "archived" or plan.get("status") == "already_archived":
+        if plan.get("status") == "archive_verification_required":
+            return "archive_needs_reconciliation"
         return "completed"
     if _source_provider(document) == "gmail" and plan.get("evidenceVerified") is True:
         return "completed"
@@ -1791,8 +1886,9 @@ def _stage_action(stage: str) -> str:
         "needs_processing": "Finish OCR, validation, categorization, and review in FAB.",
         "blocked_by_review": "Resolve the blocking FAB review before downstream execution.",
         "locate_or_create_transaction": "Find an exact Wave transaction or create the approved Wave draft, then upload the source file.",
-        "upload_and_verify_attachment": "Upload the exact source file and read the stored Wave attachment and transaction back.",
-        "refresh_wave_readback": "Repeat Wave transaction and attachment readback and submit fresh complete evidence.",
+        "upload_and_verify_attachment": "The source may be uploaded to Wave, but FAB cannot yet verify stored attachment bytes through a trusted provider path; do not archive the Drive source.",
+        "refresh_wave_readback": "Trusted Wave attachment retrieval is unavailable; keep the source and resolve this integration blocker before archival.",
+        "archive_needs_reconciliation": "This source was archived before trusted attachment provenance was enforced; verify the archived Drive file and Wave attachment together, and retain both until reconciled.",
         "ready_to_archive": "All gates pass; the worker may move the Drive source to the configured archive folder.",
         "completed": "No action required; Wave readback is verified and the source retention policy has been satisfied.",
     }.get(stage, "Inspect the work order before proceeding.")
@@ -1863,8 +1959,10 @@ def _wave_browser_contract(business_id: str, document_id: int) -> Dict[str, Any]
             "attachmentMustBeBoundToTransaction": True,
             "waveObservationMustBeFresh": True,
             "downloadStoredReceipt": True,
-            "submitDownloadedBytesTo": f"/api/drive-wave/documents/{document_id}/attachment-readback",
-            "serverComputedSha256MustMatchSource": True,
+            "submitDownloadedBytesTo": None,
+            "trustedProviderReadbackAvailable": False,
+            "readbackUnavailableReason": "trusted_provider_readback_unavailable",
+            "serverComputedSha256MustMatchSource": False,
             "serverComputedSizeMustMatchSource": True,
             "filenameMustMatchSource": True,
             "submitTransactionPageUrl": True,
@@ -1946,3 +2044,23 @@ def _timestamp_is_fresh(value: Any, max_age_seconds: int) -> bool:
 def _safe_reason(error: Exception) -> str:
     text = re.sub(r"\s+", " ", str(error or type(error).__name__)).strip()
     return text[:300] or type(error).__name__
+
+
+def _restore_drive_source_if_owned(
+    archiver: Any,
+    file_id: str,
+    source_folder_id: str,
+    archive_folder_id: str,
+    heartbeat: _RuntimeLeaseHeartbeat,
+) -> Dict[str, Any]:
+    try:
+        heartbeat.assert_owned()
+    except Exception as exc:
+        return {"status": "skipped", "reason": _safe_reason(exc)}
+    try:
+        result = archiver.restore_file(file_id, source_folder_id, archive_folder_id)
+    except Exception as exc:
+        return {"status": "failed", "reason": _safe_reason(exc)}
+    if isinstance(result, dict):
+        return result
+    return {"status": "failed", "reason": "invalid_restore_result"}

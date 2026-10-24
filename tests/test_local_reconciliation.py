@@ -94,7 +94,13 @@ class TestLocalReconciliationService(unittest.TestCase):
             }])
             match_id = summary["results"][0]["reconciliationMatchId"]
 
-            result = service.resolve_match(match_id, "approved", "Confirmed bank match.")
+            result = service.resolve_match(
+                match_id,
+                "approved",
+                "Confirmed bank match.",
+                actor="test_operator",
+                request_id="reconcile-test-001",
+            )
             document = ledger.get_document(document_id)
 
             self.assertTrue(result["success"])
@@ -103,6 +109,12 @@ class TestLocalReconciliationService(unittest.TestCase):
             self.assertEqual(document["reconciliation_status"], "reconciled")
             self.assertEqual(document["bookkeeping_record"]["reconciliation_status"], "reconciled")
             self.assertEqual(ledger.list_review_items()[0]["status"], "resolved")
+            audit = next(
+                event for event in ledger.list_audit_events(limit=20)
+                if event["action"] == "local_reconciliation.match.resolve"
+            )
+            self.assertEqual(audit["details"]["actor"], "test_operator")
+            self.assertEqual(audit["details"]["requestId"], "reconcile-test-001")
 
     def test_persisted_bank_transaction_status_tracks_reconciliation(self):
         with tempfile.TemporaryDirectory() as temp_dir:

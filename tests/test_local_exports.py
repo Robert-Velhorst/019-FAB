@@ -58,6 +58,7 @@ class TestLocalExportAttemptService(unittest.TestCase):
                 "message": "Check Wave before taking further action.",
                 "review_reason": "wave_api_outcome_unknown",
                 "requires_manual_review": True,
+                "provider_external_id": "fab:wave:unknown-outcome",
             })
             service = LocalExportAttemptService(
                 ledger,
@@ -73,6 +74,10 @@ class TestLocalExportAttemptService(unittest.TestCase):
             self.assertEqual(result["status"], "failed")
             attempt = ledger.get_export_attempt(attempt_id)
             self.assertEqual(attempt["external_submission"], "unknown")
+            self.assertEqual(
+                attempt["metadata"]["lastExecution"]["providerExternalId"],
+                "fab:wave:unknown-outcome",
+            )
             self.assertEqual(ledger.dashboard_metrics()["attention_export_attempts"], 1)
             review = ledger.list_review_items(
                 status=("pending", "in_review"),

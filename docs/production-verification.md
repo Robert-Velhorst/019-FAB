@@ -2297,3 +2297,431 @@ formatting and whitespace checks passed. No local MySQL listener was
 available, so these changes have not yet been exercised against a real MySQL
 server; the first hosted CI run remains the acceptance gate. No live or user
 database was used.
+
+## 2026-10-17 - Full Backend and Runtime Revalidation
+
+- The full Windows Python suite passed **1,999 tests, 8 skipped, and 222
+  subtests** in 943.15 seconds. Skips are environment-dependent; this is local
+  regression evidence, not hosted CI or provider acceptance.
+- The current web worktree passed **480 Vitest tests with 6 skipped**, the
+  TypeScript check, and the production build including asset budgets and both
+  server bundles. The database integration tests are opt-in and were skipped in
+  this web-suite run; a separate disposable MySQL 8.4 run had previously applied
+  the tracked migrations and passed all six database integration tests.
+- `scripts/run_stack_rehearsal.py` passed all **71 synthetic checks** on Windows.
+  It used loopback listeners, a synthetic ledger, and a simulated trusted proxy;
+  it performed no provider writes and did not open an ngrok tunnel.
+- The built standalone dashboard returned HTTP 200 for `/admin/operations` on
+  isolated loopback port 49137 and shut down with status 0. `DATABASE_URL` was
+  deliberately empty, so this smoke test did not exercise closing a live MySQL
+  pool or prove a fresh Windows installation.
+- Read-only inspection of GitHub code scanning found 100 open alerts in the
+  first results page on `main` at `6445f876bc2cece049628b1b5e9efcb43706eb3f`
+  (36 high, 64 medium). The current local branch contains changes relevant to
+  several of those findings, including hardened CAMT/XML parsing and an
+  enforcing content security policy. No alert was dismissed, and no claim is
+  made that the remote default branch has been rescanned or cleared.
+
+These checks do not establish public ngrok routing, external HAI-peer
+acceptance, live provider correctness, installed Windows 11 acceptance, a
+production deployment, or disaster-recovery acceptance.
+
+## 2026-10-17 - Current Dirty Working-Copy Repeat
+
+The checks below ran in the local `codex/fab-followup-20261015` working tree
+based on `dbe3a8a`; that tree had staged, unstaged, and untracked changes. They
+are local evidence for that exact dirty snapshot, not a commit or PR result.
+
+- Full Windows Python suite: **1,999 passed, 8 skipped, 222 subtests passed**
+  in 837.23 seconds. Python lock inputs and generated locks also passed
+  `scripts/compile_python_locks.py --verify`.
+- Web TypeScript check passed; Vitest passed **480 tests, 6 skipped**. The
+  production Vite build, asset budgets, standard server bundle, and standalone
+  server bundle passed. These direct checks used Node.js 25.2.1. The repository
+  pins pnpm 11.20.0; pnpm's dependency-status/install wrapper hit Windows
+  `EPERM` writing `web/node_modules/.package-map.json`, so direct local
+  executables were used after dependency links completed. `uvx pip-audit` over
+  all four current Python lockfiles exited successfully with **No known
+  vulnerabilities found**; pip-audit printed repeated cache-entry
+  deserialization warnings during the run.
+- The Windows stack rehearsal passed its **71 synthetic checks**, including
+  frontend-to-API-to-SQLite flows and HAI authorization. A warm control-center
+  benchmark with 500 additional synthetic ledger documents (505 total) and 30
+  requests at concurrency 6 measured 61.24 ms median, 74.07 ms p95, 76.81 ms
+  maximum, and 66,626 median response bytes. Peak sampled combined working set
+  was 186,138,624 bytes. Seven 50 ms samples are a short, warm-cache smoke
+  measurement, not a sustained capacity or SLA benchmark. The run was
+  synthetic-only, loopback-only, made no provider writes, and stopped all
+  owned children.
+- PR #125 remains open at head `a3d1a36f9b12d7cc071781400ee96ed5cb5c61c7`.
+  After adding the exact Docker action SHAs already pinned by its workflows to
+  the repository's selected-actions allowlist, workflow-dispatch run
+  [39012513626](https://github.com/Robert-Velhorst/019-FAB/actions/runs/39012513626)
+  passed all 9 jobs on that exact commit. The selected-only policy remains in
+  place. Both private GHCR packages already gave `019-FAB` Actions Write
+  access; no package permission change was needed.
+
+These results do not establish live ngrok routing, external HAI-peer
+acceptance, provider correctness, fresh Windows 11 installation, public-cloud
+deployment, or restore acceptance. No code was committed or pushed from the
+dirty working copy during this verification.
+
+## 2026-10-17 - Cloud Status Guard And Rehearsal Refresh
+
+- Cloud access now fails closed when an unauthenticated request to the managed
+  public API does not receive HTTP 401. Maintenance mode now returns its
+  disabled status without querying ngrok or probing a public endpoint. The
+  focused cloud/API suite passed **140 tests, 1 skipped, and 2 subtests**; the
+  gateway route-contract suite passed **3 tests**.
+- A fresh Windows rehearsal on this dirty working copy passed all **71
+  synthetic checks** with **505** synthetic ledger documents. The warm
+  authenticated control-center benchmark (30 requests, concurrency 6) measured
+  **57.98 ms median, 82.10 ms p95, and 85.37 ms maximum**, with a stable 66,626
+  byte response. Seven 50 ms samples measured a peak combined working set of
+  187,383,808 bytes and 0.40625 seconds dashboard CPU. This is a short warm
+  synthetic run, not a sustained load or whole-machine resource claim. The run
+  used loopback only, made no provider writes, and stopped all owned children.
+- The local MySQL integration file was not run against a database because
+  `FAB_MYSQL_INTEGRATION_URL` is not configured in this environment. PR #125's
+  separate hosted MySQL job passed on commit `a3d1a36f9b12d7cc071781400ee96ed5cb5c61c7`;
+  that result does not cover this dirty working copy.
+- PR #125 is open at that same head. Workflow-dispatch run `39012513626` passed
+  all nine jobs and CodeQL run `39012198239` passed. The local branch remains 45
+  commits behind the PR head; hosted checks do not validate its uncommitted
+  changes.
+- Two additional warm load points used the same 505-document fixture and 30
+  refreshes at concurrency 16. They measured 187.01 ms median / 224.39 ms p95
+  and 151.16 ms median / 178.30 ms p95, with 66,626-byte responses. Peak
+  sampled combined working set was 189,300,736 and 184,221,696 bytes; dashboard
+  CPU was 0.50 and 0.3125 seconds. Compared with the single concurrency-6 run
+  above (57.98 ms median / 82.10 ms p95), burst latency is higher while sampled
+  memory remains similar. These short warm runs do not isolate the cause or
+  establish sustained capacity; profiling and repeated sustained tests remain.
+
+The public tunnel, real OAuth/provider operations, external HAI peer, installed
+Windows acceptance, and production deployment remain unverified.
+
+## 2026-10-17 - Security Header And Workflow Recheck
+
+- The shared web security middleware now merges FAB's restrictive CSP with
+  Helmet's defaults while explicitly suppressing `upgrade-insecure-requests`
+  for local HTTP operation. Response-level tests passed in development and
+  production modes. TypeScript checking passed; the full web suite passed
+  **482 tests, 6 skipped**, and the client, standard server, and standalone
+  production build completed with asset budgets passing.
+- The security-header regression file passed all **5 tests**, preserving the
+  existing HSTS-through-trusted-proxy and development-HMR checks while adding
+  default-CSP coverage. A fresh complete web run after restoring those tests
+  passed **482 tests, 6 skipped**; TypeScript checking passed again.
+- Focused Python regressions for bank import, operations API, and ledger passed
+  **177 tests, 1 skipped, and 5 subtests**. Pytest reported a cache-write
+  permission warning after the suite; test execution itself succeeded.
+- Additional intake, backup, close-pack, and component tests passed **63 tests,
+  7 skipped, and 3 subtests**, including traversal, symlink, restore-root, and
+  backup-boundary cases. This group disabled pytest's cache provider and had no
+  cache-write warning.
+- The mocked ngrok PowerShell scripts, Windows launcher, and HAI connector
+  suites passed **55 tests and 8 subtests**. These tests do not open a public
+  tunnel or establish external HAI-peer acceptance.
+- The Windows stack rehearsal passed all **71 synthetic checks** using 505
+  synthetic documents. Thirty warm control-center refreshes at concurrency 6
+  measured **51.17 ms median, 89.68 ms p95, and 90.18 ms maximum** with a
+  stable 66,626-byte response. Seven 50 ms samples measured 181,694,464 bytes
+  peak combined working set and 0.40625 seconds dashboard CPU. The run was
+  loopback-only, made no provider writes, and stopped its owned child processes;
+  this is not a sustained capacity or SLA result.
+- The Codex Security Deep Scan did not start because its coordinator requires a
+  managed filesystem permission profile. No scan report or no-findings result
+  exists. GitHub's default-branch CodeQL alerts are not cleared by these local
+  tests or changes.
+
+The live ngrok route, provider operations, external HAI peer, installed
+Windows acceptance, and production deployment remain unverified.
+
+## 2026-10-17 - Complete Python Suite Rerun
+
+- After the isolated PowerShell regression passed on both shells, reran the
+  complete cache-free Python suite from the repository `.venv`.
+- Result: **2,006 passed, 8 skipped, and 222 subtests passed** in 1,220.62
+  seconds (exit 0). The earlier single PowerShell timeout did not recur.
+- This is current local test evidence only. It does not establish live provider,
+  public ngrok, external HAI-peer, installed-user acceptance, or deployment.
+
+## 2026-10-17 - Current Frontend, Security, and Scaled Synthetic Recheck
+
+- TypeScript checking passed. The complete Vitest suite passed **486 tests**
+  with **6 skipped**; the production Vite build, asset-budget verifier, general
+  server bundle, and standalone server bundle all passed. Largest generated
+  JavaScript asset was 475,938 bytes.
+- `pnpm audit --prod --audit-level high` reported no known vulnerabilities in
+  production web dependencies. An `npm audit` attempt was not applicable because
+  this pnpm project has no npm lockfile; the pnpm-native audit was used instead.
+- A fresh synthetic Windows stack rehearsal passed all **71 checks** with a
+  disposable 505-document SQLite ledger. Thirty warm authenticated control-
+  center refreshes at concurrency 6 measured **67.07 ms median, 84.11 ms p95,
+  and 88.70 ms maximum**, with a 66,626-byte response. Eight 50 ms resource
+  samples observed 180,858,880 bytes peak combined working set; dashboard CPU
+  was 0.390625 seconds and API CPU was 0.0 seconds at reported precision.
+  `syntheticOnly`, `loopbackOnly`, and `providerWrites: false` were verified;
+  owned child processes stopped. This warm synthetic run is not a sustained
+  capacity or production SLA result.
+- The full Python suite reported **2,003 passed, 10 skipped, and 222
+  subtests**, with one 50-second timeout in
+  `test_failed_native_creation_releases_log_handles` under PowerShell 7.
+  Rerunning that exact test against both PowerShell executables passed **2/2**
+  in 5.12 seconds. The full suite has not been rerun after this isolated pass.
+- Codex Security Deep Scan did not start: its coordinator requires a managed
+  filesystem permission profile. No repository-wide scan report or no-findings
+  result exists. Existing CodeQL results and local tests are not substitutes.
+
+The live ngrok route, provider operations, external HAI peer, installed
+Windows acceptance, and production deployment remain unverified.
+
+## 2026-10-17 - Full Dirty-Tree Regression And CI Policy Diagnosis
+
+- The complete Python suite on the current dirty working tree passed **2,001
+  tests, 8 skipped, and 222 subtests** in 897.45 seconds.
+- The full web suite passed **482 tests, 6 skipped**. TypeScript checking passed
+  using the already-linked local compiler. The Vite production build and asset
+  budget check passed (largest JavaScript asset 475,938 bytes); standard and
+  standalone server bundles also built successfully.
+- A dedicated temporary MySQL 8.4 container applied the tracked Drizzle
+  migrations successfully, then the dirty-tree MySQL integration file passed
+  **6/6 tests**. The container was stopped and removed after the run; no other
+  project containers or databases were changed.
+- The VM production Compose file passed `docker compose config --quiet` with
+  synthetic required origins, trusted-proxy, intake, API-token, session-secret,
+  and operator-token configuration.
+- `pnpm.cmd check` could not complete because pnpm hit Windows `EPERM` writing
+  the generated `web/node_modules/.package-map.json` after dependency linking.
+  Running the local TypeScript compiler and Vitest directly succeeded. No
+  tracked dependency lockfile was changed by this verification.
+- GitHub's annotations for PR-triggered run `39012200783` identify the startup
+  cause: two pinned Docker action SHAs were not yet in the selected-actions
+  allowlist. The current allowlist now contains both exact SHAs. The manual
+  workflow-dispatch run `39012513626` passed all nine jobs on the same PR head,
+  and the CodeQL run passed. GitHub refuses to retry the old startup-failure
+  run, so a new PR synchronize event is still required to produce fresh
+  required-check contexts; those contexts have not yet been verified green.
+- Both private GHCR packages, `019-fab-api` and `019-fab-dashboard`, show
+  `019-FAB` with Actions **Write** access.
+- These local results validate the dirty checkout, not the uncommitted state on
+  GitHub. No commit or push was made. Provider writes, live ngrok routing,
+  external HAI-peer acceptance, installed Windows 11 acceptance, and production
+  deployment remain unverified.
+
+### 2026-10-17 - Intake reservation and current-stack web recheck
+
+- The intake drawer now reserves its upload batch synchronously in a ref before
+  React state updates. Its focused Vitest regression suite passed all 12 tests;
+  the full web suite passed 491 tests with 6 skipped. TypeScript `--noEmit`,
+  the Vite production build, production asset budgets, and general and standalone
+  server bundles all passed. The emitted shell was 2,031 bytes and the largest
+  JavaScript asset was 475,938 bytes.
+- A fresh isolated production-stack rehearsal passed all 71 checks using only
+  synthetic data and loopback services. It seeded 500 synthetic documents in
+  addition to the 5 workflow fixtures (505 total), verified dashboard upload,
+  original source bytes, idempotent replay, one-row SQLite persistence, HAI and
+  reconciliation safeguards, and stopped all owned child processes. Provider
+  writes were disabled.
+- Thirty warm authenticated control-center requests at concurrency six measured
+  55.18 ms median, 75.73 ms p95, and 75.80 ms maximum, with a 66,626-byte
+  response. Six 50 ms resource samples reported a combined peak working set of
+  171,757,568 bytes; API CPU rounded to 0.0 seconds and dashboard CPU to
+  0.328125 seconds. This brief warm-cache synthetic run is not a scaled,
+  sustained, cold-start, or production workload baseline.
+- The local worktree remains broadly staged/dirty and 45 commits behind its
+  upstream branch. This verification does not update GitHub. Live Windows 11
+  user acceptance, ngrok exposure, provider writes, cloud deployment, and
+  external HAI acceptance remain unverified.
+
+### 2026-10-17 - Release completed intake file references
+
+- Completed intake rows retain only the filename, byte size, and safe
+  registration result; their browser `File` reference is released. The upload
+  mutation resets in `finally` and is configured with zero inactive retention,
+  reducing avoidable retention of the base64 financial document payload.
+- Focused intake queue tests passed **13/13**. The full web suite passed
+  **492 tests, 6 skipped**. TypeScript, production build and asset budgets, and
+  general and standalone server bundles passed; largest JavaScript asset was
+  475,938 bytes.
+- A fresh synthetic Windows production-stack run passed all **71 checks** and
+  stopped all owned processes. It used 505 documents and made no provider
+  writes. Thirty warm authenticated control-center reads at concurrency six
+  measured 52.31 ms median / 70.27 ms p95 / 70.29 ms max; six 50 ms resource
+  samples reported 177,451,008 bytes peak sampled combined working set. This
+  short synthetic sample is not a cold, scaled, sustained, or live baseline.
+- Codex Security Deep Scan could not start: the parent did not provide a managed
+  filesystem permission profile. No clean Deep Scan result is available.
+- No commit, push, live ngrok exposure, cloud deployment, or provider mutation
+  occurred. The worktree is still broadly dirty and upstream state is unchanged.
+
+### 2026-10-17 - Drive archive lease rollback audit
+
+- Before the code change, the full Python suite on the current dirty checkout
+  passed **2,007 tests, 8 skipped, and 224 subtests** in 2,175.58 seconds.
+- The Drive archive adapter previously attempted compensation internally when
+  its post-move parent check failed. That could bypass the higher-level lease
+  ownership check if another worker acquired the expired lease while the
+  provider request was in flight. The adapter now raises a reconciliation
+  error without moving the file back; the lease-owning service performs a
+  guarded restore when ownership is still valid and otherwise records the
+  result as unknown for operator review.
+- After this patch, `tests/test_drive_archiver.py` and
+  `tests/test_drive_wave_delivery.py` passed **62 tests and 35 subtests**.
+  The full Python suite was not rerun after the patch. Live Google Drive
+  behavior, lease loss during a real provider request, Wave writes, ngrok,
+  cloud deployment, and external HAI acceptance remain unverified.
+
+### 2026-10-17 - Cookie mutation origin guard and corrected scale rehearsal
+
+- Added a same-origin and Fetch Metadata check for cookie-backed tRPC mutations
+  before request-body parsing in both the full web server and FAB standalone
+  entrypoint. Requests without the legacy application session cookie retain
+  token/service-client behavior; managed operator requests keep their existing
+  stricter origin and HTTPS checks.
+- The web security suite passed **495 tests, 6 skipped**; the focused
+  security/OAuth/logout set passed **31 tests**. TypeScript checking and the
+  production dashboard build, asset budgets, general server bundle, and
+  standalone server bundle passed.
+- The full Python API/Gmail/Drive-to-Wave set passed **178 tests, 1 skipped,
+  and 37 subtests**. The three Gmail resource-limit tests passed after the
+  final diagnostic counters were added; stack-rehearsal resource tests passed
+  **6/6**.
+- Fixed a scale-rehearsal validity bug: synthetic rows were inserted after a
+  cached control-center snapshot was created. The harness now explicitly
+  refreshes and asserts that the dashboard document count matches SQLite before
+  timing. A fresh Windows run passed its synthetic checks and stopped all
+  owned child processes. At 505 synthetic documents, 30 warm authenticated
+  reads at concurrency six measured **42.03 ms median, 74.22 ms p95, and
+  77.89 ms max**, with a 70,437-byte response. Six 50 ms samples observed
+  **114,741,248 bytes** combined peak working set; dashboard CPU was 0.390625
+  seconds and API CPU rounded to 0.0 seconds. This is a brief synthetic warm
+  run, not a cold, sustained, scaled, ngrok, or production baseline.
+- No provider writes, public tunnel, deployment, commit, or push occurred.
+  Provider acceptance, external HAI acceptance, clean Windows 11 installation,
+  and independent penetration testing remain unverified.
+
+### 2026-10-17 - Durable OAuth session revocation
+
+- Legacy OAuth sessions now receive a random JWT identifier; only its SHA-256
+  hash is persisted. Authentication checks the database record and expiry, and
+  logout records revocation before clearing the cookie. Invalid or pre-change
+  tokens without a registered identifier fail closed. Session creation also
+  fails closed if durable registration is unavailable.
+- Added migration `0009_revocable_oauth_sessions`. Drizzle migration-journal
+  validation passed, but this local checkout did not apply the migration to a
+  live or disposable MySQL database. Apply migrations before deploying the new
+  OAuth flow; existing legacy sessions will need to sign in again.
+- Full web suite passed **501 tests, 7 skipped**; TypeScript check, focused
+  OAuth/logout tests, production client and both server bundles passed. The
+  MySQL integration test for durable revocation is wired into the suite and CI
+  migration job, but was skipped locally because no disposable MySQL URL was
+  configured.
+- Vitest's default worker cap was reduced from four to two after the Windows
+  full-suite run starved child-process startup tests; all startup tests passed
+  serially and the full suite then passed with the two-worker cap.
+- No live database migration, OAuth provider exchange, deployment, or provider
+  write was performed.
+- The full Windows Python suite completed with **2,013 passed, 10 skipped, and
+  224 subtests passed**, plus one process-fixture timeout. The timeout was in
+  the Windows PowerShell 5.1 rollback case. That case later timed out once at
+  75 seconds with no output, then passed on an isolated rerun in 40.28 seconds;
+  the PowerShell 7 case also passed individually. The harness now allows 75
+  seconds and reports progress breadcrumbs on timeout, but the intermittent
+  stall's root cause is unresolved. The full suite was not rerun with the
+  harness adjustment.
+
+### 2026-10-17 - Current full regression and scaled Windows rehearsal
+
+- A subsequent fail-fast run of the current full Windows Python suite completed
+  with **2,014 passed, 10 skipped, and 224 subtests passed** in 1,397.79
+  seconds. The prior process-fixture timeout did not reproduce. Pytest emitted
+  one cache warning because Windows denied writes under `.pytest_cache`; test
+  execution completed with exit code 0.
+- The current web suite passed **501 tests, 7 skipped** across 44 files.
+  TypeScript checking, the production client build, the bundle-budget verifier,
+  and general and standalone server bundles passed. Largest JavaScript asset:
+  475,938 bytes.
+- The loopback-only production-stack rehearsal passed all of its defined checks
+  with synthetic data, no provider writes, and confirmed shutdown of both owned
+  child processes. It exercised the built standalone app, authenticated API,
+  HAI command authorization, ledger/SQLite writes, reconciliation and review
+  gates, idempotent document upload, signed handoff, and logout revocation.
+- A 30-request, 8-client warm-cache dashboard benchmark over **2,005 synthetic
+  ledger documents** measured **68.60 ms median, 84.19 ms p95, and 87.55 ms
+  max**. The response remained 70,446 bytes. Six 50 ms samples observed
+  **181,149,696 bytes** peak combined working set; dashboard CPU was 0.390625
+  seconds and API CPU rounded to 0.0 seconds at the reported precision. This is
+  a short local synthetic run, not a cold, sustained, production-scale, ngrok,
+  or live-provider baseline.
+- No MySQL integration ran in this checkout: Docker was stopped and no MySQL
+  integration URL was configured. No live OAuth/provider call, public tunnel,
+  cloud deployment, migration, commit, or push was performed. External HAI
+  acceptance remains unverified.
+
+### 2026-10-18 - Backup integrity regression and current stack rehearsal
+
+- The full Windows Python suite passed **2,014 tests, 12 skipped, and 224
+  subtests** in 1,577.88 seconds. The rerun includes the backup-integrity
+  regression fix: deep backup inspection now verifies archived source-evidence
+  bytes and SQLite integrity before reusing a cached success. Its focused module
+  passed 22 tests with 3 skipped.
+- The previously recorded web checks remain **501 passed, 7 skipped**, with
+  TypeScript, production build, bundle budgets, server bundles, and production
+  dependency audit passing. No web source changed during this follow-up.
+- The built Windows dashboard/API/SQLite rehearsal passed all defined checks
+  using synthetic data only, loopback listeners, no provider writes, and
+  confirmed shutdown of its owned child processes. It exercised the HAI
+  authorization boundary, source tamper rejection, SQLite persistence,
+  reconciliation and review gates, signed handoff, and logout revocation.
+- With 2,005 synthetic ledger documents, 30 warm authenticated dashboard reads
+  at concurrency eight measured **75.65 ms median, 99.82 ms p95, and 100.23 ms
+  max**, with a 70,571-byte response. Six 50 ms samples observed
+  **202,997,760 bytes** peak combined working set; dashboard CPU was 0.53125
+  seconds and API CPU rounded to 0.0 seconds. This is a short synthetic warm
+  measurement, not a cold, sustained, production-scale, or whole-app resource
+  guarantee.
+- The standard Compose OAuth-token persistence gap remains unresolved. Docker
+  Desktop did not answer the read-only container/volume inventory, so no volume
+  mount change was made that could hide tokens in an existing container.
+  Codex Security coverage also remains partial; the full repository-wide source
+  audit and immutable-snapshot comparison are not complete.
+- No live provider call, public ngrok tunnel, cloud deployment, database
+  migration, commit, or push occurred. Clean-install Windows 11, live OAuth,
+  external HAI-peer, and provider acceptance remain unverified.
+
+### 2026-10-18 - Standard Compose OAuth-token durability
+
+- Added the `fab-tokens` named volume to the standard Compose API/worker profile
+  so Google OAuth tokens survive container recreation.
+- Added a Windows pre-up migration script for existing Compose installs. It
+  stops the API and worker before copying, restricts the staging ACL to the
+  current user and SYSTEM, rejects reparse points, then imports into the new
+  volume with bounded, checksum-verified, no-overwrite semantics. The script
+  leaves services stopped and keeps staging when verification fails.
+- The migration helper is packaged with the Compose source bundle. Focused
+  Python/package tests passed **19**, with **1 Docker-engine test skipped** and
+  **2 Docker-specific cases deselected**; PowerShell parser validation passed.
+- Docker Desktop did not answer, so the actual Compose migration/restart was
+  not exercised. OAuth token files in `fab-tokens` are plaintext; host storage
+  encryption and restricted administrator access remain operator requirements.
+- After C: recovered to 20.3 GB free, a renewed read-only Docker check still
+  timed out after 15 seconds on context `desktop-linux`; no container listing,
+  stop, migration, or restart completed. Migration staging in `%LOCALAPPDATA%`
+  is ACL-restricted but not application-encrypted, and successful file removal
+  is not a secure erase. Encrypt the Windows volume containing both that
+  staging path and Docker Desktop data before migrating real OAuth tokens.
+- The first complete run with pytest/subprocess temp files on D: reported
+  **2,017 passed, 13 skipped, and 224 subtests**, with one failure in the new
+  migration test because this Windows filesystem does not support hard links.
+  The importer now uses Windows' no-overwrite rename and retains hard-link
+  publication in Linux containers. Focused/package tests passed **19** (1
+  symlink-permission skip and 2 Docker-engine cases deselected). The final full
+  post-fix Python run passed **2,018 tests, 13 skipped, and 224 subtests** in
+  1,306.66 seconds with all pytest/subprocess temp files on D:.
+- Earlier runs exhausted C: and caused SQLite `database or disk is full` plus
+  cascading temporary-file errors. The three affected pytest directories are
+  now absent from `pytest-of-NO`; no manual deletion was performed. At final
+  inventory C: reports about **20.3 GB free**. The cause of the additional
+  free-space recovery is not attributed to FAB or this test run.

@@ -2,25 +2,31 @@
 
 import argparse
 import base64
+import ctypes
 import faulthandler
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import secrets
 import shutil
 import site
 import socket
+import statistics
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlsplit
 
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 SOURCE = b"Synthetic FAB receipt\nVendor: Rehearsal Shop\nDate: 2026-09-30\nTotal: EUR 4.28\n"
+MAX_SYNTHETIC_LEDGER_DOCUMENTS = 2_000
 
 
 def require(condition, label):
@@ -36,6 +42,8 @@ def fixture_api(directory, web_port):
 
     root = Path(directory).resolve()
     source = root / "synthetic-receipt.txt"
+    intake_root = root / "intake"
+    intake_root.mkdir()
     ledger_path = root / "ledger.sqlite3"
     require(root.name.startswith("fab-stack-rehearsal-")
             and (root / ".rehearsal").read_text() == "synthetic-only-v1"
@@ -45,10 +53,17 @@ def fixture_api(directory, web_port):
     source.write_bytes(SOURCE)
     ledger = LocalOperationsLedger(str(ledger_path))
     document_id = ledger.register_document({
-        "source": "manual", "sourceDocumentId": "synthetic-stack-rehearsal",
+        "source": "google_drive", "sourceDocumentId": "synthetic-stack-rehearsal",
         "originalFilename": source.name, "mimeType": "text/plain", "storagePath": str(source),
         "contentSha256": hashlib.sha256(SOURCE).hexdigest(), "processingStatus": "needs_review",
         "vendorName": "Uncorrected synthetic vendor", "category": "Manual Review",
+        "metadata": {
+            "sourceIdentifier": "synthetic-google-drive-folder",
+            "providerMetadata": {
+                "folder_id": "synthetic-google-drive-folder",
+                "size": len(SOURCE),
+            },
+        },
     })
     review_id = ledger.create_review_item({
         "documentId": document_id, "reason": "validation_failed", "details": "Synthetic correction check",
@@ -58,10 +73,11 @@ def fixture_api(directory, web_port):
         "fab_local_api_token": (root / "api-token").read_text(),
         "fab_hai_api_token": (root / "hai-token").read_text(),
         "fab_hai_connector_enabled": True,
-        "fab_hai_allowed_commands": "refresh_notifications",
+        "fab_hai_allowed_commands": "refresh_notifications,record_wave_attachment_verification",
+        "google_drive_wave_source_folder_id": "synthetic-google-drive-folder",
         "fab_operator_session_validation_url": f"http://127.0.0.1:{web_port}/api/fab/operator-session/status",
         "gmail_enabled": False, "google_drive_enabled": False, "freshdesk_enabled": False,
-        "google_photos_enabled": False, "fab_local_intake_paths": [],
+        "google_photos_enabled": False, "fab_local_intake_paths": [str(intake_root)],
     })
 
     @app.before_request
@@ -76,7 +92,9 @@ def fixture_api(directory, web_port):
 
     server = create_server(app, host="127.0.0.1", port=0, threads=4)
     (root / "ready.json").write_text(json.dumps({
-        "port": server.effective_port, "documentId": document_id, "reviewId": review_id,
+        "port": server.effective_port,
+        "documentId": document_id,
+        "reviewId": review_id,
     }))
     try:
         server.run()
@@ -102,6 +120,152 @@ def stop_owned_child(child):
     require(child.poll() is not None, "Rehearsal child did not stop")
 
 
+def _read_process_resources(pid):
+    """Return cumulative CPU seconds and current working-set bytes for one child."""
+    if os.name == "nt":
+        from ctypes import wintypes
+
+        class _FileTime(ctypes.Structure):
+            _fields_ = [("low", wintypes.DWORD), ("high", wintypes.DWORD)]
+
+        class _ProcessMemoryCounters(ctypes.Structure):
+            _fields_ = [
+                ("cb", wintypes.DWORD), ("page_fault_count", wintypes.DWORD),
+                ("peak_working_set_size", ctypes.c_size_t),
+                ("working_set_size", ctypes.c_size_t),
+                ("quota_peak_paged_pool_usage", ctypes.c_size_t),
+                ("quota_paged_pool_usage", ctypes.c_size_t),
+                ("quota_peak_nonpaged_pool_usage", ctypes.c_size_t),
+                ("quota_nonpaged_pool_usage", ctypes.c_size_t),
+                ("pagefile_usage", ctypes.c_size_t),
+                ("peak_pagefile_usage", ctypes.c_size_t),
+            ]
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        psapi = ctypes.WinDLL("psapi", use_last_error=True)
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.GetProcessTimes.argtypes = [
+            wintypes.HANDLE, ctypes.POINTER(_FileTime), ctypes.POINTER(_FileTime),
+            ctypes.POINTER(_FileTime), ctypes.POINTER(_FileTime),
+        ]
+        kernel32.GetProcessTimes.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        psapi.GetProcessMemoryInfo.argtypes = [
+            wintypes.HANDLE, ctypes.POINTER(_ProcessMemoryCounters), wintypes.DWORD,
+        ]
+        psapi.GetProcessMemoryInfo.restype = wintypes.BOOL
+        handle = kernel32.OpenProcess(0x0410, False, int(pid))
+        if not handle:
+            raise OSError(ctypes.get_last_error(), "OpenProcess failed")
+        try:
+            creation, exit_time, kernel, user = (_FileTime() for _ in range(4))
+            if not kernel32.GetProcessTimes(
+                handle, ctypes.byref(creation), ctypes.byref(exit_time),
+                ctypes.byref(kernel), ctypes.byref(user),
+            ):
+                raise OSError(ctypes.get_last_error(), "GetProcessTimes failed")
+            counters = _ProcessMemoryCounters()
+            counters.cb = ctypes.sizeof(counters)
+            if not psapi.GetProcessMemoryInfo(handle, ctypes.byref(counters), counters.cb):
+                raise OSError(ctypes.get_last_error(), "GetProcessMemoryInfo failed")
+            cpu_ticks = (kernel.high << 32) + kernel.low + (user.high << 32) + user.low
+            return {"cpuSeconds": cpu_ticks / 10_000_000, "workingSetBytes": counters.working_set_size}
+        finally:
+            kernel32.CloseHandle(handle)
+
+    if os.path.isfile(f"/proc/{int(pid)}/stat"):
+        with open(f"/proc/{int(pid)}/stat", encoding="ascii") as stat_file:
+            stat = stat_file.read()
+        fields = stat[stat.rfind(")") + 2:].split()
+        ticks_per_second = os.sysconf("SC_CLK_TCK")
+        page_size = os.sysconf("SC_PAGE_SIZE")
+        return {
+            "cpuSeconds": (int(fields[11]) + int(fields[12])) / ticks_per_second,
+            "workingSetBytes": int(fields[21]) * page_size,
+        }
+    raise OSError("Process resource sampling is unsupported on this platform")
+
+
+class _ProcessResourceSampler:
+    def __init__(self, processes, interval_seconds=0.05, reader=None):
+        self.processes = dict(processes)
+        self.interval_seconds = max(0.01, float(interval_seconds))
+        self.reader = reader or _read_process_resources
+        self.started = {}
+        self.peak_working_set = {name: 0 for name in self.processes}
+        self.peak_total_working_set = 0
+        self.sample_count = 0
+        self.unavailable = set()
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, name="fab-stack-resource-sampler", daemon=True)
+
+    def __enter__(self):
+        self._sample()
+        self._thread.start()
+        return self
+
+    def __exit__(self, *_exc_info):
+        self._stop.set()
+        self._thread.join(timeout=max(1.0, self.interval_seconds * 4))
+        self._sample()
+
+    def _run(self):
+        while not self._stop.wait(self.interval_seconds):
+            self._sample()
+
+    def _sample(self):
+        values = {}
+        for name, pid in self.processes.items():
+            try:
+                values[name] = self.reader(pid)
+            except (OSError, ValueError, IndexError):
+                self.unavailable.add(name)
+        with self._lock:
+            for name, metrics in values.items():
+                self.started.setdefault(name, metrics)
+                self.peak_working_set[name] = max(
+                    self.peak_working_set[name], int(metrics["workingSetBytes"]),
+                )
+            if len(values) == len(self.processes):
+                self.peak_total_working_set = max(
+                    self.peak_total_working_set,
+                    sum(int(metrics["workingSetBytes"]) for metrics in values.values()),
+                )
+            self.sample_count += 1
+
+    def result(self):
+        latest = {}
+        for name, pid in self.processes.items():
+            try:
+                latest[name] = self.reader(pid)
+            except (OSError, ValueError, IndexError):
+                self.unavailable.add(name)
+        with self._lock:
+            details = {}
+            for name in self.processes:
+                initial = self.started.get(name)
+                final = latest.get(name)
+                details[name] = {
+                    "measured": initial is not None and final is not None,
+                    "cpuSeconds": round(max(0.0, final["cpuSeconds"] - initial["cpuSeconds"]), 6)
+                    if initial is not None and final is not None else None,
+                    "baselineWorkingSetBytes": int(initial["workingSetBytes"])
+                    if initial is not None else None,
+                    "peakSampledWorkingSetBytes": self.peak_working_set[name] or None,
+                    "finalWorkingSetBytes": int(final["workingSetBytes"])
+                    if final is not None else None,
+                }
+            return {
+                "samplingIntervalMs": round(self.interval_seconds * 1000, 1),
+                "sampleCount": self.sample_count,
+                "peakSampledTotalWorkingSetBytes": self.peak_total_working_set or None,
+                "processes": details,
+                "unavailableProcesses": sorted(self.unavailable),
+            }
+
+
 def wait_for_ready(child, root):
     deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
@@ -113,7 +277,13 @@ def wait_for_ready(child, root):
     raise RuntimeError("Synthetic API startup timed out")
 
 
-def rehearse(node, bundle_dir=None):
+def rehearse(
+    node,
+    bundle_dir=None,
+    benchmark_requests=0,
+    benchmark_concurrency=8,
+    synthetic_ledger_documents=0,
+):
     import requests
 
     bundle_dir = Path(bundle_dir).resolve() if bundle_dir else ROOT / "web" / "dist"
@@ -240,7 +410,8 @@ def rehearse(node, bundle_dir=None):
 
                 center = rpc("controlCenter")
                 connected_to_ledger = (
-                    center["connection"]["connected"] and center["metrics"]["documents"] == 1
+                    center["connection"]["connected"]
+                    and center["metrics"]["documents"] == 1
                 )
                 ledger_detail = json.dumps({
                     "connected": center["connection"]["connected"],
@@ -288,6 +459,35 @@ def rehearse(node, bundle_dir=None):
                 check(replayed.status_code == 200 and replayed.json().get("status") == "already_executed"
                       and replayed.json().get("auditEventId") == attributed_event["id"],
                       "hai_command_actor_spoof_replay_preserves_original_audit")
+                blocked_payload = {
+                    "commandId": "record_wave_attachment_verification",
+                    "requestId": "synthetic-hai-blocked-attachment",
+                    "payload": {"documentId": ready["documentId"], "evidence": {}},
+                }
+                blocked = request(api_base, command_path, method="POST", headers=hai_headers,
+                                  json=blocked_payload)
+                failed_event = ledger.find_audit_event(
+                    "hai.command.failed", "hai_command_request",
+                    "synthetic-hai-blocked-attachment",
+                )
+                check(blocked.status_code == 409 and blocked.json().get("status") == "blocked"
+                      and blocked.json().get("result", {}).get("status") == "blocked"
+                      and blocked.json().get("externalSubmission") == "not_executed"
+                      and failed_event and failed_event["details"].get("externalSubmission") == "not_executed",
+                      "hai_structured_attachment_block_preserved_and_audited")
+                blocked_replay = request(api_base, command_path, method="POST", headers=hai_headers,
+                                         json=blocked_payload)
+                request_events = [
+                    event for event in ledger.list_audit_events(limit=1000)
+                    if event.get("entity_id") == "synthetic-hai-blocked-attachment"
+                    and event.get("entity_type") == "hai_command_request"
+                    and event.get("action") in {"hai.command.requested", "hai.command.failed"}
+                ]
+                check(blocked_replay.status_code == 409
+                      and blocked_replay.json().get("status") == "previously_failed"
+                      and blocked_replay.json().get("auditEventId") == failed_event["id"]
+                      and len(request_events) == 2,
+                      "hai_blocked_command_replay_does_not_retry_executor")
                 check(ledger.get_document(ready["documentId"])["vendor_name"] == "Corrected Rehearsal Shop",
                       "dashboard_mutation_persisted_in_sqlite")
                 check(ledger.get_review_item(ready["reviewId"])["status"] == "resolved", "review_resolution_persisted")
@@ -566,6 +766,171 @@ def rehearse(node, bundle_dir=None):
                           and ledger.list_review_items() == ambiguous_reviews,
                           "operator_ineligible_document_selection_denied_" + name)
 
+                upload_content = (
+                    b"Synthetic operator upload\nVendor: Upload Rehearsal\n"
+                    b"Date: 2026-09-30\nTotal: EUR 3.12\n"
+                )
+                documents_before_upload = ledger.dashboard_metrics()["documents"]
+                upload_payload = {
+                    "filename": "synthetic-operator-upload.txt",
+                    "mimeType": "text/plain",
+                    "contentBase64": base64.b64encode(upload_content).decode("ascii"),
+                }
+                uploaded = rpc("uploadIntake", upload_payload, mutation=True)
+                uploaded_document = uploaded.get("document") or {}
+                uploaded_id = uploaded_document.get("id")
+                uploaded_path = Path(uploaded_document.get("path") or "")
+                stored_document = ledger.get_document(uploaded_id) if uploaded_id else {}
+                check(
+                    uploaded.get("success") is True
+                    and uploaded.get("status") == "registered"
+                    and uploaded.get("externalSubmission") == "not_executed"
+                    and uploaded_path.parent == root / "intake"
+                    and uploaded_path.read_bytes() == upload_content
+                    and stored_document.get("content_sha256")
+                    == hashlib.sha256(upload_content).hexdigest(),
+                    "dashboard_document_upload_persisted_with_verified_source",
+                )
+                replayed_upload = rpc("uploadIntake", upload_payload, mutation=True)
+                documents_after_upload = ledger.dashboard_metrics()["documents"]
+                check(
+                    replayed_upload.get("document", {}).get("id") == uploaded_id,
+                    "dashboard_document_upload_replay_keeps_same_ledger_identity",
+                )
+                check(
+                    replayed_upload.get("idempotentReplay") is True,
+                    "dashboard_document_upload_replay_is_marked_idempotent",
+                )
+                check(
+                    documents_after_upload == documents_before_upload + 1,
+                    "dashboard_document_upload_writes_exactly_one_ledger_row",
+                )
+                processed_upload = rpc(
+                    "runCommand",
+                    {"commandId": "process_imported", "payload": {}},
+                    mutation=True,
+                )
+                check(
+                    processed_upload.get("requested") == 1
+                    and processed_upload.get("failed") == 0
+                    and sum(
+                        processed_upload.get(key, 0)
+                        for key in ("processed", "needsReview", "skipped")
+                    ) == 1
+                    and ledger.get_document(uploaded_id).get("processing_status")
+                    != "imported",
+                    "dashboard_document_upload_enters_local_processing_pipeline",
+                )
+                center_after_upload = rpc("controlCenter")
+                check(
+                    center_after_upload["metrics"]["documents"]
+                    == ledger.dashboard_metrics()["documents"],
+                    "dashboard_document_upload_refreshes_authoritative_document_count",
+                )
+
+                documents_before_scale_seed = ledger.dashboard_metrics()["documents"]
+                for index in range(synthetic_ledger_documents):
+                    amount = round(4.25 + (index % 1000) / 100, 2)
+                    ledger.register_document({
+                        "source": "manual",
+                        "sourceDocumentId": f"synthetic-scale-{index:06d}",
+                        "originalFilename": f"synthetic-scale-{index:06d}.json",
+                        "mimeType": "application/json",
+                        "documentType": "receipt",
+                        "processingStatus": "processed",
+                        "vendorName": f"Synthetic Vendor {index % 200:03d}",
+                        "category": f"Operating Expense:{index % 25:02d}",
+                        "transactionDate": "2026-09-30",
+                        "totalAmount": amount,
+                        "vatAmount": round(amount / 6, 2),
+                        "confidenceScore": 0.99,
+                        "reconciliationStatus": "not_started",
+                    })
+                check(
+                    ledger.dashboard_metrics()["documents"]
+                    == documents_before_scale_seed + synthetic_ledger_documents,
+                    "synthetic_large_ledger_seeded",
+                )
+                center_after_scale_seed = rpc("refreshControlCenter", mutation=True)
+                check(
+                    center_after_scale_seed["metrics"]["documents"]
+                    == ledger.dashboard_metrics()["documents"],
+                    "scaled_ledger_reflected_in_dashboard_before_benchmark",
+                )
+                benchmark = None
+                if benchmark_requests:
+                    thread_state = threading.local()
+                    benchmark_sessions = []
+                    sessions_lock = threading.Lock()
+
+                    def refresh_sample(_index):
+                        sample_session = getattr(thread_state, "session", None)
+                        if sample_session is None:
+                            sample_session = requests.Session()
+                            sample_session.trust_env = False
+                            thread_state.session = sample_session
+                            with sessions_lock:
+                                benchmark_sessions.append(sample_session)
+                        started = time.perf_counter()
+                        response = sample_session.get(
+                            web_base + "/api/trpc/fab.controlCenter",
+                            headers=browser,
+                            timeout=(3, 30),
+                            allow_redirects=False,
+                        )
+                        elapsed_ms = (time.perf_counter() - started) * 1000
+                        if response.status_code != 200:
+                            body = response.text[:500].replace("\r", " ").replace("\n", " ")
+                            raise RuntimeError(
+                                f"Concurrent dashboard refresh returned HTTP {response.status_code}: {body}"
+                            )
+                        result = response.json().get("result", {}).get("data", {}).get("json", {})
+                        require(result.get("connection", {}).get("connected") is True,
+                                "Concurrent dashboard refresh lost its ledger connection")
+                        resource_bytes = {
+                            name: len(json.dumps(value, separators=(",", ":")).encode("utf-8"))
+                            for name, value in result.items()
+                            if name not in {"connection", "resourceStates", "partialErrors"}
+                        }
+                        return elapsed_ms, len(response.content), resource_bytes
+
+                    try:
+                        with (
+                            _ProcessResourceSampler({"api": api.pid, "dashboard": web.pid}) as sampler,
+                            ThreadPoolExecutor(max_workers=benchmark_concurrency) as pool,
+                        ):
+                            samples = list(pool.map(refresh_sample, range(benchmark_requests)))
+                        process_resources = sampler.result()
+                    finally:
+                        for sample_session in benchmark_sessions:
+                            sample_session.close()
+                    latencies = sorted(sample[0] for sample in samples)
+                    payload_bytes = [sample[1] for sample in samples]
+                    resource_bytes = {
+                        name: round(statistics.median(sample[2].get(name, 0) for sample in samples))
+                        for name in sorted({key for sample in samples for key in sample[2]})
+                    }
+                    benchmark = {
+                        "route": "GET /api/trpc/fab.controlCenter",
+                        "ledgerDocuments": ledger.dashboard_metrics()["documents"],
+                        "cacheState": "warm",
+                        "requests": len(samples),
+                        "concurrency": benchmark_concurrency,
+                        "latencyMs": {
+                            "median": round(statistics.median(latencies), 2),
+                            "p95": round(latencies[math.ceil(0.95 * len(latencies)) - 1], 2),
+                            "max": round(latencies[-1], 2),
+                        },
+                        "responseBytes": {
+                            "median": round(statistics.median(payload_bytes)),
+                            "max": max(payload_bytes),
+                        },
+                        "medianResourceBytes": resource_bytes,
+                        "processResources": process_resources,
+                    }
+                    check(len(samples) == benchmark_requests,
+                          "concurrent_dashboard_refresh_benchmark")
+
                 handoff = request(web_base, "/api/fab/operator-session?next=/api/live", headers=browser)
                 destination = urlsplit(handoff.headers.get("Location", ""))
                 check(handoff.status_code == 302 and f"{destination.scheme}://{destination.netloc}" == api_base,
@@ -579,6 +944,7 @@ def rehearse(node, bundle_dir=None):
                       "managed_operator_logout")
                 check(request(web_base, source_path, headers=browser).status_code == 403, "gateway_logout_revoked")
                 check(request(api_base, "/api/live").status_code == 401, "ledger_parent_logout_revoked")
+
         except Exception as error:
             diagnostics = []
             for name in ("api.log", "web.log"):
@@ -601,20 +967,51 @@ def rehearse(node, bundle_dir=None):
                     failures.append(child.pid)
             require(not failures, "One or more owned rehearsal children did not stop")
     return {"syntheticOnly": True, "loopbackOnly": True, "simulatedTrustedProxy": True,
-            "providerWrites": False, "checks": checks, "ownedChildrenStopped": True}
+            "providerWrites": False, "checks": checks, "ownedChildrenStopped": True,
+            "additionalSyntheticLedgerDocuments": synthetic_ledger_documents,
+            "performanceBenchmark": benchmark}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--node", help="Node.js executable (defaults to PATH)")
     parser.add_argument("--bundle-dir", help="Production bundle directory (defaults to web/dist)")
+    parser.add_argument("--benchmark-requests", type=int, default=0,
+                        help="Measure concurrent authenticated dashboard refreshes (1-30; 0 disables)")
+    parser.add_argument("--benchmark-concurrency", type=int, default=8,
+                        help="Maximum concurrent dashboard refreshes (1-16)")
+    parser.add_argument(
+        "--synthetic-ledger-documents",
+        type=int,
+        default=0,
+        help=f"Add 0-{MAX_SYNTHETIC_LEDGER_DOCUMENTS} synthetic SQLite documents; requires dashboard benchmark requests",
+    )
     parser.add_argument("--fixture-api", help=argparse.SUPPRESS)
     parser.add_argument("--web-port", type=int, help=argparse.SUPPRESS)
     args = parser.parse_args()
+    if not 1 <= args.benchmark_concurrency <= 16:
+        parser.error("--benchmark-concurrency must be between 1 and 16")
+    if not 0 <= args.benchmark_requests <= 30:
+        parser.error("--benchmark-requests must be between 0 and 30; larger bursts exceed the combined rehearsal's rate-limit budget")
+    if not 0 <= args.synthetic_ledger_documents <= MAX_SYNTHETIC_LEDGER_DOCUMENTS:
+        parser.error(
+            "--synthetic-ledger-documents must be between 0 and "
+            f"{MAX_SYNTHETIC_LEDGER_DOCUMENTS}"
+        )
+    if (
+        args.synthetic_ledger_documents
+        and not args.fixture_api
+        and not args.benchmark_requests
+    ):
+        parser.error(
+            "--synthetic-ledger-documents requires --benchmark-requests"
+        )
     if args.fixture_api:
         fixture_api(args.fixture_api, args.web_port)
     else:
-        print(json.dumps(rehearse(args.node, args.bundle_dir)))
+        print(json.dumps(rehearse(args.node, args.bundle_dir,
+                                  args.benchmark_requests, args.benchmark_concurrency,
+                                  args.synthetic_ledger_documents)))
 
 
 if __name__ == "__main__":

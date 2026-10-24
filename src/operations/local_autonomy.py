@@ -185,7 +185,6 @@ class LocalAutonomousService:
         guarded_reasons = self._blocked_reasons(readiness, health)
         if emergency_stop.get("active"):
             guarded_reasons.append("operator_emergency_stop")
-        health_execution_blocked = "operations_health_blocked" in guarded_reasons
         # Ledger-health failures must not freeze the read-only and local repair
         # work that can clear them. Security/readiness failures remain hard
         # stops, while unhealthy state continues to gate external execution.
@@ -903,7 +902,10 @@ class LocalAutonomousService:
                     "result": _compact_step_result(result),
                 },
             })
-            executed.append(result)
+            if str(result.get("status") or "").strip().lower() == "skipped":
+                skipped.append(result)
+            else:
+                executed.append(result)
             return result
 
         self.ledger.record_audit_event({
@@ -1366,6 +1368,13 @@ class LocalAutonomousService:
             self.ledger,
             allowed_extensions=self.intake_extensions,
         ).rescan(self.intake_paths)
+        if summary.get("status") == "already_running":
+            return {
+                "id": "rescan_intake",
+                "status": "skipped",
+                "reason": "intake_already_running",
+                "summary": summary,
+            }
         return {"id": "rescan_intake", "status": "completed", "summary": summary}
 
     def _run_connector_sync(self, sources: List[str]) -> Dict[str, Any]:

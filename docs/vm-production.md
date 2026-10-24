@@ -8,13 +8,16 @@ worker share a durable volume. It is not a multi-host or multi-tenant deployment
 Use `docker-compose.vm.yml` alone. The ordinary Compose file remains the local
 desktop profile and must not be merged into this one.
 
-Provision three independent random secrets with at least 32 characters: an API
-token, a browser-session signing secret, and the operator sign-in secret. Keep
-them in separate files outside the repository. Set these environment variables
-to their absolute host paths:
+Provision four independent random secrets with at least 32 characters: an API
+token, a dedicated HAI token, a browser-session signing secret, and the operator
+sign-in secret. The API and HAI tokens must differ. VM startup fails closed when
+the dedicated HAI token is missing, so remote HAI access cannot silently inherit
+operator authority. Keep each in a separate file outside the repository. Set
+these environment variables to their absolute host paths:
 
 ```text
 FAB_API_TOKEN_FILE
+FAB_HAI_API_TOKEN_FILE
 FAB_SESSION_SECRET_FILE
 FAB_OPERATOR_TOKEN_FILE
 ```
@@ -24,7 +27,8 @@ encrypt host files or guarantee ownership changes: provision read permissions
 for the container service users (API UID 10001, Node UID 1000), restrict host
 directory access, and verify access on the target host. Never make the secret
 directory publicly readable. The API token is consumed by API, worker and web;
-the session and operator secrets are consumed only by web.
+the HAI token is consumed by API and worker only; the session and operator
+secrets are consumed only by web. Do not pass the HAI token to the web container.
 
 Configure these non-secret settings in an ignored environment file outside Git:
 

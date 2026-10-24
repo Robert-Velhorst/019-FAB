@@ -48,6 +48,18 @@ def test_standard_compose_persists_the_local_secret_store():
 
     assert "    - fab-credentials:/app/credentials\n" in compose
     assert "  fab-credentials:\n" in compose
+    assert "    - fab-tokens:/app/tokens\n" in compose
+    assert "  fab-tokens:\n" in compose
+
+
+def test_compose_oauth_token_migration_is_available_before_recreation():
+    migration = ROOT / "Migrate-FAB-Compose-Tokens.ps1"
+    assert migration.is_file()
+    source = migration.read_text(encoding="utf-8")
+    assert "docker cp" in source
+    assert "compose_token_migration" in source
+    assert "SetAccessRuleProtection" in source
+    assert "--env-file" in source
 
 
 @pytest.mark.parametrize("context", ["python", "web"])

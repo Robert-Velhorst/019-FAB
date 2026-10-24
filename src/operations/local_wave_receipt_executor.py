@@ -69,9 +69,9 @@ class LocalWaveReceiptExecutorService:
     """Coordinate a user-owned Wave browser without storing its login state.
 
     The coordinator is deliberately not a browser implementation. A supervised
-    HAI or browser process owns the authenticated session, advertises only its
-    non-secret capabilities, and receives one evidence-bound work order at a
-    time. FAB remains the source of truth and verifies downloaded bytes itself.
+    HAI or browser process owns the authenticated session and advertises only
+    non-secret capabilities. Until FAB has a trusted provider attachment reader,
+    the coordinator must not claim a work order can be completed or archived.
     """
 
     def __init__(self, ledger: LocalOperationsLedger, config: Optional[Dict[str, Any]] = None):
@@ -97,6 +97,8 @@ class LocalWaveReceiptExecutorService:
             "heartbeatTtlSeconds": self._heartbeat_ttl_seconds(),
             "credentialFieldsAccepted": False,
             "credentialPolicy": "browser_session_owned_by_user_never_stored_in_fab",
+            "trustedProviderReadbackAvailable": False,
+            "readbackUnavailableReason": "trusted_provider_readback_unavailable",
             "workOrderClaimPath": "/api/wave/receipt-executor/claim",
             "sessionPath": "/api/wave/receipt-executor/session",
             "releasePath": "/api/wave/receipt-executor/release",
@@ -115,8 +117,8 @@ class LocalWaveReceiptExecutorService:
                     "path": "/api/wave/receipt-executor/release",
                 },
                 "attachmentReadback": {
-                    "method": "POST",
-                    "pathTemplate": "/api/drive-wave/documents/{documentId}/attachment-readback",
+                    "available": False,
+                    "reason": "trusted_provider_readback_unavailable",
                 },
             },
             "externalSubmission": "policy_gated_browser_execution",
@@ -144,7 +146,7 @@ class LocalWaveReceiptExecutorService:
             return {
                 **base,
                 "status": "not_connected",
-                "nextAction": "Connect a supervised HAI or browser executor using the local FAB manifest.",
+                "nextAction": "FAB lacks trusted Wave attachment retrieval; connecting an executor cannot complete or archive receipts yet.",
             }
 
         heartbeat_at = _parse_datetime(state.get("heartbeatAt"))
@@ -173,11 +175,9 @@ class LocalWaveReceiptExecutorService:
             resolved_status = "authentication_required"
             next_action = "Sign in to Wave in the user-owned supervised browser session."
         elif session_status in {"ready", "busy"}:
-            resolved_status = session_status
+            resolved_status = "readback_unavailable"
             next_action = (
-                "The executor is processing a claimed Wave receipt work order."
-                if session_status == "busy"
-                else "Wave receipt upload and readback execution is available."
+                "Do not claim or archive Wave receipt work. FAB needs a trusted provider attachment retrieval path."
             )
         elif session_status == "error":
             resolved_status = "error"

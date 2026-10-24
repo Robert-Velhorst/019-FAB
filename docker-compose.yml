@@ -22,6 +22,7 @@ x-fab-python: &fab-python
   volumes:
     - fab-data:/app/data
     - fab-credentials:/app/credentials
+    - fab-tokens:/app/tokens
     - fab-output:/app/output
     - ./downloads/sort-out:/app/downloads/sort-out:ro
 
@@ -88,4 +89,5 @@ networks:
 volumes:
   fab-data:
   fab-credentials:
+  fab-tokens:
   fab-output:

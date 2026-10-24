@@ -4,6 +4,7 @@ import axios, { type AxiosInstance } from "axios";
 import { parse as parseCookieHeader } from "cookie";
 import type { Request } from "express";
 import { SignJWT, jwtVerify } from "jose";
+import { createHash, randomBytes } from "node:crypto";
 import type { User } from "../../drizzle/schema";
 import * as db from "../db";
 import { createLogger } from "../lib/logger";
@@ -24,6 +25,7 @@ export type SessionPayload = {
   openId: string;
   appId: string;
   name: string;
+  jti: string;
 };
 
 const EXCHANGE_TOKEN_PATH = `/webdev.v1.WebDevAuthPublicService/ExchangeToken`;
@@ -173,14 +175,27 @@ class SDKServer {
     openId: string,
     options: { expiresInMs?: number; name?: string } = {}
   ): Promise<string> {
-    return this.signSession(
-      {
-        openId,
-        appId: ENV.appId,
-        name: options.name || "",
-      },
-      options
+    const jti = randomBytes(32).toString("base64url");
+    const issuedAt = Date.now();
+    const expiresInMs = options.expiresInMs ?? ONE_YEAR_MS;
+    if (!Number.isSafeInteger(expiresInMs) || expiresInMs <= 0) {
+      throw new Error("Session lifetime must be a positive safe integer");
+    }
+    const expiresAt = new Date(Math.floor((issuedAt + expiresInMs) / 1000) * 1000);
+    const token = await this.signSession(
+      { openId, appId: ENV.appId, name: options.name || "", jti },
+      options,
     );
+    await db.createOAuthSession({
+      tokenHash: this.hashSessionId(jti),
+      openId,
+      expiresAt,
+    });
+    return token;
+  }
+
+  private hashSessionId(jti: string): string {
+    return createHash("sha256").update(jti).digest("hex");
   }
 
   async signSession(
@@ -196,6 +211,7 @@ class SDKServer {
       openId: payload.openId,
       appId: payload.appId,
       name: payload.name,
+      jti: payload.jti,
     })
       .setProtectedHeader({ alg: "HS256", typ: "JWT" })
       .setExpirationTime(expirationSeconds)
@@ -210,26 +226,15 @@ class SDKServer {
     }
 
     try {
-      const secretKey = this.getSessionSecret();
-      const { payload } = await jwtVerify(cookieValue, secretKey, {
-        algorithms: ["HS256"],
-      });
-      const { openId, appId, name } = payload as Record<string, unknown>;
-
-      if (
-        !isNonEmptyString(openId) ||
-        !isNonEmptyString(appId) ||
-        !isNonEmptyString(name)
-      ) {
-        log.warn("Session payload missing required fields");
-        return null;
-      }
-
-      return {
-        openId,
-        appId,
-        name,
-      };
+      const session = await this.verifySignedSession(cookieValue);
+      if (!session) return null;
+      const active = await db.isOAuthSessionActive(
+        this.hashSessionId(session.jti),
+        session.openId,
+      );
+      return active
+        ? { openId: session.openId, appId: session.appId, name: session.name }
+        : null;
     } catch (error) {
       log.warn(
         "Session verification failed",
@@ -238,6 +243,35 @@ class SDKServer {
       );
       return null;
     }
+  }
+
+  private async verifySignedSession(cookieValue: string): Promise<SessionPayload | null> {
+    try {
+      const { payload } = await jwtVerify(cookieValue, this.getSessionSecret(), {
+        algorithms: ["HS256"],
+      });
+      const { openId, appId, name, jti } = payload as Record<string, unknown>;
+      if (!isNonEmptyString(openId) || !isNonEmptyString(appId)
+        || typeof name !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(String(jti))) {
+        log.warn("Session payload missing required fields");
+        return null;
+      }
+      return { openId, appId, name, jti: String(jti) };
+    } catch (error) {
+      log.warn(
+        "Session verification failed",
+        {},
+        error instanceof Error ? error : new Error(String(error)),
+      );
+      return null;
+    }
+  }
+
+  async revokeSessionFromRequest(req: Request): Promise<void> {
+    const cookieValue = this.parseCookies(req.headers.cookie).get(COOKIE_NAME);
+    if (!cookieValue) return;
+    const session = await this.verifySignedSession(cookieValue);
+    if (session) await db.revokeOAuthSession(this.hashSessionId(session.jti));
   }
 
   async getUserInfoWithJwt(

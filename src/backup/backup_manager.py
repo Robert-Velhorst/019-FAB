@@ -138,6 +138,19 @@ class BackupManager:
         partial_path = os.path.join(self.backup_base_dir, f".fab-backup-{uuid.uuid4().hex}.partial")
         temporary_snapshots = []
         database_path = _canonical_path(self.config.get("database_path", "data/fab.sqlite3"))
+        database_sidecars = {
+            os.path.normcase(database_path + suffix)
+            for suffix in ("-wal", "-shm")
+        }
+        database_snapshot_path = None
+
+        def snapshot_database() -> str:
+            nonlocal database_snapshot_path
+            if database_snapshot_path is None:
+                database_snapshot_path = self._snapshot_sqlite_database(database_path)
+                temporary_snapshots.append(database_snapshot_path)
+            return database_snapshot_path
+
         try:
             written_names = set()
             total_source_bytes = 0
@@ -157,15 +170,16 @@ class BackupManager:
                     if not os.path.exists(path):
                         raise FileNotFoundError(f"Backup source disappeared: {path}")
                     if os.path.isfile(path):
+                        normalized_path = os.path.normcase(_canonical_path(path))
+                        if normalized_path in database_sidecars:
+                            raise ValueError("SQLite WAL and SHM sidecars cannot be backed up independently.")
                         arcname = os.path.basename(path)
                         normalized_arcname = os.path.normcase(arcname.replace("/", os.path.sep)).casefold()
                         if normalized_arcname in written_names:
                             raise ValueError("Backup sources contain duplicate archive names.")
                         written_names.add(normalized_arcname)
-                        if path == database_path:
-                            snapshot_path = self._snapshot_sqlite_database(path)
-                            temporary_snapshots.append(snapshot_path)
-                            write_source_file(snapshot_path, arcname)
+                        if normalized_path == os.path.normcase(database_path):
+                            write_source_file(snapshot_database(), arcname)
                         else:
                             write_source_file(path, arcname)
                     elif os.path.isdir(path):
@@ -189,6 +203,9 @@ class BackupManager:
                                     raise ValueError("Backup source contains a symbolic link.")
                                 if not os.path.isfile(file_path):
                                     raise ValueError("Backup source contains a non-regular file.")
+                                normalized_file_path = os.path.normcase(_canonical_path(file_path))
+                                if normalized_file_path in database_sidecars:
+                                    continue
                                 arcname = os.path.join(
                                     root_name,
                                     os.path.relpath(file_path, start=path),
@@ -197,7 +214,10 @@ class BackupManager:
                                 if normalized_arcname in written_names:
                                     raise ValueError("Backup sources contain duplicate archive names.")
                                 written_names.add(normalized_arcname)
-                                write_source_file(file_path, arcname)
+                                if normalized_file_path == os.path.normcase(database_path):
+                                    write_source_file(snapshot_database(), arcname)
+                                else:
+                                    write_source_file(file_path, arcname)
             if os.path.getsize(partial_path) > MAX_RESTORE_BYTES:
                 raise ValueError("Backup archive exceeds the restore size limit.")
             for snapshot_path in temporary_snapshots:

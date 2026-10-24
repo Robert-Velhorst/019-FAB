@@ -29,6 +29,7 @@ x-python: &python
     FAB_LOCAL_API_HOST: 0.0.0.0
     FAB_LOCAL_API_PORT: 5001
     FAB_LOCAL_API_TOKEN_FILE: /run/secrets/api_token
+    FAB_HAI_API_TOKEN_FILE: /run/secrets/hai_api_token
     FAB_LOCAL_API_BASE_URL: ${FAB_LEDGER_PUBLIC_ORIGIN:?Set the ledger HTTPS origin}
     FAB_OPERATOR_DASHBOARD_URL: ${FAB_OPERATOR_PUBLIC_ORIGIN:?Set the dashboard HTTPS origin}/admin/operations
     FAB_OPERATOR_SESSION_VALIDATION_URL: http://web:3000/api/fab/operator-session/status
@@ -37,7 +38,7 @@ x-python: &python
     FAB_LOCAL_INTAKE_PATHS: /app/downloads/sort-out
     FAB_SUPPORT_BUNDLE_DIR: /app/output/support
     FAB_STORAGE_ENCRYPTION_CONFIRMED: ${FAB_STORAGE_ENCRYPTION_CONFIRMED:-false}
-  secrets: [api_token]
+  secrets: [api_token, hai_api_token]
   volumes:
     - fab-data:/app/data
     - fab-backups:/app/backups
@@ -106,6 +107,8 @@ services:
 secrets:
   api_token:
     file: ${FAB_API_TOKEN_FILE:?Set the absolute API token file path}
+  hai_api_token:
+    file: ${FAB_HAI_API_TOKEN_FILE:?Set the absolute HAI token file path}
   session_secret:
     file: ${FAB_SESSION_SECRET_FILE:?Set the absolute session secret file path}
   operator_token:

@@ -65,9 +65,11 @@ class TestLocalWaveReceiptExecutorService(unittest.TestCase):
         self.assertEqual(status["requiredCapabilities"], list(REQUIRED_CAPABILITIES))
         self.assertEqual(status["missingCapabilities"], list(REQUIRED_CAPABILITIES))
         self.assertEqual(status["haiManifestPath"], "/api/hai/manifest")
+        self.assertFalse(status["trustedProviderReadbackAvailable"])
+        self.assertFalse(status["pairing"]["attachmentReadback"]["available"])
         self.assertEqual(
-            status["pairing"]["attachmentReadback"]["pathTemplate"],
-            "/api/drive-wave/documents/{documentId}/attachment-readback",
+            status["pairing"]["attachmentReadback"]["reason"],
+            "trusted_provider_readback_unavailable",
         )
 
     def test_status_exposes_dashboard_uuid_from_wave_graphql_id(self):
@@ -92,7 +94,10 @@ class TestLocalWaveReceiptExecutorService(unittest.TestCase):
         ready = self.service.register(self._session())
 
         self.assertTrue(ready["success"])
-        self.assertEqual(ready["status"], "ready")
+        self.assertEqual(ready["status"], "readback_unavailable")
+        self.assertFalse(ready["ready"])
+        self.assertFalse(ready["trustedProviderReadbackAvailable"])
+        self.assertIn("trusted provider attachment retrieval path", ready["nextAction"])
         self.assertTrue(ready["businessMatches"])
         self.assertNotIn("password", json.dumps(ready).lower())
 
@@ -133,7 +138,7 @@ class TestLocalWaveReceiptExecutorService(unittest.TestCase):
         self.assertEqual(conflict["status"], "session_conflict")
         self.assertEqual(self.service.status()["executorId"], "hai-wave-browser")
 
-    def test_executor_cannot_self_assign_busy_work_or_release_another_document(self):
+    def test_executor_cannot_claim_or_release_without_trusted_readback(self):
         self.service.register(self._session())
 
         self_assigned = self.service.register(self._session(
@@ -150,7 +155,7 @@ class TestLocalWaveReceiptExecutorService(unittest.TestCase):
             "source": {"localAvailable": True},
             "wave": {"externalTransactionId": "wave-transaction-2"},
         }])
-        self.service.claim_next(provider, self._session())
+        claimed = self.service.claim_next(provider, self._session())
 
         mismatched_release = self.service.release(3, {
             "executorId": "hai-wave-browser",
@@ -160,10 +165,11 @@ class TestLocalWaveReceiptExecutorService(unittest.TestCase):
 
         self.assertFalse(mismatched_release["success"])
         self.assertEqual(mismatched_release["status"], "invalid_claim")
-        self.assertEqual(self.service.status()["currentDocumentId"], 2)
-        self.assertTrue(self.ledger.get_runtime_lease("wave-receipt-execution:2")["active"])
+        self.assertEqual(claimed["status"], "executor_not_ready")
+        self.assertIsNone(self.service.status()["currentDocumentId"])
+        self.assertIsNone(self.ledger.get_runtime_lease("wave-receipt-execution:2"))
 
-    def test_claims_only_attachment_work_and_releases_owned_lease(self):
+    def test_claims_are_blocked_until_trusted_provider_readback_exists(self):
         self.service.register(self._session())
         provider = FakeWorkOrders([
             {
@@ -182,16 +188,15 @@ class TestLocalWaveReceiptExecutorService(unittest.TestCase):
 
         claimed = self.service.claim_next(provider, self._session())
 
-        self.assertTrue(claimed["success"])
-        self.assertEqual(claimed["status"], "claimed")
-        self.assertEqual(claimed["documentId"], 2)
-        self.assertEqual(self.service.status()["status"], "busy")
-        self.assertTrue(self.ledger.get_runtime_lease("wave-receipt-execution:2")["active"])
+        self.assertFalse(claimed["success"])
+        self.assertEqual(claimed["status"], "executor_not_ready")
+        self.assertEqual(self.service.status()["status"], "readback_unavailable")
+        self.assertIsNone(self.ledger.get_runtime_lease("wave-receipt-execution:2"))
 
         skipped_release = self.service.register(self._session())
 
-        self.assertFalse(skipped_release["success"])
-        self.assertEqual(skipped_release["status"], "active_claim")
+        self.assertTrue(skipped_release["success"])
+        self.assertEqual(skipped_release["status"], "readback_unavailable")
 
         released = self.service.release(2, {
             "executorId": "hai-wave-browser",
@@ -199,10 +204,10 @@ class TestLocalWaveReceiptExecutorService(unittest.TestCase):
             "outcome": "verified",
         })
 
-        self.assertTrue(released["success"])
-        self.assertTrue(released["leaseReleased"])
+        self.assertFalse(released["success"])
+        self.assertEqual(released["status"], "invalid_claim")
         self.assertIsNone(self.ledger.get_runtime_lease("wave-receipt-execution:2"))
-        self.assertEqual(self.service.status()["status"], "ready")
+        self.assertEqual(self.service.status()["status"], "readback_unavailable")
 
     def test_api_exposes_session_status_and_manifest_contract(self):
         app = create_app({
@@ -221,7 +226,8 @@ class TestLocalWaveReceiptExecutorService(unittest.TestCase):
         self.assertEqual(disconnected.status_code, 200)
         self.assertEqual(disconnected.get_json()["status"], "not_connected")
         self.assertEqual(registered.status_code, 200)
-        self.assertTrue(registered.get_json()["ready"])
+        self.assertFalse(registered.get_json()["ready"])
+        self.assertEqual(registered.get_json()["status"], "readback_unavailable")
         resources = {
             item["resourceId"]: item for item in manifest.get_json()["resources"]
         }

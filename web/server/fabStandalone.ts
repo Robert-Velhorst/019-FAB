@@ -10,23 +10,37 @@ import { registerFabRuntimeRoute } from "./fabRuntime";
 import { registerFabManagedAuthRoutes } from "./fabManagedAuth";
 import { registerFabSourcePreviewRoutes } from "./fabSourcePreview";
 import { ENV } from "./_core/env";
-import { createFabSecurityMiddleware } from "./_core/security";
+import { createCookieMutationOriginGuard, createFabSecurityMiddleware } from "./_core/security";
 import { serveStatic } from "./_core/static";
 import { sanitizeExternalMessage } from "./lib/errorSanitizer";
-import { relaxedLimiter } from "./lib/rateLimiter";
+import { relaxedLimiter, standardLimiter } from "./lib/rateLimiter";
+import { registerFabRequestBodyParsers } from "./lib/requestBodyParsers";
 import { configureFabProxyTrust } from "./_core/deployment";
 import { createFabServerLifecycle, listenFabServer } from "./_core/lifecycle";
+import { closeDb } from "./db";
+import { createLogger } from "./lib/logger";
+import { COOKIE_NAME } from "@shared/const";
+
+const log = createLogger("FAB standalone");
 
 export async function startFabStandaloneServer() {
   const app = express();
   const server = createServer(app);
   const lifecycle = createFabServerLifecycle(server);
+  const closeDatabase = async () => {
+    try {
+      await closeDb();
+    } catch (error) {
+      log.error("Database pool shutdown failed", {}, error instanceof Error ? error : new Error(String(error)));
+      throw error;
+    }
+  };
   configureFabProxyTrust(app, ENV.fabOperatorTrustedProxyAddresses);
   app.use(...createFabSecurityMiddleware(ENV.isProduction));
+  app.use("/api/trpc", createCookieMutationOriginGuard(COOKIE_NAME));
   app.use(compression({ threshold: 1_024 }));
   registerFabManagedAuthRoutes(app);
-  app.use(express.json({ limit: "10mb" }));
-  app.use(express.urlencoded({ limit: "10mb", extended: true }));
+  registerFabRequestBodyParsers(app, standardLimiter);
 
   registerFabRuntimeRoute(app);
   registerFabSourcePreviewRoutes(app);
@@ -46,7 +60,7 @@ export async function startFabStandaloneServer() {
     port: ENV.fabWebPort,
     allowPortFallback: ENV.fabAllowPortFallback,
   });
-  lifecycle.installSignalHandlers();
+  lifecycle.installSignalHandlers(process, undefined, closeDatabase);
   return { app, port, server, shutdown: lifecycle.shutdown };
 }
 

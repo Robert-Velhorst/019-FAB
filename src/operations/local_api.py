@@ -59,10 +59,7 @@ from src.operations.drive_relay_intake import (
     MAX_DRIVE_RELAY_MAX_BYTES,
     DriveRelayIntakeService,
 )
-from src.operations.drive_wave_delivery import (
-    DriveWaveDeliveryService,
-    WAVE_RECEIPT_MAX_BYTES,
-)
+from src.operations.drive_wave_delivery import DriveWaveDeliveryService
 from src.operations.local_exceptions import LocalExceptionQueueService
 from src.operations.local_exports import (
     EXPORT_APPROVAL_PHRASE,
@@ -108,6 +105,7 @@ DEFAULT_LOCAL_API_MAX_REQUEST_BYTES = 101 * 1024 * 1024
 MAX_RECONCILIATION_REQUEST_BYTES = MAX_RECONCILIATION_JSON_BYTES + 1024 * 1024
 MAX_LOCAL_API_MAX_REQUEST_BYTES = 128 * 1024 * 1024
 DEFAULT_LOCAL_JSON_MUTATION_REQUEST_BYTES = 2 * 1024 * 1024
+MAX_LOCAL_LOGIN_REQUEST_BYTES = 32 * 1024
 LOCAL_JSON_REQUEST_OVERHEAD_BYTES = 128 * 1024
 LOCAL_MULTIPART_REQUEST_OVERHEAD_BYTES = 1024 * 1024
 MAX_LOCAL_INTAKE_REQUEST_BYTES = (
@@ -119,9 +117,6 @@ MAX_LOCAL_BANK_IMPORT_REQUEST_BYTES = (
     + LOCAL_JSON_REQUEST_OVERHEAD_BYTES
 )
 MAX_LOCAL_OAUTH_CREDENTIAL_REQUEST_BYTES = 90_000 + 16 * 1024
-MAX_LOCAL_WAVE_READBACK_REQUEST_BYTES = (
-    WAVE_RECEIPT_MAX_BYTES + LOCAL_MULTIPART_REQUEST_OVERHEAD_BYTES
-)
 MAX_LOCAL_WAVE_REPORT_RESULT_REQUEST_BYTES = (
     MAX_WAVE_REPORT_RESULT_BYTES + LOCAL_JSON_REQUEST_OVERHEAD_BYTES
 )
@@ -129,12 +124,12 @@ MAX_LOCAL_DRIVE_RELAY_REQUEST_BYTES = (
     MAX_DRIVE_RELAY_MAX_BYTES + LOCAL_MULTIPART_REQUEST_OVERHEAD_BYTES
 )
 LOCAL_API_ROUTE_BODY_LIMITS = {
+    "login": MAX_LOCAL_LOGIN_REQUEST_BYTES,
     "upload_intake_document": MAX_LOCAL_INTAKE_REQUEST_BYTES,
     "import_bank_transactions": MAX_LOCAL_BANK_IMPORT_REQUEST_BYTES,
     "import_bank_transactions_form": MAX_LOCAL_BANK_IMPORT_REQUEST_BYTES,
     "install_gmail_credentials_api": MAX_LOCAL_OAUTH_CREDENTIAL_REQUEST_BYTES,
     "install_google_drive_credentials_api": MAX_LOCAL_OAUTH_CREDENTIAL_REQUEST_BYTES,
-    "drive_wave_attachment_readback_api": MAX_LOCAL_WAVE_READBACK_REQUEST_BYTES,
     "record_wave_report_result": MAX_LOCAL_WAVE_REPORT_RESULT_REQUEST_BYTES,
     "google_drive_relay_intake_api": MAX_LOCAL_DRIVE_RELAY_REQUEST_BYTES,
     "run_autonomy": MAX_RECONCILIATION_REQUEST_BYTES,
@@ -158,7 +153,6 @@ LOCAL_SOURCE_PREVIEW_MIME_TYPES = {
     "text/plain",
     "text/xml",
 }
-LOCAL_FORM_SESSION_KEY = "fab_local_form_session"
 LOGIN_FAILURE_WINDOW_SECONDS = 15 * 60
 MAX_LOGIN_FAILURES_PER_CLIENT = 5
 MAX_TRACKED_LOGIN_CLIENTS = 4096
@@ -176,7 +170,7 @@ HAI_ROUTE_RULES = (
     ("GET", re.compile(r"^/api/backups$")),
     ("POST", re.compile(r"^/api/connectors/google-drive/relay$")),
     ("GET", re.compile(r"^/api/drive-wave/work-orders$")),
-    ("POST", re.compile(r"^/api/drive-wave/documents/[1-9][0-9]*/attachment-readback$")),
+    # Binary Wave readback is operator-only; HAI cannot self-attest archival evidence.
     ("GET", re.compile(r"^/api/wave/receipt-executor/status$")),
     ("POST", re.compile(r"^/api/wave/receipt-executor/(?:session|claim|release)$")),
 )
@@ -206,7 +200,6 @@ CONTROL_CENTER_BATCH_PATHS = {
     "sourceReadiness": "/api/sources/readiness",
     "driveAuthorization": "/api/connectors/google-drive/authorization",
     "haiStatus": "/api/hai/status",
-    "haiManifest": "/api/hai/manifest",
     "gmailAuthorization": "/api/connectors/gmail/authorization",
 }
 
@@ -2335,6 +2328,9 @@ DASHBOARD_TEMPLATE = """
                 {% if export.external_id %}
                 <div class="muted">Wave ID</div>
                 <div class="muted mono">{{ export.external_id }}</div>
+                {% elif export.metadata and export.metadata.lastExecution and export.metadata.lastExecution.providerExternalId %}
+                <div class="muted">FAB external reference (not confirmation)</div>
+                <div class="muted mono">{{ export.metadata.lastExecution.providerExternalId }}</div>
                 {% endif %}
                 {% if export.metadata and export.metadata.masterLedgerDraft %}
                 <div class="muted">Master ledger {{ export.metadata.masterLedgerDraft.draftType }}</div>
@@ -4263,6 +4259,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         "scanner_folder",
         "scanner_watch_folder",
     )
+    document_source_roots = [os.path.dirname(os.path.abspath(ledger_path)), *intake_paths]
     intake_extensions = _list_config(
         config,
         "fab_local_intake_extensions",
@@ -4362,25 +4359,15 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             if request.path.startswith("/api/"):
                 return jsonify({"error": "Untrusted host for loopback-only service"}), 421
             return "Untrusted host for loopback-only service", 421
-        if request.method == "GET" and not request.path.startswith("/api/"):
-            if not session.get(LOCAL_FORM_SESSION_KEY):
-                session[LOCAL_FORM_SESSION_KEY] = secrets.token_urlsafe(24)
         if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
             fetch_site = request.headers.get("Sec-Fetch-Site", "").strip().lower()
             origin = request.headers.get("Origin", "").strip().rstrip("/")
             allowed_origins = {request.host_url.rstrip("/")}
             if configured_base_url:
                 allowed_origins.add(configured_base_url)
-            trusted_opaque_form = (
-                origin == "null"
-                and not request.path.startswith("/api/")
-                and bool(session.get(LOCAL_FORM_SESSION_KEY))
-                and request.mimetype == "application/x-www-form-urlencoded"
-            )
             origin_rejected = (
                 bool(origin)
                 and origin not in allowed_origins
-                and not trusted_opaque_form
             )
             originless_cross_site = not origin and fetch_site == "cross-site"
             if origin_rejected or originless_cross_site:
@@ -4585,7 +4572,6 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         session["fab_local_api_authenticated"] = True
         if payload["v"] == 2:
             session["fab_operator_parent"] = parent
-        session[LOCAL_FORM_SESSION_KEY] = secrets.token_urlsafe(24)
         ledger.record_audit_event({
             "action": "local_api.operator_session_bootstrapped",
             "entityType": "operator_session",
@@ -4655,7 +4641,9 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
                     "method": request.method,
                     "endpoint": request.endpoint or "unmatched",
                     "errorType": type(exc).__name__,
-                    "externalSubmission": "not_executed",
+                    # A route may have reached a provider before an unexpected
+                    # exception prevented it from recording its own outcome.
+                    "externalSubmission": "unknown",
                 },
             })
         except Exception:
@@ -5260,27 +5248,17 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
     @app.get("/api/cloud/status")
     def cloud_status_api():
         runtime_path = config.get("fab_ngrok_runtime_path")
-        result = LocalCloudAccessService(
+        cloud_access = LocalCloudAccessService(
             project_root=Path(__file__).resolve().parents[2],
             runtime_path=Path(str(runtime_path)) if runtime_path else None,
             api_token_configured=bool(token),
             shared_inspector_url=config.get("fab_ngrok_shared_inspector_url"),
-        ).summarize()
+        )
         if maintenance_mode:
-            result.update({
-                "status": "disabled_for_maintenance",
-                "active": False,
-                "publicUrl": None,
-                "haiManifestUrl": None,
-                "maintenanceMode": True,
-                "nextAction": (
-                    "Complete or cancel local recovery and restart FAB in standard mode "
-                    "before enabling cloud access."
-                ),
-                "externalSubmission": "not_executed",
-            })
+            result = cloud_access.disabled_for_maintenance()
         else:
-            result["maintenanceMode"] = False
+            result = cloud_access.summarize()
+        result["maintenanceMode"] = bool(maintenance_mode)
         return jsonify(result)
 
     @app.post("/api/hai/commands/plan")
@@ -5320,6 +5298,8 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             "execution_indeterminate",
             "idempotency_conflict",
             "previously_failed",
+            "blocked",
+            "needs_review",
         }:
             status_code = 409
         else:
@@ -5432,60 +5412,16 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
 
     @app.post("/api/drive-wave/documents/<int:document_id>/attachment-readback")
     def drive_wave_attachment_readback_api(document_id: int):
-        attachment = request.files.get("attachment")
-        if attachment is None:
-            return jsonify({"error": "Multipart file field 'attachment' is required"}), 400
-        evidence_text = request.form.get("evidence") or "{}"
-        try:
-            evidence = json.loads(evidence_text)
-        except (TypeError, ValueError):
-            return jsonify({"error": "evidence must be a valid JSON object"}), 400
-        if not isinstance(evidence, dict):
-            return jsonify({"error": "evidence must be a valid JSON object"}), 400
-        content = attachment.stream.read(WAVE_RECEIPT_MAX_BYTES + 1)
-        if len(content) > WAVE_RECEIPT_MAX_BYTES:
-            return jsonify({
-                "success": False,
-                "status": "blocked",
-                "reasons": ["wave_attachment_readback_exceeds_limit"],
-                "maxBytes": WAVE_RECEIPT_MAX_BYTES,
-                "externalSubmission": "not_executed",
-            }), 413
-        result = DriveWaveDeliveryService(ledger, config).record_attachment_readback(
-            document_id,
-            content,
-            filename=attachment.filename,
-            mime_type=attachment.mimetype,
-            evidence=evidence,
-            actor=_request_audit_actor(
-                request.form.get("actor"),
-                "local_api_wave_browser",
-            ),
+        actor = _request_audit_actor(
+            None,
+            "local_api_wave_browser",
         )
-        executor_id = str(request.form.get("executorId") or "").strip()
-        session_id = str(request.form.get("sessionId") or "").strip()
-        if executor_id and session_id:
-            result["executorRelease"] = LocalWaveReceiptExecutorService(
-                ledger,
-                config,
-            ).release(
-                document_id,
-                {
-                    "executorId": executor_id,
-                    "sessionId": session_id,
-                    "outcome": "verified" if result.get("success") else "blocked",
-                    "message": (
-                        "Wave receipt binary readback passed FAB verification."
-                        if result.get("success")
-                        else "Wave receipt binary readback was blocked by FAB verification."
-                    ),
-                },
-                actor=_request_audit_actor(
-                    request.form.get("actor"),
-                    "local_api_wave_browser",
-                ),
-            )
-        return jsonify(result), 200 if result.get("success") else 400
+        result = DriveWaveDeliveryService(ledger, config).reject_untrusted_attachment_readback(
+            document_id,
+            actor=actor,
+        )
+        status_code = 409 if result.get("status") == "blocked" else 404 if result.get("status") == "not_found" else 400
+        return jsonify(result), status_code
 
     @app.post("/api/drive-wave/documents/<int:document_id>/archive")
     def drive_wave_archive_document_api(document_id: int):
@@ -5509,12 +5445,15 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             if isinstance(audit_event_id, int) and not isinstance(audit_event_id, bool):
                 response["auditEventId"] = audit_event_id
             return jsonify(response), 200
+        external_submission = result.get("externalSubmission")
+        if external_submission not in {"not_executed", "unknown"}:
+            external_submission = "unknown"
         return jsonify({
             "success": False,
             "status": "blocked",
             "documentId": document_id,
             "reasons": ["Archive did not complete. Review the audit record."],
-            "externalSubmission": "not_executed",
+            "externalSubmission": external_submission,
         }), 409
 
     @app.get("/api/workflows")
@@ -6716,7 +6655,10 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             format_money=_format_money,
             open_review_count=open_review_count,
             pretty_json=_pretty_json,
-            source_preview=_document_source_preview(document),
+            source_preview=_document_source_preview(
+                document,
+                trusted_roots=document_source_roots,
+            ),
         )
 
     @app.get("/api/documents/<int:document_id>")
@@ -6735,7 +6677,9 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         source_path = str(document.get("storage_path") or "").strip()
         if not source_path:
             return jsonify({"error": "No retained source file is registered"}), 404
-        normalized_path = os.path.abspath(os.path.expandvars(os.path.expanduser(source_path)))
+        normalized_path = _trusted_document_source_path(source_path, document_source_roots)
+        if not normalized_path:
+            return jsonify({"error": "The retained source file is outside trusted evidence roots"}), 409
         if not os.path.isfile(normalized_path):
             return jsonify({"error": "The retained source file is unavailable"}), 404
 
@@ -6747,12 +6691,22 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         source_chunks = []
         verified_size = 0
         try:
-            flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+            flags = (
+                os.O_RDONLY
+                | getattr(os, "O_NONBLOCK", 0)
+                | getattr(os, "O_BINARY", 0)
+                | getattr(os, "O_NOFOLLOW", 0)
+            )
             descriptor = os.open(normalized_path, flags)
             try:
                 with os.fdopen(descriptor, "rb", buffering=0, closefd=False) as source_file:
                     opened = os.fstat(descriptor)
-                    if not stat.S_ISREG(opened.st_mode):
+                    path_stat = os.stat(normalized_path, follow_symlinks=False)
+                    if (
+                        not stat.S_ISREG(opened.st_mode)
+                        or not stat.S_ISREG(path_stat.st_mode)
+                        or (opened.st_dev, opened.st_ino) != (path_stat.st_dev, path_stat.st_ino)
+                    ):
                         return jsonify({"error": "The retained source file could not be verified"}), 409
                     if opened.st_size > LOCAL_SOURCE_PREVIEW_MAX_BYTES:
                         return jsonify({
@@ -7927,6 +7881,12 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             reconciliation_match_id,
             status=status,
             resolution=payload.get("resolution"),
+            actor=(
+                f"local_{g.fab_api_principal}"
+                if getattr(g, "fab_api_principal", None) in {"operator", "hai"}
+                else "local_operator_session"
+            ),
+            request_id=getattr(g, "fab_request_id", None),
         )
         status_code = 404 if result.get("status") == "not_found" else 200
         if result.get("status") == "invalid_status":
@@ -7944,6 +7904,12 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             reconciliation_match_id,
             status=status,
             resolution=f"Resolved from FAB dashboard as {status}.",
+            actor=(
+                f"local_{g.fab_api_principal}"
+                if getattr(g, "fab_api_principal", None) in {"operator", "hai"}
+                else "local_operator_session"
+            ),
+            request_id=getattr(g, "fab_request_id", None),
         )
         if not result.get("success"):
             return jsonify(result), {"not_found": 404, "invalid_status": 400}.get(result.get("status"), 409)
@@ -8897,22 +8863,63 @@ def _reconciliation_matches_for_record(
     return matches[: _bounded_positive_int(limit, default=100, maximum=500)]
 
 
-def _document_source_preview(document: Dict[str, Any], character_limit: int = 5000) -> Dict[str, Any]:
+def _trusted_document_source_path(path: Any, trusted_roots: Any) -> Optional[str]:
+    if not path:
+        return None
+    candidate = os.path.abspath(os.path.expandvars(os.path.expanduser(str(path))))
+    resolved = os.path.realpath(candidate)
+    for root in trusted_roots or []:
+        if not str(root or "").strip():
+            continue
+        trusted_root = os.path.realpath(os.path.abspath(os.path.expanduser(str(root))))
+        try:
+            if os.path.normcase(os.path.commonpath([resolved, trusted_root])) == os.path.normcase(trusted_root):
+                return resolved
+        except ValueError:
+            continue
+    return None
+
+
+def _document_source_preview(
+    document: Dict[str, Any],
+    character_limit: int = 5000,
+    *,
+    trusted_roots: Any = None,
+) -> Dict[str, Any]:
     path = document.get("storage_path")
     if not path:
         return {"status": "No source file path is recorded.", "path": None, "text": None}
-    normalized_path = os.path.abspath(os.path.expandvars(os.path.expanduser(str(path))))
+    normalized_path = _trusted_document_source_path(path, trusted_roots)
+    if not normalized_path:
+        return {"status": "Source file is outside trusted evidence roots.", "path": None, "text": None}
     if not os.path.exists(normalized_path):
         return {"status": "Source file is missing from disk.", "path": normalized_path, "text": None}
     extension = os.path.splitext(normalized_path)[1].lower()
     mime_type = str(document.get("mime_type") or "").lower()
-    file_size = os.path.getsize(normalized_path)
-    if extension in {".txt", ".csv", ".json", ".xml"} or mime_type.startswith("text/"):
+    try:
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(normalized_path, flags)
         try:
-            with open(normalized_path, "r", encoding="utf-8", errors="replace") as handle:
-                text = handle.read(character_limit + 1)
-        except OSError as exc:
-            return {"status": f"Could not read source preview: {exc}", "path": normalized_path, "text": None}
+            with os.fdopen(descriptor, "rb", closefd=False) as handle:
+                opened = os.fstat(descriptor)
+                path_stat = os.stat(normalized_path, follow_symlinks=False)
+                if (
+                    not stat.S_ISREG(opened.st_mode)
+                    or not stat.S_ISREG(path_stat.st_mode)
+                    or (opened.st_dev, opened.st_ino) != (path_stat.st_dev, path_stat.st_ino)
+                ):
+                    return {"status": "Source file could not be verified as a regular file.", "path": None, "text": None}
+                file_size = opened.st_size
+                if extension in {".txt", ".csv", ".json", ".xml"} or mime_type.startswith("text/"):
+                    preview_bytes = handle.read((max(0, character_limit) + 1) * 4)
+                else:
+                    preview_bytes = b""
+        finally:
+            os.close(descriptor)
+    except OSError:
+        return {"status": "Could not verify or read source file.", "path": None, "text": None}
+    if extension in {".txt", ".csv", ".json", ".xml"} or mime_type.startswith("text/"):
+        text = preview_bytes.decode("utf-8", errors="replace")
         truncated = len(text) > character_limit
         if truncated:
             text = text[:character_limit] + "\n... truncated ..."

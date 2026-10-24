@@ -13,7 +13,7 @@ from typing import Any, Dict, Optional, Sequence
 
 VENDOR_CATEGORY_RULE_STATUSES = {"suggested", "approved", "rejected", "disabled", "learned"}
 GOVERNED_VENDOR_CATEGORY_RULE_STATUSES = {"approved", "rejected", "disabled"}
-LEDGER_SCHEMA_VERSION = 1
+LEDGER_SCHEMA_VERSION = 2
 MAX_ERROR_DIAGNOSTIC_INPUT_CHARS = 16_384
 MAX_ERROR_DIAGNOSTIC_OUTPUT_CHARS = 2_000
 MISSING_REVIEW_MATCH_REFERENCE_SQL = (
@@ -38,6 +38,12 @@ LEDGER_SCHEMA_MIGRATIONS = {
         "name": "operations_ledger_baseline_2026_08_09",
         "checksum": hashlib.sha256(
             b"FAB operations ledger schema v1: baseline through runtime controls and support diagnostics"
+        ).hexdigest(),
+    },
+    2: {
+        "name": "bounded_source_scan_manifest_2026_10_16",
+        "checksum": hashlib.sha256(
+            b"FAB operations ledger schema v2: resumable indexed local-folder scan manifests"
         ).hexdigest(),
     },
 }
@@ -101,6 +107,14 @@ def _quote_sql_identifier(identifier: str) -> str:
     if not parts or any(not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", part) for part in parts):
         raise ValueError("Invalid SQLite identifier.")
     return ".".join(f'"{part}"' for part in parts)
+
+
+class SourceScanManifestLimitError(RuntimeError):
+    def __init__(self, reason: str, *, max_entries: int, max_path_bytes: int):
+        super().__init__(reason)
+        self.reason = reason
+        self.max_entries = max_entries
+        self.max_path_bytes = max_path_bytes
 
 
 class LocalOperationsLedger:
@@ -272,6 +286,22 @@ class LocalOperationsLedger:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     UNIQUE(source_type, source_identifier)
+                );
+
+                CREATE TABLE IF NOT EXISTS source_scan_state (
+                    source_account_id INTEGER PRIMARY KEY,
+                    last_path TEXT,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(source_account_id) REFERENCES source_accounts(id) ON DELETE CASCADE
+                );
+
+                CREATE TABLE IF NOT EXISTS source_scan_manifest (
+                    source_account_id INTEGER NOT NULL,
+                    sequence INTEGER NOT NULL,
+                    path TEXT NOT NULL,
+                    PRIMARY KEY(source_account_id, sequence),
+                    UNIQUE(source_account_id, path),
+                    FOREIGN KEY(source_account_id) REFERENCES source_accounts(id) ON DELETE CASCADE
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_local_sources_type
@@ -1583,6 +1613,129 @@ class LocalOperationsLedger:
                 },
             )
 
+    def get_source_scan_cursor(self, source_account_id: int) -> Optional[str]:
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT last_path FROM source_scan_state WHERE source_account_id = ?",
+                (int(source_account_id),),
+            ).fetchone()
+        return str(row["last_path"]) if row and row["last_path"] else None
+
+    def set_source_scan_cursor(self, source_account_id: int, last_path: Optional[str]) -> None:
+        with self._connection() as connection:
+            if not last_path:
+                connection.execute(
+                    "DELETE FROM source_scan_state WHERE source_account_id = ?",
+                    (int(source_account_id),),
+                )
+                return
+            connection.execute(
+                """
+                INSERT INTO source_scan_state (source_account_id, last_path, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(source_account_id) DO UPDATE SET
+                    last_path = excluded.last_path,
+                    updated_at = excluded.updated_at
+                """,
+                (int(source_account_id), str(last_path), self._now()),
+            )
+
+    def rebuild_source_scan_manifest(
+        self,
+        source_account_id: int,
+        entries,
+        *,
+        max_entries: int = 100_000,
+        max_path_bytes: int = 16 * 1024 * 1024,
+    ) -> None:
+        """Replace one folder's path manifest, committing in bounded chunks."""
+        account_id = int(source_account_id)
+        sequence = 0
+        path_bytes = 0
+        batch = []
+        with self._connection() as connection:
+            connection.execute(
+                "DELETE FROM source_scan_manifest WHERE source_account_id = ?",
+                (account_id,),
+            )
+            # Do not hold SQLite's writer lock while the filesystem is enumerated.
+            # An interrupted build is rebuilt on retry because the cursor advances
+            # only after a complete document batch has been registered.
+            connection.commit()
+            try:
+                for path in entries:
+                    value = str(path)
+                    encoded_size = len(value.encode("utf-8", errors="surrogateescape"))
+                    if sequence >= max_entries or path_bytes + encoded_size > max_path_bytes:
+                        raise SourceScanManifestLimitError(
+                            "manifest_limit_exceeded",
+                            max_entries=max_entries,
+                            max_path_bytes=max_path_bytes,
+                        )
+                    batch.append((account_id, sequence, value))
+                    sequence += 1
+                    path_bytes += encoded_size
+                    if len(batch) >= 500:
+                        connection.executemany(
+                            """
+                            INSERT INTO source_scan_manifest
+                                (source_account_id, sequence, path)
+                            VALUES (?, ?, ?)
+                            """,
+                            batch,
+                        )
+                        connection.commit()
+                        batch.clear()
+                if batch:
+                    connection.executemany(
+                        """
+                        INSERT INTO source_scan_manifest
+                            (source_account_id, sequence, path)
+                        VALUES (?, ?, ?)
+                        """,
+                        batch,
+                    )
+            except Exception:
+                connection.rollback()
+                connection.execute(
+                    "DELETE FROM source_scan_manifest WHERE source_account_id = ?",
+                    (account_id,),
+                )
+                connection.commit()
+                raise
+
+
+    def get_source_scan_batch(
+        self,
+        source_account_id: int,
+        after_path: Optional[str],
+        limit: int,
+    ) -> list:
+        account_id = int(source_account_id)
+        bounded_limit = max(1, min(1000, int(limit)))
+        with self._connection() as connection:
+            after_sequence = -1
+            if after_path:
+                cursor_row = connection.execute(
+                    """
+                    SELECT sequence FROM source_scan_manifest
+                    WHERE source_account_id = ? AND path = ?
+                    LIMIT 1
+                    """,
+                    (account_id, str(after_path)),
+                ).fetchone()
+                if cursor_row:
+                    after_sequence = int(cursor_row["sequence"])
+            rows = connection.execute(
+                """
+                SELECT path FROM source_scan_manifest
+                WHERE source_account_id = ? AND sequence > ?
+                ORDER BY sequence ASC LIMIT ?
+                """,
+                (account_id, after_sequence, bounded_limit),
+            ).fetchall()
+        return [self._row_to_dict(row) for row in rows]
+
     def create_workflow_run(self, payload: Dict[str, Any], preferred_id: Optional[int] = None) -> int:
         now = self._now()
         metadata = payload.get("metadata")
@@ -2449,6 +2602,62 @@ class LocalOperationsLedger:
         with self._connection() as connection:
             rows = connection.execute(query, params).fetchall()
         return [self._row_to_dict(row) for row in rows]
+
+    def latest_export_attempts_for_records(
+        self,
+        records: Sequence[Dict[str, Any]],
+        target_system: Optional[str] = None,
+    ) -> Dict[int, Dict[str, Any]]:
+        """Return one latest matching attempt per record using bounded queries."""
+        selected = [
+            (record_id, document_id)
+            for record in records
+            if (record_id := self._optional_int(record.get("id"))) is not None
+            for document_id in (self._optional_int(record.get("document_id")),)
+        ]
+        if not selected:
+            return {}
+
+        latest: Dict[int, Dict[str, Any]] = {}
+        query_batch_size = 400
+        target_filter = "WHERE attempts.target_system = ?" if target_system else ""
+        with self._connection() as connection:
+            for start in range(0, len(selected), query_batch_size):
+                selected_batch = selected[start : start + query_batch_size]
+                values_sql = ", ".join("(?, ?)" for _ in selected_batch)
+                params: list = [value for pair in selected_batch for value in pair]
+                if target_system:
+                    params.append(target_system)
+                rows = connection.execute(
+                    f"""
+                    WITH selected_records(record_id, document_id) AS (
+                        VALUES {values_sql}
+                    )
+                    SELECT selected_records.record_id AS selected_record_id,
+                           attempts.*
+                    FROM selected_records
+                    JOIN export_attempts AS attempts
+                      ON attempts.bookkeeping_record_id = selected_records.record_id
+                      OR (
+                          selected_records.document_id IS NOT NULL
+                          AND attempts.document_id = selected_records.document_id
+                      )
+                    {target_filter}
+                    ORDER BY selected_records.record_id,
+                             CASE WHEN attempts.bookkeeping_record_id = selected_records.record_id
+                                  THEN 0 ELSE 1 END,
+                             attempts.updated_at DESC,
+                             attempts.id DESC
+                    """,
+                    params,
+                ).fetchall()
+                for row in rows:
+                    record_id = int(row["selected_record_id"])
+                    if record_id not in latest:
+                        attempt = self._row_to_dict(row)
+                        attempt.pop("selected_record_id", None)
+                        latest[record_id] = attempt
+        return latest
 
     def create_reconciliation_match(self, payload: Dict[str, Any], preferred_id: Optional[int] = None) -> int:
         return self._insert(
@@ -4909,6 +5118,29 @@ class LocalOperationsLedger:
             ).fetchone()
         return self._row_to_dict(row) if row else None
 
+    def get_document_for_processing(self, document_id: int) -> Optional[Dict[str, Any]]:
+        """Load the document and open reviews needed by processing, not its histories."""
+        with self._connection() as connection:
+            document = connection.execute(
+                "SELECT * FROM bookkeeping_documents WHERE id = ? LIMIT 1",
+                (document_id,),
+            ).fetchone()
+            if not document:
+                return None
+            result = self._row_to_dict(document)
+            result["review_items"] = [
+                self._row_to_dict(row)
+                for row in connection.execute(
+                    """
+                    SELECT * FROM review_items
+                    WHERE document_id = ? AND status IN ('pending', 'in_review')
+                    ORDER BY created_at DESC, id DESC
+                    """,
+                    (document_id,),
+                ).fetchall()
+            ]
+            return result
+
     def get_document(self, document_id: int) -> Optional[Dict[str, Any]]:
         with self._connection() as connection:
             document = connection.execute(
@@ -6273,6 +6505,10 @@ class LocalOperationsLedger:
                 ON export_attempts(target_system);
             CREATE INDEX IF NOT EXISTS idx_local_exports_document
                 ON export_attempts(document_id);
+            CREATE INDEX IF NOT EXISTS idx_local_exports_record_recent
+                ON export_attempts(bookkeeping_record_id, updated_at DESC, id DESC);
+            CREATE INDEX IF NOT EXISTS idx_local_exports_document_recent
+                ON export_attempts(document_id, updated_at DESC, id DESC);
             """
         )
 

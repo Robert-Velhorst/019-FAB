@@ -8,6 +8,7 @@ from src.operations.local_autonomy import LocalAutonomousService
 from src.operations.local_autonomy_control import AUTONOMY_RESUME_CONFIRMATION
 from src.operations.local_bank_transactions import LocalBankTransactionImportService
 from src.operations.local_exports import EXPORT_APPROVAL_PHRASE, LocalExportAttemptService
+from src.operations.local_intake import LOCAL_FOLDER_INTAKE_LEASE_NAME
 from src.operations.local_ledger import LocalOperationsLedger
 from src.operations.local_readiness import LocalReadinessService
 from src.operations.local_routing import LocalRoutingService
@@ -16,6 +17,20 @@ from src.utils.rate_limiter import RateLimiter, reset_all_limiters, set_rate_lim
 
 
 class TestLocalAutonomousService(unittest.TestCase):
+    def test_autonomy_reports_concurrent_intake_as_skipped_not_completed(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = LocalOperationsLedger(os.path.join(temp_dir, "fab.sqlite3"))
+            intake_dir = os.path.join(temp_dir, "sort-out")
+            os.makedirs(intake_dir)
+            service = LocalAutonomousService(ledger, {}, intake_paths=[intake_dir])
+            ledger.acquire_runtime_lease(LOCAL_FOLDER_INTAKE_LEASE_NAME, "manual-intake")
+
+            result = service._run_rescan()
+
+            self.assertEqual(result["status"], "skipped")
+            self.assertEqual(result["reason"], "intake_already_running")
+            self.assertTrue(ledger.release_runtime_lease(LOCAL_FOLDER_INTAKE_LEASE_NAME, "manual-intake"))
+
     def test_autonomy_plan_uses_one_consistent_ledger_snapshot(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             app = create_app({

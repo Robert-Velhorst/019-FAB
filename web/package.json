@@ -12,6 +12,8 @@
     "format": "prettier --write .",
     "test": "vitest run",
     "verify:production-build": "node scripts/verify-production-build.mjs",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit generate && drizzle-kit migrate"
   },
   "dependencies": {

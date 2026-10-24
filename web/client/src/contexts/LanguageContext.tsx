@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
+import { readLocalStorage, writeLocalStorage } from "@/lib/safeLocalStorage";
 
 type Language = "en" | "nl";
 
@@ -1240,16 +1241,14 @@ const LanguageContext = createContext<LanguageContextType | undefined>(undefined
 
 export function LanguageProvider({ children }: { children: ReactNode }) {
   const [lang, setLangState] = useState<Language>(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("fab-lang");
-      if (saved === "en" || saved === "nl") return saved;
-    }
+    const saved = readLocalStorage("fab-lang");
+    if (saved === "en" || saved === "nl") return saved;
     return "en";
   });
 
   const setLang = useCallback((newLang: Language) => {
     setLangState(newLang);
-    localStorage.setItem("fab-lang", newLang);
+    writeLocalStorage("fab-lang", newLang);
   }, []);
 
   const t = useCallback(

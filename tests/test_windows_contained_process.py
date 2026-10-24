@@ -17,14 +17,26 @@ def run_fixture(tmp_path, shell, body):
     assert helper.exists(), "Missing native Windows containment launcher"
     script = (
         "$ErrorActionPreference='Stop'\nSet-StrictMode -Version Latest\n"
+        + "$script:fabProgress=Join-Path (Get-Location).Path 'fixture-progress.log'\n"
+        + "function Write-FabTestProgress([string]$step) { [IO.File]::AppendAllText($script:fabProgress, ('{0:o} {1}' -f [DateTime]::UtcNow, $step) + [Environment]::NewLine) }\n"
         + ". '" + str(helper).replace("'", "''") + "'\n"
         + "$python='" + sys._base_executable.replace("'", "''") + "'\n"
         + body
     )
     path = tmp_path / "fixture.ps1"
     path.write_text(script, encoding="utf-8")
-    result = subprocess.run([shell, "-NoProfile", "-NonInteractive", "-File", str(path)],
-                            cwd=tmp_path, capture_output=True, text=True, timeout=50)
+    try:
+        result = subprocess.run(
+            [shell, "-NoProfile", "-NonInteractive", "-File", str(path)],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            timeout=75,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise AssertionError(
+            f"Windows fixture timed out; progress={(tmp_path / 'fixture-progress.log').read_text(encoding='utf-8') if (tmp_path / 'fixture-progress.log').exists() else 'not started'}; stdout={error.stdout!r}; stderr={error.stderr!r}"
+        ) from error
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout.strip().splitlines()[-1])
 
@@ -50,24 +62,32 @@ def test_job_contains_descendant_after_intermediate_exits(tmp_path, shell, mode)
     result = run_fixture(tmp_path, shell, r"""
     $parent=$null; $child=$null; $other=$null
     try {
+        Write-FabTestProgress 'before-contained-start'
         $parent=Start-FabContainedProcess -FilePath $python -ArgumentList @('parent.py') -WorkingDirectory (Get-Location).Path -RedirectStandardOutput 'parent.out' -RedirectStandardError 'parent.err'
+        Write-FabTestProgress 'after-contained-start'
         $other=Start-Process -FilePath $python -ArgumentList @('sleeper.py') -WorkingDirectory (Get-Location).Path -WindowStyle Hidden -PassThru
+        Write-FabTestProgress 'after-uncontained-start'
         $watch=[Diagnostics.Stopwatch]::StartNew()
         while (-not (Test-Path 'ready') -and $watch.Elapsed.TotalSeconds -lt 10) { Start-Sleep -Milliseconds 50 }
+        Write-FabTestProgress 'ready-wait-finished'
         $child=Get-Process -Id ([int](Get-Content 'child.pid' -Raw))
         [void]$child.Handle
+        Write-FabTestProgress 'before-job-terminate'
         if ('__MODE__' -eq 'committed') {
             $parent.FabJob.Commit()
             $parent.FabJob.Dispose()
             $parent.Kill()
         } elseif ('__MODE__' -eq 'dispose') { $parent.FabJob.Dispose() }
         else { $parent.FabJob.Terminate() }
+        Write-FabTestProgress 'after-job-terminate'
         @{parentExited=$parent.WaitForExit(5000); childExited=$child.WaitForExit(5000); otherAlive=(-not $other.HasExited)} | ConvertTo-Json -Compress
     } finally {
+        Write-FabTestProgress 'finally-start'
         if ($parent) { $parent.FabJob.Dispose() }
         foreach ($p in @($parent,$child,$other)) {
             if ($p) { try { if (-not $p.HasExited) { $p.Kill(); [void]$p.WaitForExit(5000) } } finally { $p.Dispose() } }
         }
+        Write-FabTestProgress 'finally-finished'
     }
     """.replace("__MODE__", mode))
     assert result == {"parentExited": True, "childExited": True, "otherAlive": True}

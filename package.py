@@ -40,6 +40,7 @@ class PackageBuilder:
         },
         "compose": {
             "Dockerfile",
+            "Migrate-FAB-Compose-Tokens.ps1",
             "docker-compose.maintenance.yml",
             "docker-compose.yml",
             "config/config_template.ini",
@@ -47,6 +48,7 @@ class PackageBuilder:
             "requirements.lock",
             "requirements-ml.lock",
             "src/main.py",
+            "src/security/compose_token_migration.py",
             "web/Dockerfile",
             "web/package.json",
             "web/pnpm-lock.yaml",

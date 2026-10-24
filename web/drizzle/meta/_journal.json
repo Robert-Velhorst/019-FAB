@@ -64,6 +64,13 @@
       "when": 1782864000000,
       "tag": "0008_record_backed_routing_attempts",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "5",
+      "when": 1792249082000,
+      "tag": "0009_revocable_oauth_sessions",
+      "breakpoints": true
     }
   ]
 }

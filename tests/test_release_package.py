@@ -1,4 +1,5 @@
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 import subprocess
@@ -17,6 +18,14 @@ class ReleasePackageTests(unittest.TestCase):
         self.root = Path(self.temp_dir.name) / "source"
         self.output = Path(self.temp_dir.name) / "release"
         self.root.mkdir()
+        git_config_count = int(os.environ.get("GIT_CONFIG_COUNT", "0"))
+        git_environment = patch.dict(os.environ, {
+            "GIT_CONFIG_COUNT": str(git_config_count + 1),
+            f"GIT_CONFIG_KEY_{git_config_count}": "safe.directory",
+            f"GIT_CONFIG_VALUE_{git_config_count}": str(self.root),
+        })
+        git_environment.start()
+        self.addCleanup(git_environment.stop)
         self._write_required_sources()
         self._git("init", "--quiet")
         self._git("config", "user.name", "FAB Tests")
@@ -46,6 +55,10 @@ class ReleasePackageTests(unittest.TestCase):
         self.assertNotIn("FAB/config/config.ini", names)
         self.assertEqual(manifest["fileCount"], len(manifest["files"]))
         self.assertEqual(manifest["sourceCommit"], self._git_output("rev-parse", "HEAD"))
+        with zipfile.ZipFile(compose_path, "r") as release:
+            compose_names = release.namelist()
+        self.assertIn("FAB/Migrate-FAB-Compose-Tokens.ps1", compose_names)
+        self.assertIn("FAB/src/security/compose_token_migration.py", compose_names)
 
     def test_refuses_modified_tracked_sources(self):
         (self.root / "README.md").write_text("modified\n", encoding="utf-8")
@@ -135,6 +148,7 @@ class ReleasePackageTests(unittest.TestCase):
     def _write_required_sources(self):
         files = {
             "Start-FAB.ps1": "Write-Output 'start'\n",
+            "Migrate-FAB-Compose-Tokens.ps1": "Write-Output 'migrate'\n",
             "Start-FAB-Maintenance.cmd": "@echo off\n",
             "Stop-FAB.ps1": "Write-Output 'stop'\n",
             "config/config_template.ini": "[operations]\nenabled=false\n",
@@ -143,6 +157,7 @@ class ReleasePackageTests(unittest.TestCase):
             "requirements.lock": "Flask==3.1.0\n",
             "requirements-ml.lock": "joblib==1.0.0\n",
             "src/main.py": "def main(): return 0\n",
+            "src/security/compose_token_migration.py": "def main(): return 0\n",
             "web/package.json": '{"name":"fab-test"}\n',
             "web/pnpm-lock.yaml": "lockfileVersion: '9.0'\n",
             "web/Dockerfile": "FROM node:22-slim\n",

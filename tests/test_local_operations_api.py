@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from flask import request
+from requests.exceptions import Timeout
 
 from src.operations.local_backup import (
     FULL_RESTORE_CONFIRMATION_PHRASE,
@@ -22,9 +23,9 @@ from src.operations.local_api import (
     MAX_LOCAL_BANK_IMPORT_REQUEST_BYTES,
     MAX_LOCAL_INTAKE_REQUEST_BYTES,
     DEFAULT_LOCAL_JSON_MUTATION_REQUEST_BYTES,
+    MAX_LOCAL_LOGIN_REQUEST_BYTES,
     MAX_LOCAL_DRIVE_RELAY_REQUEST_BYTES,
     MAX_LOCAL_OAUTH_CREDENTIAL_REQUEST_BYTES,
-    MAX_LOCAL_WAVE_READBACK_REQUEST_BYTES,
     MAX_LOCAL_WAVE_REPORT_RESULT_REQUEST_BYTES,
     MAX_RECONCILIATION_REQUEST_BYTES,
     _sanitize_public_diagnostics,
@@ -59,12 +60,13 @@ class TestLocalOperationsApi(unittest.TestCase):
             })
             observed = {}
             expected = {
+                "login": MAX_LOCAL_LOGIN_REQUEST_BYTES,
                 "upload_intake_document": MAX_LOCAL_INTAKE_REQUEST_BYTES,
                 "import_bank_transactions": MAX_LOCAL_BANK_IMPORT_REQUEST_BYTES,
                 "import_bank_transactions_form": MAX_LOCAL_BANK_IMPORT_REQUEST_BYTES,
                 "install_gmail_credentials_api": MAX_LOCAL_OAUTH_CREDENTIAL_REQUEST_BYTES,
                 "install_google_drive_credentials_api": MAX_LOCAL_OAUTH_CREDENTIAL_REQUEST_BYTES,
-                "drive_wave_attachment_readback_api": MAX_LOCAL_WAVE_READBACK_REQUEST_BYTES,
+                "drive_wave_attachment_readback_api": DEFAULT_LOCAL_JSON_MUTATION_REQUEST_BYTES,
                 "record_wave_report_result": MAX_LOCAL_WAVE_REPORT_RESULT_REQUEST_BYTES,
                 "google_drive_relay_intake_api": MAX_LOCAL_DRIVE_RELAY_REQUEST_BYTES,
                 "run_autonomy": MAX_RECONCILIATION_REQUEST_BYTES,
@@ -82,6 +84,7 @@ class TestLocalOperationsApi(unittest.TestCase):
 
             client = app.test_client()
             paths = {
+                "login": "/login",
                 "upload_intake_document": "/api/intake/upload",
                 "import_bank_transactions": "/api/bank-transactions/import",
                 "import_bank_transactions_form": "/bank-transactions/import",
@@ -94,7 +97,11 @@ class TestLocalOperationsApi(unittest.TestCase):
                 "refresh_notifications_api": "/api/notifications/refresh",
             }
             for endpoint, path in paths.items():
-                response = client.post(path, json={})
+                response = client.post(
+                    path,
+                    data={"token": "test"} if endpoint == "login" else None,
+                    json={} if endpoint != "login" else None,
+                )
                 self.assertEqual(response.status_code, 204, endpoint)
                 self.assertEqual(observed[endpoint], expected[endpoint], endpoint)
 
@@ -140,6 +147,21 @@ class TestLocalOperationsApi(unittest.TestCase):
 
             self.assertEqual(response.status_code, 413)
             self.assertEqual(response.get_json()["errorCode"], "payload_too_large")
+
+    def test_oversized_login_form_is_rejected_by_small_route_limit(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = create_app({
+                "fab_local_ledger_path": os.path.join(temp_dir, "fab.sqlite3"),
+                "fab_local_api_token": "secret",
+            })
+            oversized_form = b"token=" + b"x" * MAX_LOCAL_LOGIN_REQUEST_BYTES
+            response = app.test_client().post(
+                "/login",
+                data=oversized_form,
+                content_type="application/x-www-form-urlencoded",
+            )
+
+            self.assertEqual(response.status_code, 413)
 
     def test_default_api_mutation_limit_rejects_before_json_decode(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -224,7 +246,6 @@ class TestLocalOperationsApi(unittest.TestCase):
             "sourceReadiness",
             "driveAuthorization",
             "haiStatus",
-            "haiManifest",
             "gmailAuthorization",
         }
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -621,20 +642,29 @@ class TestLocalOperationsApi(unittest.TestCase):
             ledger_path = os.path.join(temp_dir, "fab.sqlite3")
             app = create_app({"fab_local_ledger_path": ledger_path})
 
-            @app.get("/api/test-unhandled-error")
-            def test_unhandled_error():
-                raise RuntimeError("financial implementation detail")
+            provider_effects = []
+            private_detail = (
+                f"Failed at {temp_dir}\\private\\ledger.sqlite3\n"
+                'Traceback (most recent call last):\n  File "C:\\FAB\\src\\worker.py", line 42, in run'
+            )
 
-            response = app.test_client().get(
+            @app.post("/api/test-unhandled-error")
+            def test_unhandled_error():
+                provider_effects.append("submitted")
+                raise RuntimeError(private_detail)
+
+            response = app.test_client().post(
                 "/api/test-unhandled-error",
                 headers={"X-Request-ID": "fab-test-error-001"},
             )
 
+            self.assertEqual(provider_effects, ["submitted"])
             self.assertEqual(response.status_code, 500)
             self.assertEqual(response.headers["X-Request-ID"], "fab-test-error-001")
             self.assertEqual(response.get_json()["errorCode"], "internal_error")
             self.assertEqual(response.get_json()["message"], "Internal server error")
-            self.assertNotIn("financial implementation detail", response.get_data(as_text=True))
+            self.assertNotIn(temp_dir, response.get_data(as_text=True))
+            self.assertNotIn("Traceback", response.get_data(as_text=True))
             audit = LocalOperationsLedger(ledger_path).find_audit_event(
                 "local_api.unhandled_exception",
                 "api_request",
@@ -642,7 +672,9 @@ class TestLocalOperationsApi(unittest.TestCase):
             )
             self.assertEqual(audit["details"]["errorType"], "RuntimeError")
             self.assertEqual(audit["details"]["endpoint"], "test_unhandled_error")
-            self.assertNotIn("financial implementation detail", str(audit))
+            self.assertEqual(audit["details"]["externalSubmission"], "unknown")
+            self.assertNotIn(temp_dir, str(audit))
+            self.assertNotIn("Traceback", str(audit))
 
     def test_api_diagnostics_hide_local_paths_and_tracebacks(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1916,6 +1948,77 @@ class TestLocalOperationsApi(unittest.TestCase):
             self.assertIn("workflow.document.imported", html)
             self.assertIn(f"/review/{review_id}/resolve", html)
 
+    def test_document_previews_reject_symlinks_outside_trusted_roots(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fab_root = os.path.join(temp_dir, "fab")
+            intake_root = os.path.join(fab_root, "intake")
+            outside_root = os.path.join(temp_dir, "outside")
+            os.makedirs(intake_root)
+            os.makedirs(outside_root)
+            ledger_path = os.path.join(fab_root, "fab.sqlite3")
+            outside_path = os.path.join(outside_root, "private.txt")
+            source_path = os.path.join(intake_root, "receipt.txt")
+            outside_bytes = b"PRIVATE OUTSIDE ROOT"
+            with open(outside_path, "wb") as handle:
+                handle.write(outside_bytes)
+            try:
+                os.symlink(outside_path, source_path)
+            except OSError as exc:
+                self.skipTest(f"File symlinks are unavailable: {exc}")
+
+            ledger = LocalOperationsLedger(ledger_path)
+            document_id = ledger.register_document({
+                "source": "scanner",
+                "sourceDocumentId": "symlink-preview",
+                "originalFilename": "receipt.txt",
+                "mimeType": "text/plain",
+                "storagePath": source_path,
+                "contentSha256": hashlib.sha256(outside_bytes).hexdigest(),
+            })
+            app = create_app({
+                "fab_local_ledger_path": ledger_path,
+                "fab_local_intake_paths": [intake_root],
+            })
+            client = app.test_client()
+
+            detail = client.get(f"/documents/{document_id}")
+            source = client.get(f"/api/documents/{document_id}/source")
+
+            self.assertEqual(detail.status_code, 200)
+            self.assertNotIn(b"PRIVATE OUTSIDE ROOT", detail.data)
+            self.assertIn(b"outside trusted evidence roots", detail.data)
+            self.assertEqual(source.status_code, 409)
+            self.assertNotIn(b"PRIVATE OUTSIDE ROOT", source.data)
+
+    def test_document_previews_reject_paths_outside_trusted_roots(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fab_root = os.path.join(temp_dir, "fab")
+            outside_root = os.path.join(temp_dir, "outside")
+            os.makedirs(fab_root)
+            os.makedirs(outside_root)
+            ledger_path = os.path.join(fab_root, "fab.sqlite3")
+            outside_path = os.path.join(outside_root, "private.txt")
+            with open(outside_path, "w", encoding="utf-8") as handle:
+                handle.write("PRIVATE OUTSIDE ROOT")
+            ledger = LocalOperationsLedger(ledger_path)
+            document_id = ledger.register_document({
+                "source": "scanner",
+                "sourceDocumentId": "outside-root-preview",
+                "originalFilename": "private.txt",
+                "mimeType": "text/plain",
+                "storagePath": outside_path,
+            })
+            app = create_app({"fab_local_ledger_path": ledger_path})
+            client = app.test_client()
+
+            detail = client.get(f"/documents/{document_id}")
+            source = client.get(f"/api/documents/{document_id}/source")
+
+            self.assertEqual(detail.status_code, 200)
+            self.assertNotIn(b"PRIVATE OUTSIDE ROOT", detail.data)
+            self.assertEqual(source.status_code, 409)
+            self.assertNotIn(b"PRIVATE OUTSIDE ROOT", source.data)
+
     def test_document_source_api_serves_only_checksum_verified_preview_bytes(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             ledger_path = os.path.join(temp_dir, "fab.sqlite3")
@@ -2652,6 +2755,7 @@ class TestLocalOperationsApi(unittest.TestCase):
                         "status": "outcome_unknown",
                         "review_reason": "wave_api_outcome_unknown",
                         "message": "Check Wave before taking further action.",
+                        "provider_external_id": "fab:wave-observation-api",
                     }
 
             route = LocalRoutingService(ledger, config).prepare_document_route(document_id)
@@ -2689,11 +2793,59 @@ class TestLocalOperationsApi(unittest.TestCase):
             self.assertFalse(api_result.get_json()["sourceArchivalAllowed"])
             self.assertIn("Record Wave check", html)
             self.assertIn("Observation only", html)
+            self.assertIn("FAB external reference (not confirmation)", html)
+            self.assertIn("fab:wave-observation-api", html)
             self.assertEqual(form_result.status_code, 302)
             attempt = LocalOperationsLedger(ledger_path).get_export_attempt(export_id)
             self.assertEqual(attempt["status"], "failed")
             self.assertEqual(attempt["external_submission"], "unknown")
             self.assertEqual(len(attempt["metadata"]["operatorReconciliationHistory"]), 2)
+
+    def test_real_wave_export_timeout_persists_request_reference_and_never_retries(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger_path = os.path.join(temp_dir, "fab.sqlite3")
+            config = {
+                "fab_local_ledger_path": ledger_path,
+                "waveapps_default_target": "waveapps_business",
+                "waveapps_business_access_token": "test-token",
+                "waveapps_business_id": "business-1",
+                "waveapps_business_anchor_account_id": "bank-account-1",
+                "waveapps_business_category_account_ids": {"Office Supplies": "expense-account-1"},
+            }
+            ledger = LocalOperationsLedger(ledger_path)
+            document_id = ledger.register_document({
+                "source": "scanner",
+                "sourceDocumentId": "wave-timeout-reference",
+                "originalFilename": "receipt.txt",
+                "documentType": "receipt",
+                "processingStatus": "reviewed",
+                "vendorName": "Office Shop",
+                "category": "Office Supplies",
+                "transactionDate": "2026-07-10",
+                "totalAmount": 42.5,
+            })
+            route = LocalRoutingService(ledger, config).prepare_document_route(document_id)
+            service = LocalExportAttemptService(ledger, config)
+            prepared = service.prepare_from_routing_attempt(route["routingAttemptId"])
+            attempt_id = prepared["exportAttemptId"]
+            service.approve_attempt(attempt_id, confirmation=EXPORT_APPROVAL_PHRASE)
+
+            with patch(
+                "src.data_entry.waveapps_business_handler.requests.post",
+                side_effect=Timeout("provider response timed out"),
+            ) as wave_post:
+                result = service.execute_attempt(attempt_id)
+                attempt = ledger.get_export_attempt(attempt_id)
+                request_external_id = wave_post.call_args.kwargs["json"]["variables"]["input"]["externalId"]
+                repeated = service.execute_attempt(attempt_id)
+
+            self.assertEqual(result["status"], "failed")
+            self.assertEqual(attempt["external_submission"], "unknown")
+            self.assertIsNone(attempt["external_id"])
+            self.assertEqual(attempt["metadata"]["lastExecution"]["providerExternalId"], request_external_id)
+            self.assertEqual(request_external_id, f"fab:{prepared['operationId']}")
+            self.assertEqual(repeated["status"], "not_executable")
+            wave_post.assert_called_once()
 
     def test_api_exposes_mijngeldzaken_export_master_ledger_draft(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -3102,6 +3254,7 @@ class TestLocalOperationsApi(unittest.TestCase):
             resolved = client.post(
                 f"/api/reconciliation/{matches[0]['id']}/resolve",
                 json={"status": "approved", "resolution": "Confirmed from API."},
+                headers={"X-Request-ID": "reconcile-audit-001"},
             )
 
             self.assertEqual(resolved.status_code, 200)
@@ -3109,6 +3262,12 @@ class TestLocalOperationsApi(unittest.TestCase):
             detail = client.get(f"/api/documents/{document_id}").get_json()
             self.assertEqual(detail["processing_status"], "processed")
             self.assertEqual(detail["reconciliation_status"], "reconciled")
+            audit = next(
+                event for event in ledger.list_audit_events(limit=30)
+                if event["action"] == "local_reconciliation.match.resolve"
+            )
+            self.assertEqual(audit["details"]["actor"], "local_operator_session")
+            self.assertEqual(audit["details"]["requestId"], "reconcile-audit-001")
 
     def test_dashboard_reconciliation_form_shows_summary(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -3756,6 +3915,31 @@ class TestLocalOperationsApi(unittest.TestCase):
                 response.get_json()["reasons"][0],
                 "Archive did not complete. Review the audit record.",
             )
+
+    def test_drive_archive_api_preserves_unknown_provider_outcome(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = create_app({
+                "fab_local_ledger_path": os.path.join(temp_dir, "fab.sqlite3"),
+            })
+            with patch(
+                "src.operations.local_api.DriveWaveDeliveryService.archive_document",
+                return_value={
+                    "success": False,
+                    "status": "blocked",
+                    "reasons": [f"Drive response failed at {temp_dir}\\private\\receipt.pdf"],
+                    "externalSubmission": "unknown",
+                },
+            ):
+                response = app.test_client().post("/api/drive-wave/documents/1/archive", json={})
+
+            self.assertEqual(response.status_code, 409)
+            payload = response.get_json()
+            self.assertEqual(payload["externalSubmission"], "unknown")
+            self.assertEqual(
+                payload["reasons"],
+                ["Archive did not complete. Review the audit record."],
+            )
+            self.assertNotIn(temp_dir, response.get_data(as_text=True))
 
     def test_drive_archive_success_response_keeps_only_verified_fields(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -5260,31 +5444,33 @@ class TestLocalOperationsApi(unittest.TestCase):
                 "Untrusted host for loopback-only service",
             )
 
-    def test_dashboard_session_allows_opaque_origin_forms_but_not_api_mutations(self):
+    def test_dashboard_session_rejects_opaque_origin_export_execution(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             app = create_app({
                 "fab_local_ledger_path": os.path.join(temp_dir, "fab.sqlite3"),
             })
             client = app.test_client()
 
-            unprimed = client.post(
-                "/workflows/recovery/run-due",
-                headers={"Origin": "null"},
-            )
             client.get("/")
-            form_response = client.post(
-                "/workflows/recovery/run-due",
-                data={"source": "dashboard"},
-                headers={"Origin": "null"},
-            )
-            api_response = client.post(
-                "/api/workflows/recovery/run-due",
-                headers={"Origin": "null"},
-            )
+            with patch.object(
+                LocalExportAttemptService,
+                "execute_attempt",
+                return_value={"success": True, "status": "executed"},
+            ) as execute_attempt:
+                opaque_origin_response = client.post(
+                    "/export-attempts/1/execute",
+                    data={"confirm": "yes"},
+                    headers={"Origin": "null"},
+                )
+                same_origin_response = client.post(
+                    "/export-attempts/1/execute",
+                    data={"confirm": "yes"},
+                    headers={"Origin": "http://localhost"},
+                )
 
-            self.assertEqual(unprimed.status_code, 403)
-            self.assertEqual(form_response.status_code, 302)
-            self.assertEqual(api_response.status_code, 403)
+            self.assertEqual(opaque_origin_response.status_code, 403)
+            self.assertEqual(same_origin_response.status_code, 302)
+            execute_attempt.assert_called_once_with(1, actor="dashboard")
 
     def test_tokenless_apps_use_unpredictable_session_signing_keys(self):
         with tempfile.TemporaryDirectory() as temp_dir:

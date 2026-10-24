@@ -18,6 +18,8 @@ from src.validation.financial_consistency import finite_number
 FINAL_RECONCILIATION_STATUSES = {"approved", "reconciled", "ignored"}
 OPEN_RECONCILIATION_STATUSES = ("not_started", "candidate", "missing_receipt", "needs_review", "rejected", "resolved")
 MAX_BANK_STATEMENT_BYTES = 4 * 1024 * 1024
+MAX_BANK_STATEMENT_TRANSACTIONS = 10_000
+MAX_RETURNED_BANK_TRANSACTION_IDS = 100
 SUPPORTED_BANK_STATEMENT_FORMATS = {"csv", "json", "camt", "mt940"}
 BANK_STATEMENT_FILE_EXTENSIONS = {
     "csv": {".csv"},
@@ -79,6 +81,7 @@ class LocalBankTransactionImportService:
                 parsed = parsed.get("bankTransactions") or parsed.get("transactions") or []
             if not isinstance(parsed, list):
                 raise ValueError("JSON statement text must be a list or contain transactions")
+            _validate_transaction_count(parsed)
             return self.import_transactions(
                 parsed,
                 account_identifier,
@@ -149,8 +152,15 @@ class LocalBankTransactionImportService:
         format: str = "json",
         actor: str = "local_bank_import",
     ) -> Dict[str, Any]:
-        if not isinstance(transactions, list):
-            transactions = list(transactions or [])
+        if isinstance(transactions, list):
+            _validate_transaction_count(transactions)
+        else:
+            bounded_transactions = []
+            for transaction in transactions or []:
+                if len(bounded_transactions) >= MAX_BANK_STATEMENT_TRANSACTIONS:
+                    raise _transaction_limit_error()
+                bounded_transactions.append(transaction)
+            transactions = bounded_transactions
         account_identifier = str(account_identifier or "default").strip() or "default"
         account_identifier = account_identifier[:200]
         source = str(source or "manual_json").strip()[:120] or "manual_json"
@@ -189,6 +199,7 @@ class LocalBankTransactionImportService:
         identity_conflict_rows: List[Dict[str, Any]] = []
         skipped: List[Dict[str, Any]] = []
         bank_transaction_ids: List[int] = []
+        bank_transaction_id_count = 0
         generated_occurrences: Dict[str, int] = {}
 
         for index, transaction in enumerate(transactions):
@@ -215,7 +226,9 @@ class LocalBankTransactionImportService:
             if existing:
                 if _same_imported_transaction(existing, normalized):
                     duplicates += 1
-                    bank_transaction_ids.append(int(existing["id"]))
+                    bank_transaction_id_count += 1
+                    if len(bank_transaction_ids) < MAX_RETURNED_BANK_TRANSACTION_IDS:
+                        bank_transaction_ids.append(int(existing["id"]))
                     continue
                 identity_conflicts += 1
                 conflict = {
@@ -231,7 +244,9 @@ class LocalBankTransactionImportService:
                 **normalized,
                 "importId": import_id,
             })
-            bank_transaction_ids.append(transaction_record_id)
+            bank_transaction_id_count += 1
+            if len(bank_transaction_ids) < MAX_RETURNED_BANK_TRANSACTION_IDS:
+                bank_transaction_ids.append(transaction_record_id)
             imported += 1
 
         status = (
@@ -247,7 +262,8 @@ class LocalBankTransactionImportService:
             "metadata": {
                 "skipped": skipped[:25],
                 "skippedCount": len(skipped),
-                "bankTransactionIds": bank_transaction_ids[:100],
+                "bankTransactionIds": bank_transaction_ids,
+                "bankTransactionIdsTruncated": bank_transaction_id_count > len(bank_transaction_ids),
                 "identityConflictRows": identity_conflict_rows,
                 "identityConflictsTruncated": identity_conflicts > len(identity_conflict_rows),
             },
@@ -268,6 +284,7 @@ class LocalBankTransactionImportService:
             "identityConflictsTruncated": identity_conflicts > len(identity_conflict_rows),
             "skipped": len(skipped),
             "bankTransactionIds": bank_transaction_ids,
+            "bankTransactionIdsTruncated": bank_transaction_id_count > len(bank_transaction_ids),
             "externalSubmission": "not_executed",
         }
         self.ledger.record_audit_event({
@@ -441,7 +458,11 @@ def _parse_csv_transactions(text: str) -> List[Dict[str, Any]]:
         raise ValueError("CSV bank statement must contain a recognized transaction date column")
     if not normalized_headers.intersection(CSV_AMOUNT_FIELDS):
         raise ValueError("CSV bank statement must contain a recognized amount, debit, or credit column")
-    return [dict(row) for row in reader if row]
+    transactions = []
+    for row in reader:
+        if row:
+            _append_bank_transaction(transactions, dict(row))
+    return transactions
 
 
 def _parse_camt_transactions(text: str) -> List[Dict[str, Any]]:
@@ -456,15 +477,20 @@ def _parse_camt_transactions(text: str) -> List[Dict[str, Any]]:
         raise ValueError("CAMT/XML bank statement is not valid XML") from exc
     transactions: List[Dict[str, Any]] = []
     for entry in _iter_local(root, "Ntry"):
-        amount_text = _first_local_text(entry, "Amt")
+        amount_text = _first_path_text(entry, ("Amt",))
         amount = _parse_number(amount_text)
         credit_debit = (_first_local_text(entry, "CdtDbtInd") or "").upper()
         if amount is not None and credit_debit.startswith("DBIT"):
             amount = -abs(amount)
-        transaction = {
-            "transactionDate": _first_path_text(entry, ("BookgDt", "Dt")) or _first_path_text(entry, ("ValDt", "Dt")),
+        currency = _first_path_attribute(entry, ("Amt",), "Ccy") or "EUR"
+        transaction_date = (
+            _first_path_text(entry, ("BookgDt", "Dt"))
+            or _first_path_text(entry, ("ValDt", "Dt"))
+        )
+        entry_transaction = {
+            "transactionDate": transaction_date,
             "amount": amount,
-            "currency": _first_local_attribute(entry, "Amt", "Ccy") or "EUR",
+            "currency": currency,
             "description": _first_local_text(entry, "Ustrd") or _first_local_text(entry, "AddtlNtryInf"),
             "counterparty": _first_local_text(entry, "Nm"),
             "transactionId": (
@@ -473,18 +499,62 @@ def _parse_camt_transactions(text: str) -> List[Dict[str, Any]]:
                 or _first_local_text(entry, "EndToEndId")
             ),
         }
-        transactions.append(transaction)
+        details = []
+        for detail in _iter_local(entry, "TxDtls"):
+            if len(details) >= MAX_BANK_STATEMENT_TRANSACTIONS:
+                raise _transaction_limit_error()
+            details.append(detail)
+        if len(details) <= 1 or amount is None:
+            _append_bank_transaction(transactions, entry_transaction)
+            continue
+
+        detail_transactions = []
+        detail_total = Decimal("0")
+        safe_to_split = True
+        for detail in details:
+            detail_amount_text = (
+                _first_path_text(detail, ("AmtDtls", "TxAmt", "Amt"))
+                or _first_path_text(detail, ("AmtDtls", "InstdAmt", "Amt"))
+            )
+            detail_amount = _parse_number(detail_amount_text)
+            detail_currency = (
+                _first_path_attribute(detail, ("AmtDtls", "TxAmt", "Amt"), "Ccy")
+                or _first_path_attribute(detail, ("AmtDtls", "InstdAmt", "Amt"), "Ccy")
+            )
+            if detail_amount is None or (detail_currency and detail_currency.upper() != currency.upper()):
+                safe_to_split = False
+                break
+            detail_direction = (_first_local_text(detail, "CdtDbtInd") or credit_debit).upper()
+            signed_amount = -abs(detail_amount) if detail_direction.startswith("DBIT") else abs(detail_amount)
+            detail_total += Decimal(str(signed_amount))
+            detail_transactions.append({
+                "transactionDate": transaction_date,
+                "amount": signed_amount,
+                "currency": detail_currency or currency,
+                "description": _join_nonempty(_iter_local_texts(detail, "Ustrd")) or _first_local_text(detail, "AddtlNtryInf"),
+                "counterparty": _first_local_text(detail, "Nm"),
+                "transactionId": (
+                    _first_path_text(detail, ("Refs", "AcctSvcrRef"))
+                    or _first_path_text(detail, ("Refs", "EndToEndId"))
+                    or _first_path_text(detail, ("Refs", "TxId"))
+                ),
+            })
+        if not safe_to_split or detail_total != Decimal(str(amount)):
+            _append_bank_transaction(transactions, entry_transaction)
+            continue
+        for transaction in detail_transactions:
+            _append_bank_transaction(transactions, transaction)
     return transactions
 
 
 def _parse_mt940_transactions(text: str) -> List[Dict[str, Any]]:
     transactions: List[Dict[str, Any]] = []
     current: Optional[Dict[str, Any]] = None
-    for raw_line in text.splitlines():
+    for raw_line in io.StringIO(text):
         line = raw_line.strip()
         if line.startswith(":61:"):
             if current:
-                transactions.append(current)
+                _append_bank_transaction(transactions, current)
             current = _parse_mt940_61(line, len(transactions) + 1)
         elif line.startswith(":86:") and current is not None:
             description = line[4:].strip()
@@ -496,8 +566,27 @@ def _parse_mt940_transactions(text: str) -> List[Dict[str, Any]]:
                 part for part in [current.get("description"), line] if part
             )
     if current:
-        transactions.append(current)
+        _append_bank_transaction(transactions, current)
     return transactions
+
+
+def _validate_transaction_count(transactions: List[Any]) -> None:
+    if len(transactions) > MAX_BANK_STATEMENT_TRANSACTIONS:
+        raise _transaction_limit_error()
+
+
+def _append_bank_transaction(
+    transactions: List[Dict[str, Any]], transaction: Dict[str, Any]
+) -> None:
+    if len(transactions) >= MAX_BANK_STATEMENT_TRANSACTIONS:
+        raise _transaction_limit_error()
+    transactions.append(transaction)
+
+
+def _transaction_limit_error() -> ValueError:
+    return ValueError(
+        f"Bank statement exceeds the {MAX_BANK_STATEMENT_TRANSACTIONS}-transaction import limit"
+    )
 
 
 def _parse_mt940_61(line: str, sequence: int) -> Dict[str, Any]:
@@ -739,6 +828,32 @@ def _first_local_attribute(root: Element, local_name: str, attribute: str) -> Op
             if value:
                 return value
     return None
+
+
+def _first_path_attribute(root: Element, path: Iterable[str], attribute: str) -> Optional[str]:
+    current = root
+    for local_name in path:
+        next_child = next(
+            (child for child in current if _local_name(child.tag) == local_name),
+            None,
+        )
+        if next_child is None:
+            return None
+        current = next_child
+    return current.attrib.get(attribute)
+
+
+def _iter_local_texts(root: Element, local_name: str) -> Iterable[str]:
+    for element in root.iter():
+        if _local_name(element.tag) == local_name and element.text:
+            value = element.text.strip()
+            if value:
+                yield value
+
+
+def _join_nonempty(values: Iterable[str]) -> Optional[str]:
+    joined = " ".join(values)
+    return joined or None
 
 
 def _local_name(tag: Any) -> str:
