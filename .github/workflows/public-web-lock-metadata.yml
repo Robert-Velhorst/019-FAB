@@ -1,0 +1,61 @@
+name: FAB public web lock metadata
+
+on:
+  pull_request:
+    paths:
+      - web/package.json
+      - .github/workflows/public-web-lock-metadata.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fab-public-web-lock-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  public-web-lock:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out exact candidate source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up current stable Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26.12.1'
+      - name: Set up pinned current stable pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 12.15.0
+          run_install: false
+      - name: Record exact metadata input
+        run: |
+          mkdir -p /tmp/fab-public-lock
+          python - <<'PY'
+          import hashlib, json, pathlib, subprocess
+          payload = pathlib.Path('web/package.json').read_bytes()
+          record = {
+              'git_head': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+              'package_json_sha256': hashlib.sha256(payload).hexdigest(),
+              'node': subprocess.check_output(['node', '--version'], text=True).strip(),
+              'pnpm': subprocess.check_output(['pnpm', '--version'], text=True).strip(),
+              'scope': 'Normal lock metadata only; no application or case acceptance',
+          }
+          pathlib.Path('/tmp/fab-public-lock/input.json').write_text(json.dumps(record, indent=2))
+          pathlib.Path('/tmp/fab-public-lock/package.json').write_bytes(payload)
+          PY
+      - name: Resolve normal lock with strict peer and engine checks
+        run: pnpm --dir web install --lockfile-only --ignore-scripts --strict-peer-dependencies --no-frozen-lockfile
+      - name: Retain resolved lock and immutable input
+        run: cp web/pnpm-lock.yaml /tmp/fab-public-lock/pnpm-lock.yaml
+      - name: Upload exact lock metadata
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fab-public-web-lock-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /tmp/fab-public-lock
+          if-no-files-found: error
+          retention-days: 14
