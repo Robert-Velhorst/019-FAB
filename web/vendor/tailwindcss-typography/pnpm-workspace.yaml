@@ -3,3 +3,11 @@ packages:
 engineStrict: true
 minimumReleaseAge: 1440
 minimumReleaseAgeStrict: true
+strictPeerDependencies: true
+strictDepBuilds: true
+verifyStoreIntegrity: true
+dangerouslyAllowAllBuilds: false
+sideEffectsCache: false
+allowBuilds:
+  "@parcel/watcher@2.6.0": true
+  "unrs-resolver@1.12.2": true

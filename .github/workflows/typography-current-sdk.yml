@@ -66,10 +66,39 @@ jobs:
           }
           (root / 'FAB_HOSTED_INPUT.json').write_text(json.dumps(record, indent=2))
           PY
-      - name: Install current SDK with strict peers engines and intact age policy
-        run: pnpm install --no-frozen-lockfile --strict-peer-dependencies
+      - name: Resolve current SDK normally with strict peers engines and intact age policy
+        run: pnpm install --lockfile-only --strict-peer-dependencies
+      - name: Fetch integrity-bound packages without lifecycle execution
+        run: pnpm fetch
+      - name: Install approved exact native scripts offline without network or privilege escalation
+        id: native-install
+        shell: bash
+        run: |
+          set -euo pipefail
+          runner_uid="$(id -u)"
+          runner_gid="$(id -g)"
+          host_network_namespace="$(readlink /proc/self/ns/net)"
+          sudo unshare --net -- setpriv \
+            --reuid="$runner_uid" --regid="$runner_gid" --clear-groups \
+            --no-new-privs --bounding-set=-all --inh-caps=-all --ambient-caps=-all \
+            env -i HOME="$HOME" PATH="$PATH" PNPM_HOME="$PNPM_HOME" CI=true \
+            GITHUB_ACTIONS=true GITHUB_REPOSITORY="$GITHUB_REPOSITORY" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" \
+            FAB_EXPECTED_UID="$runner_uid" FAB_EXPECTED_GID="$runner_gid" \
+            FAB_HOST_NETWORK_NAMESPACE="$host_network_namespace" \
+            python3 ../../../.github/scripts/fab_typography_offline_install.py
       - name: Execute original complete publisher command
         run: pnpm run ${{ matrix.command }}
+      - name: Audit the complete normally resolved SDK graph
+        if: always() && steps.native-install.outcome == 'success'
+        run: |
+          pnpm audit --audit-level=low --json > FAB_NATIVE_INSTALL_EVIDENCE/full-audit.json
+      - name: Require stable releases throughout the installed graph
+        if: always() && steps.native-install.outcome == 'success'
+        shell: python
+        run: |
+          import json,pathlib
+          rows=json.loads(pathlib.Path('FAB_NATIVE_INSTALL_EVIDENCE/installed-prereleases.json').read_text())
+          assert not rows,'Installed prerelease rows remain; every row is retained without exclusion.'
       - name: Retain exact SDK input and normal resolved lock
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -78,5 +107,6 @@ jobs:
           path: |
             web/vendor/tailwindcss-typography/FAB_HOSTED_INPUT.json
             web/vendor/tailwindcss-typography/pnpm-lock.yaml
+            web/vendor/tailwindcss-typography/FAB_NATIVE_INSTALL_EVIDENCE/
           if-no-files-found: error
           retention-days: 14
