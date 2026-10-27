@@ -3,6 +3,7 @@ name: FAB public web lock metadata
 on:
   pull_request:
     paths:
+      - web/pnpm-lock.yaml
       - web/package.json
       - web/pnpm-workspace.yaml
       - web/vendor/tailwindcss-typography/**

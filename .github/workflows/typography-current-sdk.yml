@@ -3,6 +3,8 @@ name: FAB current Typography parent SDK
 on:
   pull_request:
     paths:
+      - web/pnpm-lock.yaml
+      - .github/scripts/fab_typography_offline_install.py
       - web/vendor/tailwindcss-typography/**
       - .github/workflows/typography-current-sdk.yml
 

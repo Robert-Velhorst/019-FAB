@@ -165,7 +165,6 @@ settings:
 overrides:
   '@esbuild-kit/core-utils>esbuild': 0.28.2
   katex: 0.19.1
-  postcss-selector-parser: 7.1.7
   proxy-addr: 2.0.8
   source-map-js: 1.2.2
 
@@ -385,8 +384,8 @@ importers:
         version: 4.6.7
     devDependencies:
       '@tailwindcss/typography':
-        specifier: 0.5.20
-        version: 0.5.20(tailwindcss@4.3.3)
+        specifier: file:vendor/tailwindcss-typography
+        version: file:vendor/tailwindcss-typography(tailwindcss@4.3.3)
       '@tailwindcss/vite':
         specifier: 4.3.3
         version: 4.3.3(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15))
@@ -1855,8 +1854,8 @@ packages:
     resolution: {integrity: sha512-krXjAikiaFSPaK/FkAQT5UTx3VormQaiZ5hBFlJZ9UFQGB/rwg1MZIhHAG9smMQRTdyJxP6Qt5MwMtdyU5FWrA==}
     engines: {node: '>= 20'}
 
-  '@tailwindcss/typography@0.5.20':
-    resolution: {integrity: sha512-hwbzQuNUfcPvbegQFatVPl/MY/tcM9KLl963hQ5laJKPh81TEZ1+dNG9PirGvcaDBkp+BCshExAyKVPW91dozw==}
+  '@tailwindcss/typography@file:vendor/tailwindcss-typography':
+    resolution: {directory: vendor/tailwindcss-typography, type: directory}
     peerDependencies:
       tailwindcss: '>=3.0.0 || >=4.0.0 || insiders'
 
@@ -5053,7 +5052,7 @@ snapshots:
       '@tailwindcss/oxide-win32-arm64-msvc': 4.3.3
       '@tailwindcss/oxide-win32-x64-msvc': 4.3.3
 
-  '@tailwindcss/typography@0.5.20(tailwindcss@4.3.3)':
+  '@tailwindcss/typography@file:vendor/tailwindcss-typography(tailwindcss@4.3.3)':
     dependencies:
       postcss-selector-parser: 7.1.7
       tailwindcss: 4.3.3
