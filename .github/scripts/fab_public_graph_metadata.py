@@ -17,6 +17,8 @@ def config(key):
     raw=subprocess.check_output(['pnpm','--dir','web','config','get',key,'--json'],text=True).strip()
     return None if raw in {'','undefined'} else json.loads(raw)
 policy={key:config(key) for key in ['engineStrict','minimumReleaseAge','minimumReleaseAgeStrict','minimumReleaseAgeExclude','minimumReleaseAgeIgnoreMissingTime','verifyStoreIntegrity','trustPolicy']}
+(output/'effective-pnpm-policy.json').write_text(json.dumps(policy,indent=2)+'\n')
+print(json.dumps({'selected_nonsecret_effective_policy':policy}))
 assert policy['engineStrict'] is True and policy['minimumReleaseAge']==1440 and not policy['minimumReleaseAgeExclude']
 def public(name):
     url='https://registry.npmjs.org/'+urllib.parse.quote(name,safe='')

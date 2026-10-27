@@ -19,3 +19,6 @@ allowBuilds:
   esbuild: true
 
 engineStrict: true
+
+# Keep pnpm12's existing one-day release quarantine explicit and inspectable.
+minimumReleaseAge: 1440
