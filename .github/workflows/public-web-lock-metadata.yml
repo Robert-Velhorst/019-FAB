@@ -52,8 +52,20 @@ jobs:
           PY
       - name: Resolve normal lock with strict peer and engine checks
         run: pnpm --dir web install --lockfile-only --ignore-scripts --strict-peer-dependencies --no-frozen-lockfile
+      - name: Refresh body-parser through its existing parent ranges without saving manifest changes
+        run: pnpm --dir web update body-parser --depth Infinity --lockfile-only --ignore-scripts --strict-peer-dependencies --no-save
+      - name: Require every tracked payload except the normal lock to remain unchanged
+        shell: python
+        run: |
+          import hashlib,json,pathlib,subprocess
+          changed=subprocess.check_output(['git','diff','--name-only'],text=True).splitlines()
+          assert set(changed)<={'web/pnpm-lock.yaml'},changed
+          expected=json.loads(pathlib.Path('/tmp/fab-public-lock/input.json').read_text())
+          assert hashlib.sha256(pathlib.Path('web/package.json').read_bytes()).hexdigest()==expected['package_json_sha256']
       - name: Retain resolved lock and immutable input
         run: cp web/pnpm-lock.yaml /tmp/fab-public-lock/pnpm-lock.yaml
+      - name: Require the complete refreshed dependency audit to have no findings
+        run: pnpm --dir web audit --audit-level=low --json > /tmp/fab-public-lock/full-audit.json
       - name: Upload exact lock metadata
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
