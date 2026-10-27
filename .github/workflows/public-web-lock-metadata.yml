@@ -52,8 +52,8 @@ jobs:
           PY
       - name: Resolve normal lock with strict peer and engine checks
         run: pnpm --dir web install --lockfile-only --ignore-scripts --strict-peer-dependencies --no-frozen-lockfile
-      - name: Refresh body-parser through its existing parent ranges without saving manifest changes
-        run: pnpm --dir web update body-parser --depth Infinity --lockfile-only --ignore-scripts --strict-peer-dependencies --no-save
+      - name: Refresh body-parser and qs through their existing parent ranges without saving manifest changes
+        run: pnpm --dir web update body-parser qs --depth Infinity --lockfile-only --ignore-scripts --strict-peer-dependencies --no-save
       - name: Require every tracked payload except the normal lock to remain unchanged
         shell: python
         run: |
