@@ -52,15 +52,20 @@ try{
     await call('Page.navigate',{url:origin+route},session);
     let observed;
     for(let attempt=0;attempt<120;attempt++){
-      const result=await call('Runtime.evaluate',{expression:`(() => { const prose=document.querySelector('.prose'); const heading=prose?.querySelector('h1,h2,h3'); if(document.readyState!=='complete'||!prose||!heading)return null; const style=getComputedStyle(heading),base=getComputedStyle(prose),bounds=heading.getBoundingClientRect(); return {url:location.href,title:document.title,proseCount:document.querySelectorAll('.prose').length,headingText:heading.textContent,headingFontSize:style.fontSize,containerFontSize:base.fontSize,headingColor:style.color,headingWidth:bounds.width,headingHeight:bounds.height}; })()`,returnByValue:true},session);
+      const result=await call('Runtime.evaluate',{expression:`(() => { const prose=document.querySelector('.prose'); const headings=prose?[...prose.querySelectorAll('h1,h2,h3')]:[]; const heading=headings.find(node=>!node.closest('.not-prose')); if(document.readyState!=='complete'||!prose||!heading)return null; const style=getComputedStyle(heading),base=getComputedStyle(prose),bounds=heading.getBoundingClientRect(); return {url:location.href,title:document.title,proseCount:document.querySelectorAll('.prose').length,headingText:heading.textContent,excludedNotProseHeadings:headings.filter(node=>node.closest('.not-prose')).length,headingFontSize:style.fontSize,containerFontSize:base.fontSize,headingColor:style.color,headingWidth:bounds.width,headingHeight:bounds.height}; })()`,returnByValue:true},session);
       assert.equal(result.exceptionDetails,undefined);observed=result.result.value;if(observed)break;await sleep(250);
     }
     assert.ok(observed,route+': original Typography content did not render.');assert.equal(observed.url,origin+route);
-    assert.ok(observed.headingWidth>0&&observed.headingHeight>0&&parseFloat(observed.headingFontSize)>parseFloat(observed.containerFontSize),route+': computed Typography heading styling is absent.');
     const shot=await call('Page.captureScreenshot',{format:'png',captureBeyondViewport:false,fromSurface:true},session);const bytes=Buffer.from(shot.data,'base64');const name=route==='/'?'index':route.slice(1);fs.writeFileSync(path.join(output,name+'.png'),bytes);
     pages.push({route,status:response.status,htmlSha256:createHash('sha256').update(html).digest('hex'),observed,screenshot:name+'.png',screenshotSha256:createHash('sha256').update(bytes).digest('hex')});
+    fs.writeFileSync(path.join(output,name+'-server.html'),html);
+    const dom=await call('Runtime.evaluate',{expression:'document.documentElement.outerHTML',returnByValue:true},session);
+    fs.writeFileSync(path.join(output,name+'-browser.html'),dom.result.value);
+    const styled=observed.headingWidth>0&&observed.headingHeight>0&&parseFloat(observed.headingFontSize)>parseFloat(observed.containerFontSize);
+    pages[pages.length-1].headingStylingPass=styled;
     await call('Target.closeTarget',{targetId:target.targetId});
   }
+  assert.ok(pages.every(page=>page.headingStylingPass),'Computed Typography heading styling is absent on at least one route.');
   assert.equal(errors.length,0,'Uncaught browser JavaScript exceptions remain.');receipt.all_five_original_routes_verified=true;
 }catch(error){receipt.failure=String(error);process.exitCode=1;}
 finally{

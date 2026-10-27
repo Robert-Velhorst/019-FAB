@@ -13,7 +13,7 @@
     },
     "demo/next.config.js": {
       "original_sha256": "4eaf3291b948eae00bb254c13a15cbf9e9d8ce6347a7101b91c747e34714c169",
-      "ported_sha256": "bf263177ae3ae5098417c0a4fcd90b026ae68cd0e9bc3d1053b0309f3272dcfc",
+      "ported_sha256": "d11c6444a2b88c95f3d8e3789dbbcd62e00c2ef9548b2b97a155e8790653c832",
       "kind": "production demo source or configuration; original SDK cases/helpers/fixtures are not modified"
     },
     "demo/tailwind.config.js": {
@@ -30,5 +30,10 @@
     "https://tailwindcss.com/docs/installation/framework-guides/nextjs",
     "https://tailwindcss.com/docs/functions-and-directives#config-directive",
     "https://mdxjs.com/packages/mdx/#compilesyncfile-options"
-  ]
+  ],
+  "mdx3_valid_html_integration": {
+    "new_compiler_plugin": "demo/remark-valid-paragraphs.cjs",
+    "publisher_samples_modified": false,
+    "purpose": "Unwrap the redundant Markdown paragraph inside an explicit JSX p element; preserve text and inline nodes."
+  }
 }

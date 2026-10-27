@@ -5,6 +5,7 @@ on:
     paths:
       - web/pnpm-lock.yaml
       - .github/scripts/fab_typography_offline_install.py
+      - .github/scripts/fab_typography_browser.mjs
       - web/vendor/tailwindcss-typography/**
       - .github/workflows/typography-current-sdk.yml
 
