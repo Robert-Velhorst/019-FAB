@@ -1,5 +1,5 @@
 """Owned hosted metadata-only evidence: no dependency/application/SDK imports."""
-import collections,concurrent.futures,datetime,json,pathlib,re,subprocess,urllib.parse,urllib.request
+import collections,concurrent.futures,datetime,gzip,hashlib,io,json,pathlib,re,subprocess,urllib.parse,urllib.request
 assert __import__('os').environ['GITHUB_REPOSITORY']=='Robert-Velhorst/019-FAB'
 output=pathlib.Path('/tmp/fab-public-lock');lock=pathlib.Path('web/pnpm-lock.yaml').read_text()
 documents=[d for d in re.split(r'(?m)^---\n',lock) if d.strip()]
@@ -23,13 +23,19 @@ assert policy['engineStrict'] is True and policy['minimumReleaseAge']==1440 and 
 def public(name):
     url='https://registry.npmjs.org/'+urllib.parse.quote(name,safe='')
     try:
-        with urllib.request.urlopen(url,timeout=45) as stream:raw=stream.read(24*1024*1024+1)
-        assert len(raw)<=24*1024*1024,'Registry record exceeds bounded metadata limit.'
+        request=urllib.request.Request(url,headers={'Accept-Encoding':'gzip','Accept':'application/json'})
+        with urllib.request.urlopen(request,timeout=45) as stream:
+            compressed=stream.read(32*1024*1024+1);encoding=stream.headers.get('Content-Encoding','')
+        assert len(compressed)<=32*1024*1024,'Compressed registry record exceeds bounded metadata limit.'
+        if encoding=='gzip':
+            with gzip.GzipFile(fileobj=io.BytesIO(compressed)) as stream:raw=stream.read(128*1024*1024+1)
+        else:raw=compressed
+        assert len(raw)<=128*1024*1024,'Decoded registry record exceeds bounded metadata limit.'
         data=json.loads(raw);stable=[v for v,row in data['versions'].items() if re.fullmatch(r'\d+\.\d+\.\d+',v) and not row.get('deprecated')]
         highest=max(stable,key=lambda v:tuple(map(int,v.split('.')))) if stable else None
         selected=sorted(versions[name]);published=data.get('time',{}).get(highest) if highest else None
         eligible=(datetime.datetime.fromisoformat(published.replace('Z','+00:00'))+datetime.timedelta(minutes=policy['minimumReleaseAge'])).isoformat() if published else None
-        return {'name':name,'source':url,'query':'ok','selected_versions':selected,'highest_non_deprecated_public_stable':highest,'latest_tag':data.get('dist-tags',{}).get('latest'),'published':published,'eligible_after_unchanged_age_policy':eligible,'all_selected_versions_equal_highest_public_stable':highest is not None and set(selected)=={highest}}
+        return {'name':name,'source':url,'query':'ok','selected_versions':selected,'highest_non_deprecated_public_stable':highest,'latest_tag':data.get('dist-tags',{}).get('latest'),'published':published,'eligible_after_unchanged_age_policy':eligible,'all_selected_versions_equal_highest_public_stable':highest is not None and set(selected)=={highest},'metadata_response_sha256':hashlib.sha256(raw).hexdigest(),'compressed_bytes':len(compressed),'decoded_bytes':len(raw),'compression':encoding}
     except Exception as error:
         return {'name':name,'source':url,'query':'unavailable','selected_versions':sorted(versions[name]),'error':str(error),'all_selected_versions_equal_highest_public_stable':False}
 with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:rows=list(pool.map(public,sorted(versions)))
