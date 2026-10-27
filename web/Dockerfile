@@ -9,6 +9,7 @@ RUN test "$(node --version)" = "v26.12.1" \
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY patches ./patches
+COPY vendor/tailwindcss-typography ./vendor/tailwindcss-typography
 RUN pnpm install --frozen-lockfile
 
 COPY . .

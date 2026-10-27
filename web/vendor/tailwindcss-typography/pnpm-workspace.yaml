@@ -1,0 +1,5 @@
+packages:
+  - "."
+engineStrict: true
+minimumReleaseAge: 1440
+minimumReleaseAgeStrict: true

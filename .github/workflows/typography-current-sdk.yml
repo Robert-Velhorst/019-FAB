@@ -1,0 +1,82 @@
+name: FAB current Typography parent SDK
+
+on:
+  pull_request:
+    paths:
+      - web/vendor/tailwindcss-typography/**
+      - .github/workflows/typography-current-sdk.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fab-typography-sdk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  original-sdk:
+    name: Original Typography SDK (${{ matrix.command }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        command: [test, build]
+    defaults:
+      run:
+        working-directory: web/vendor/tailwindcss-typography
+    steps:
+      - name: Check out complete parent candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up current Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26.12.1'
+      - name: Set up current pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 12.15.0
+          run_install: false
+      - name: Verify every retained original upstream payload before install
+        run: |
+          python - <<'PY'
+          import hashlib, json, pathlib, subprocess
+          root = pathlib.Path('.')
+          provenance = json.loads((root / 'FAB_UPSTREAM_PROVENANCE.json').read_text())
+          for name, record in provenance['files'].items():
+              if name == 'package.json':
+                  continue
+              payload = (root / name).read_bytes()
+              assert hashlib.sha256(payload).hexdigest() == record['sha256'], name
+          manifest = json.loads((root / 'package.json').read_text())
+          assert manifest['private'] is True
+          assert manifest['dependencies'] == {'postcss-selector-parser': '7.1.7'}
+          assert manifest['fabUpstream']['commit'] == provenance['commit']
+          assert manifest['scripts']['test'] == 'jest'
+          assert manifest['scripts']['build'] == 'next build demo'
+          record = {
+              'worker_commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+              'publisher_commit': provenance['commit'],
+              'original_payloads_verified': len(provenance['files']) - 1,
+              'manifest_sha256': hashlib.sha256((root / 'package.json').read_bytes()).hexdigest(),
+              'node': subprocess.check_output(['node', '--version'], text=True).strip(),
+              'pnpm': subprocess.check_output(['pnpm', '--version'], text=True).strip(),
+          }
+          (root / 'FAB_HOSTED_INPUT.json').write_text(json.dumps(record, indent=2))
+          PY
+      - name: Install current SDK with strict peers engines and intact age policy
+        run: pnpm install --no-frozen-lockfile --strict-peer-dependencies
+      - name: Execute original complete publisher command
+        run: pnpm run ${{ matrix.command }}
+      - name: Retain exact SDK input and normal resolved lock
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fab-typography-sdk-${{ matrix.command }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            web/vendor/tailwindcss-typography/FAB_HOSTED_INPUT.json
+            web/vendor/tailwindcss-typography/pnpm-lock.yaml
+          if-no-files-found: error
+          retention-days: 14

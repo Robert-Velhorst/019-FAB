@@ -88,7 +88,7 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
-    "@tailwindcss/typography": "0.5.20",
+    "@tailwindcss/typography": "file:vendor/tailwindcss-typography",
     "@tailwindcss/vite": "4.3.3",
     "@types/compression": "1.8.1",
     "@types/express": "5.0.6",

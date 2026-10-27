@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - web/package.json
+      - web/pnpm-workspace.yaml
+      - web/vendor/tailwindcss-typography/**
       - .github/workflows/public-web-lock-metadata.yml
 
 permissions:
