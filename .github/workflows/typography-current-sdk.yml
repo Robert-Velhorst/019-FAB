@@ -20,6 +20,8 @@ jobs:
     name: Original Typography SDK (${{ matrix.command }})
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
     strategy:
       fail-fast: false
       matrix:
@@ -118,6 +120,23 @@ jobs:
               name=p.relative_to(root);target=output/'generated'/name;target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(p,target)
               files[str(name)]={'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()}
           (output/'summary.json').write_text(json.dumps({'original_build_command_pass':True,'generated_routes':sorted(pages),'required_original_routes':sorted(required),'compiled_css_files':len(css),'compiled_Typography_present':True,'files':files,'browser_or_operator_acceptance':False},indent=2)+'\n')
+      - name: Render all original demo routes in sandboxed installed Chrome on loopback
+        if: success() && matrix.command == 'build'
+        run: node ../../../.github/scripts/fab_typography_browser.mjs
+      - name: Reconcile every tracked payload after original SDK commands and browser execution
+        if: always() && steps.native-install.outcome == 'success'
+        shell: python
+        run: |
+          import hashlib,json,os,pathlib,subprocess
+          root=pathlib.Path(subprocess.check_output(['git','rev-parse','--show-toplevel'],text=True).strip())
+          output=pathlib.Path('FAB_NATIVE_INSTALL_EVIDENCE');before=json.loads((output/'source-before.json').read_text())
+          observed={}
+          for name,row in before['payloads'].items():
+              source=root/name;payload=os.readlink(source).encode() if row['mode']=='120000' else source.read_bytes()
+              observed[name]={'mode':row['mode'],'blob':hashlib.sha1(b'blob '+str(len(payload)).encode()+b'\0'+payload).hexdigest(),'sha256':hashlib.sha256(payload).hexdigest()}
+          record={'head':before['head'],'tree':before['tree'],'payloads':observed}
+          (output/'source-after-complete-SDK.json').write_text(json.dumps(record,indent=2)+'\n')
+          assert record==before,'Tracked source changed during the complete original SDK/compiler/browser steps.'
       - name: Audit the complete normally resolved SDK graph
         if: always() && steps.native-install.outcome == 'success'
         run: |
