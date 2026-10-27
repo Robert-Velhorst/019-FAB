@@ -27,7 +27,7 @@ except OSError as error:
     assert error.errno in {errno.ENETUNREACH,errno.EHOSTUNREACH,errno.EACCES,errno.EPERM},str(error)
     network_error={'errno':error.errno,'name':errno.errorcode[error.errno]}
 assert os.environ.get('npm_config_build_from_source') is None
-expected={'engineStrict':True,'strictPeerDependencies':True,'minimumReleaseAge':1440,'minimumReleaseAgeStrict':True,'strictDepBuilds':True,'verifyStoreIntegrity':True,'dangerouslyAllowAllBuilds':False,'sideEffectsCache':False,'allowBuilds':{'@parcel/watcher@2.6.0':True,'unrs-resolver@1.12.2':True}}
+expected={'engineStrict':True,'strictPeerDependencies':True,'minimumReleaseAge':1440,'minimumReleaseAgeStrict':True,'strictDepBuilds':True,'ignoreScripts':False,'verifyStoreIntegrity':True,'dangerouslyAllowAllBuilds':False,'sideEffectsCache':False,'allowBuilds':{'@parcel/watcher@2.6.0':True,'unrs-resolver@1.12.2':True}}
 config={}
 for key,value in expected.items():
     raw=subprocess.check_output(['pnpm','config','get',key,'--json'],text=True).strip();config[key]=json.loads(raw);assert config[key]==value,(key,config[key])
@@ -42,6 +42,19 @@ try:
     (output/'install.log').write_bytes(result.stdout);receipt.update(command=command,exit_code=result.returncode)
     print(result.stdout.decode(errors='replace')[-18000:])
     assert result.returncode==0,'Strict offline installation failed; full log retained.'
+    lifecycle_log=result.stdout
+    required_scripts=[b'node scripts/build-from-source.js',b'node postinstall.js']
+    if not all(command in lifecycle_log for command in required_scripts):
+        rebuild=['pnpm','rebuild','--pending']
+        result_rebuild=subprocess.run(rebuild,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+        lifecycle_log+=result_rebuild.stdout
+        (output/'pending-rebuild.log').write_bytes(result_rebuild.stdout)
+        receipt.update(pending_rebuild_command=rebuild,pending_rebuild_exit_code=result_rebuild.returncode)
+        print(result_rebuild.stdout.decode(errors='replace')[-18000:])
+        assert result_rebuild.returncode==0,'Pending dependency lifecycle execution failed inside the isolated phase.'
+    (output/'isolated-lifecycle.log').write_bytes(lifecycle_log)
+    assert all(command in lifecycle_log for command in required_scripts),'Both actual original dependency scripts must execute in this phase; fetching is never execution acceptance.'
+    receipt['both_actual_dependency_lifecycle_commands_observed_inside_network_namespace']=True
     assert digest(lock.read_bytes())==lock_before
     probe=r'''
 const fs = require('node:fs');

@@ -5,6 +5,7 @@ minimumReleaseAge: 1440
 minimumReleaseAgeStrict: true
 strictPeerDependencies: true
 strictDepBuilds: true
+ignoreScripts: false
 verifyStoreIntegrity: true
 dangerouslyAllowAllBuilds: false
 sideEffectsCache: false

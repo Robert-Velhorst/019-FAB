@@ -69,7 +69,7 @@ jobs:
       - name: Resolve current SDK normally with strict peers engines and intact age policy
         run: pnpm install --lockfile-only --strict-peer-dependencies
       - name: Fetch integrity-bound packages without lifecycle execution
-        run: pnpm fetch
+        run: pnpm fetch --ignore-scripts
       - name: Install approved exact native scripts offline without network or privilege escalation
         id: native-install
         shell: bash
