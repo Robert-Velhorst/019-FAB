@@ -3,7 +3,7 @@ const mdx = require('@mdx-js/mdx')
 module.exports = {
   content: ['./demo/pages/**/*.{js,mdx}', './demo/components/**/*.{js,mdx}'],
   transform: {
-    mdx: (content) => mdx.sync(content),
+    mdx: (content) => String(mdx.compileSync(content)),
   },
   theme: {
     extend: {

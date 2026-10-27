@@ -1,0 +1,34 @@
+{
+  "publisher_commit": "e3714a3fe55551ce9d51eec4721183ed6b1d5cd1",
+  "production_changes": {
+    "demo/pages/_app.js": {
+      "original_sha256": "a86b970aa8b6cdcd8018d314fe0fa5cb4fcbdb1bf3f2a09d701eb77aa8bd9785",
+      "ported_sha256": "804c07f8c7d0ecc91e9c47f5eec222e8466614c87a0755f022afeaf01cfed790",
+      "kind": "production demo source or configuration; original SDK cases/helpers/fixtures are not modified"
+    },
+    "demo/postcss.config.js": {
+      "original_sha256": "2b710074a819e0b71917d6d874dd52b0341350476a94f3f71802c7a6d81c8f60",
+      "ported_sha256": "7ba9a73b8e05ab7658d11753040f0da9afd22b5b256e8f2cbcf18bd4cc1e64bb",
+      "kind": "production demo source or configuration; original SDK cases/helpers/fixtures are not modified"
+    },
+    "demo/next.config.js": {
+      "original_sha256": "4eaf3291b948eae00bb254c13a15cbf9e9d8ce6347a7101b91c747e34714c169",
+      "ported_sha256": "bf263177ae3ae5098417c0a4fcd90b026ae68cd0e9bc3d1053b0309f3272dcfc",
+      "kind": "production demo source or configuration; original SDK cases/helpers/fixtures are not modified"
+    },
+    "demo/tailwind.config.js": {
+      "original_sha256": "85bf7748a6ab6edf6fd01eb1799be4a13ab7cfeb4bd0ceb6c3431d1a1fe80ee9",
+      "ported_sha256": "08f1c8770f4770e31828fac7cb81af284a39ed32292d93044e06f2c2558495ae",
+      "kind": "production demo source or configuration; original SDK cases/helpers/fixtures are not modified"
+    }
+  },
+  "added_production_stylesheet": "demo/tailwind.css",
+  "original_publisher_payloads": 35,
+  "unchanged_original_payloads_excluding_manifest_and_four_production_paths": 30,
+  "original_case_helper_fixture_assertion_selector_timeout_or_command_changes": false,
+  "official_sources": [
+    "https://tailwindcss.com/docs/installation/framework-guides/nextjs",
+    "https://tailwindcss.com/docs/functions-and-directives#config-directive",
+    "https://mdxjs.com/packages/mdx/#compilesyncfile-options"
+  ]
+}

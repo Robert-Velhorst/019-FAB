@@ -42,7 +42,8 @@
     "prettier": "3.9.10",
     "react": "19.3.1",
     "react-dom": "19.3.1",
-    "tailwindcss": "4.3.3"
+    "tailwindcss": "4.3.3",
+    "@tailwindcss/postcss": "4.3.3"
   },
   "dependencies": {
     "postcss-selector-parser": "7.1.7"
@@ -58,6 +59,6 @@
     "commit": "e3714a3fe55551ce9d51eec4721183ed6b1d5cd1",
     "version": "0.5.20",
     "releaseIntegrity": "sha512-hwbzQuNUfcPvbegQFatVPl/MY/tcM9KLl963hQ5laJKPh81TEZ1+dNG9PirGvcaDBkp+BCshExAyKVPW91dozw==",
-    "modification": "Explicit selector-parser7 parent contract and current SDK declarations; original runtime source/cases preserved"
+    "modification": "Explicit selector-parser7 parent contract, current SDK declarations and documented Tailwind4 production demo port; original runtime/case/helper/fixture/release-script bytes preserved."
   }
 }

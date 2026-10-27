@@ -47,11 +47,22 @@ jobs:
           import hashlib, json, pathlib, subprocess
           root = pathlib.Path('.')
           provenance = json.loads((root / 'FAB_UPSTREAM_PROVENANCE.json').read_text())
+          port = json.loads((root / 'FAB_DEMO_COMPATIBILITY.json').read_text())
+          allowed = {'demo/pages/_app.js','demo/postcss.config.js','demo/next.config.js','demo/tailwind.config.js'}
+          assert set(port['production_changes']) == allowed and port['publisher_commit'] == provenance['commit']
+          unchanged = 0
           for name, record in provenance['files'].items():
               if name == 'package.json':
                   continue
               payload = (root / name).read_bytes()
-              assert hashlib.sha256(payload).hexdigest() == record['sha256'], name
+              if name in allowed:
+                  change = port['production_changes'][name]
+                  assert change['original_sha256'] == record['sha256'], name
+                  assert hashlib.sha256(payload).hexdigest() == change['ported_sha256'], name
+              else:
+                  assert hashlib.sha256(payload).hexdigest() == record['sha256'], name
+                  unchanged += 1
+          assert unchanged == 30
           manifest = json.loads((root / 'package.json').read_text())
           assert manifest['private'] is True
           assert manifest['dependencies'] == {'postcss-selector-parser': '7.1.7'}
@@ -61,7 +72,8 @@ jobs:
           record = {
               'worker_commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
               'publisher_commit': provenance['commit'],
-              'original_payloads_verified': len(provenance['files']) - 1,
+              'original_payloads_verified_unchanged': unchanged,
+              'production_paths_explicitly_ported': sorted(allowed),
               'manifest_sha256': hashlib.sha256((root / 'package.json').read_bytes()).hexdigest(),
               'node': subprocess.check_output(['node', '--version'], text=True).strip(),
               'pnpm': subprocess.check_output(['pnpm', '--version'], text=True).strip(),
@@ -90,6 +102,22 @@ jobs:
             python3 ../../../.github/scripts/fab_typography_offline_install.py
       - name: Execute original complete publisher command
         run: pnpm run ${{ matrix.command }}
+      - name: Retain actual demo routes and compiled Typography styles
+        if: success() && matrix.command == 'build'
+        shell: python
+        run: |
+          import hashlib,json,pathlib,shutil
+          root=pathlib.Path('demo/.next');output=pathlib.Path('FAB_NATIVE_INSTALL_EVIDENCE/demo-build');output.mkdir(parents=True,exist_ok=True)
+          required={'index','dark','themes','variants','list-items'}
+          pages={p.stem:p for p in (root/'server/pages').glob('*.html')}
+          assert required<=set(pages),sorted(pages)
+          css=sorted((root/'static').rglob('*.css'));assert css
+          assert any('.prose' in p.read_text() for p in css),'Actual compiled Typography CSS is missing.'
+          files={}
+          for p in [*pages.values(),*css,*(root/n for n in ['build-manifest.json','prerender-manifest.json','routes-manifest.json'] if (root/n).is_file())]:
+              name=p.relative_to(root);target=output/'generated'/name;target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(p,target)
+              files[str(name)]={'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()}
+          (output/'summary.json').write_text(json.dumps({'original_build_command_pass':True,'generated_routes':sorted(pages),'required_original_routes':sorted(required),'compiled_css_files':len(css),'compiled_Typography_present':True,'files':files,'browser_or_operator_acceptance':False},indent=2)+'\n')
       - name: Audit the complete normally resolved SDK graph
         if: always() && steps.native-install.outcome == 'success'
         run: |
