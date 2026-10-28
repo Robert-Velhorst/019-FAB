@@ -31,6 +31,29 @@ if profile=='native-builder-runtime':manifest['devDependencies']={name:value for
 (sdk/'package.json').write_bytes((json.dumps(manifest,indent=2)+'\n').encode())
 for port in d['source_ports']:
     assert hashlib.sha256((sdk/port['path']).read_bytes()).hexdigest()==port['before_sha256'];raw=port['content'].encode();assert hashlib.sha256(raw).hexdigest()==port['sha256'];(sdk/port['path']).write_bytes(raw)
+# Explicit source-linked declaration parent; never overwrite shared dependency sources.
+nt=json.loads((owner/'.github/qualification/node-types-current-undici-parent.json').read_bytes())
+assert nt['public_name']=='@types/node' and nt['public_version']=='26.6.5'
+with urllib.request.urlopen(nt['official_tarball'],timeout=60) as stream:ntarchive=stream.read(8*1024*1024+1)
+assert len(ntarchive)<=8*1024*1024 and hashlib.sha256(ntarchive).hexdigest()==nt['archive_sha256']
+import base64,shutil
+assert 'sha512-'+base64.b64encode(hashlib.sha512(ntarchive).digest()).decode()==nt['official_integrity']
+ntroot=sdk/'vendor/owned-node-types';ntroot.mkdir(parents=True)
+ntexpected={r['path']:r for r in nt['source_payloads']};ntactual={}
+with tarfile.open(fileobj=io.BytesIO(ntarchive),mode='r:gz') as tar:
+    for member in tar.getmembers():
+        assert member.isfile() or member.isdir()
+        if not member.isfile():continue
+        parts=pathlib.PurePosixPath(member.name).parts;assert len(parts)>1 and '..' not in parts and not member.name.startswith('/')
+        name='/'.join(parts[1:]);assert name in ntexpected and name not in ntactual and member.size<4*1024*1024
+        raw=tar.extractfile(member).read();assert len(raw)==member.size and hashlib.sha256(raw).hexdigest()==ntexpected[name]['sha256']
+        target=ntroot/name;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(raw);ntactual[name]=ntexpected[name]
+assert ntactual.keys()==ntexpected.keys() and json.loads((ntroot/'package.json').read_bytes())==nt['original_manifest']
+(ntroot/'package.json').write_bytes((json.dumps(nt['candidate_manifest'],indent=2)+'\n').encode())
+manifest['devDependencies']['@types/node']='file:vendor/owned-node-types'
+(sdk/'package.json').write_bytes((json.dumps(manifest,indent=2)+'\n').encode())
+ntbefore={n:hashlib.sha256((ntroot/n).read_bytes()).hexdigest() for n in ntexpected};save('Node-types-explicit-parent-source-before.json',{'official_input':nt,'actual':ntbefore})
+
 cli=sdk/'vendor/owned-native-typescript-cli';cli.mkdir(parents=True)
 for r in d['owned_cli_source_files']:
     raw=r['content'].encode();assert hashlib.sha256(raw).hexdigest()==r['sha256'];path=cli/r['path'];path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(raw)
@@ -51,10 +74,12 @@ if metadata==0 and (sdk/'package-lock.json').is_file():
     for name,r in lock['packages'].items():
         if not name:continue
         if r.get('link'):
-            assert (name=='node_modules/tshy' and r['resolved'] in ['', '.']) or (name=='node_modules/@owned/native-typescript-cli' and r['resolved']=='vendor/owned-native-typescript-cli'),(name,r)
+            assert (name=='node_modules/tshy' and r['resolved'] in ['', '.']) or (name=='node_modules/@owned/native-typescript-cli' and r['resolved']=='vendor/owned-native-typescript-cli') or (name=='node_modules/@types/node' and r['resolved']=='vendor/owned-node-types'),(name,r)
             source_links.append({'path':name,**r});continue
         if name=='vendor/owned-native-typescript-cli':
             assert r['version']=='1.0.0' and r['dependencies']=={'typescript':'7.0.2'};source_links.append({'path':name,**r});continue
+        if name=='vendor/owned-node-types':
+            assert r['version']==nt['candidate_manifest']['version'] and r['dependencies']==nt['candidate_manifest']['dependencies'];source_links.append({'path':name,**r});rows.append({'path':name,'name':'@types/node','version':nt['public_version'],'explicit_private_parent_version':r['version']});continue
         assert 'node_modules/' in name and r.get('version'),(name,r)
         rows.append({'path':name,'name':name.rsplit('node_modules/',1)[1],'version':r['version']})
     prereleases=[r for r in rows if re.search(r'^\d+\.\d+\.\d+-',r['version'])];save('prerelease-lock-records.json',prereleases);save('explicit-source-link-records.json',source_links)
@@ -70,6 +95,7 @@ if installed:
         tool=sdk/'dist/esm/bin-min.mjs';assert tool.is_file()
         for selector in ['tsc','tsgo']:
             project=temporary/('owned-'+selector);(project/'src').mkdir(parents=True)
+            shutil.copytree(ntroot,project/'vendor/owned-node-types')
             package={'name':'owned-native-client','version':'1.0.0','private':True,'type':'module','devDependencies':{'@types/node':manifest['devDependencies']['@types/node'],'typescript':'7.0.2'},'tshy':{'compiler':selector,'exports':{'.':'./src/index.ts'}}}
             (project/'package.json').write_bytes((json.dumps(package,indent=2)+'\n').encode());(project/'src/index.ts').write_bytes(b'export const twice = (value: number): number => value * 2\n')
             client_metadata=run('owned-'+selector+'-normal-client-metadata',['npm','install','--package-lock-only','--ignore-scripts','--strict-peer-deps'],cwd=project)
@@ -77,6 +103,10 @@ if installed:
                 client_lock=json.loads((project/'package-lock.json').read_bytes());client_rows=[]
                 for name,r in client_lock['packages'].items():
                     if not name:continue
+                    if name=='node_modules/@types/node' and r.get('link'):
+                        assert r['resolved']=='vendor/owned-node-types';source_links.append({'profile':selector+'-client','path':name,**r});continue
+                    if name=='vendor/owned-node-types':
+                        assert r['version']==nt['candidate_manifest']['version'] and r['dependencies']==nt['candidate_manifest']['dependencies'];source_links.append({'profile':selector+'-client','path':name,**r});client_rows.append({'path':selector+'-client/'+name,'name':'@types/node','version':nt['public_version'],'explicit_private_parent_version':r['version']});continue
                     assert 'node_modules/' in name and not r.get('link') and r.get('version')
                     client_rows.append({'path':selector+'-client/'+name,'name':name.rsplit('node_modules/',1)[1],'version':r['version']})
                 client_prereleases=[r for r in client_rows if re.search(r'^\d+\.\d+\.\d+-',r['version'])];save('owned-'+selector+'-client-prereleases.json',client_prereleases)
@@ -109,6 +139,11 @@ save('complete-public-graph-comparison.json',comparison)
 final={n:hashlib.sha256((sdk/n).read_bytes()).hexdigest() for n in expected if n!='package-lock.json'};save('SDK-source-after.json',final);changes=[{'path':n,'before':initial[n],'after':final[n]} for n in initial if initial[n]!=final[n]];save('source-side-effects.json',changes)
 protected={n:r for n,r in expected.items() if n.startswith(('test/','tests/','tap-snapshots/'))};assert len(protected)==114;unchanged=all(final[n]==r['sha256'] for n,r in protected.items());save('original-case-helper-fixture-snapshot-source-after.json',protected)
 owned_after={r['path']:hashlib.sha256((cli/r['path']).read_bytes()).hexdigest() for r in d['owned_cli_source_files']};save('owned-CLI-source-after.json',owned_after);assert owned_before==owned_after
+ntafter={n:hashlib.sha256((ntroot/n).read_bytes()).hexdigest() for n in ntexpected};assert ntbefore==ntafter
+save('Node-types-explicit-parent-source-after.json',{'actual':ntafter,'all_original_nonmanifest_payloads_unchanged':all(ntafter[n]==r['sha256'] for n,r in ntexpected.items() if n!='package.json'),'original_declared_dependency':nt['original_manifest']['dependencies'],'explicit_private_parent_dependency':nt['candidate_manifest']['dependencies']})
+for selector in ['tsc','tsgo']:
+    client=temporary/('owned-'+selector)/'vendor/owned-node-types'
+    if client.is_dir():assert {n:hashlib.sha256((client/n).read_bytes()).hexdigest() for n in ntexpected}==ntbefore
 after=snapshot();save('owner-source-after.json',after);assert before==after
 summary={'captured_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'profile':profile,'publisher_payloads_verified':174,'original_case_helper_fixture_snapshot_payloads':114,'original_case_helper_fixture_snapshot_payloads_unchanged':unchanged,'original_scripts_unchanged':json.loads((sdk/'package.json').read_bytes())['scripts']==d['original_scripts'],'metadata_exit':metadata,'installed':installed,'prereleases':prereleases,'explicit_source_links':source_links,'actual_native_compiler':native_proof,'original_npm_test_exit':original_test_exit,'owned_runtime_cases':cases,'source_side_effects':changes,'public_namespaces':len(comparison),'public_current_version_gaps':sum(not r['highest_stable_met'] for r in comparison),'public_metadata_query_errors':sum(r['query']!='ok' for r in comparison),'commands':commands,'cross_platform_original_SDK_matrix_not_established':True,'whole_original_SDK_qualified':False,'actual_parent_or_application_adoption':False}
 save('qualification-summary.json',summary)

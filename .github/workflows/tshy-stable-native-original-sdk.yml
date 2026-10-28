@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - .github/qualification/tshy-stable-native-original-sdk.json
+      - .github/qualification/node-types-current-undici-parent.json
       - .github/scripts/qualify_tshy_stable_native_sdk.py
       - .github/workflows/tshy-stable-native-original-sdk.yml
 permissions:
