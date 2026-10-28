@@ -18,8 +18,10 @@ const cases=[
  ['glob-configuration-override',`const c=require('./src/cli');let messages;assert.equal(c.run({args:['owned-browser.js'],ignores:[],config:{esversion:11,undef:true,overrides:{'**/owned-browser.js':{browser:true}}},reporter:r=>{messages=r;}}),true);assert.deepEqual(messages,[]);`],
  ['CLI-rejects-invalid-JavaScript',`let messages;assert.equal(require('./src/cli').run({args:['owned-invalid.js'],ignores:[],config:{esversion:11},reporter:r=>{messages=r;}}),false);assert.ok(messages.length>0);`],
 ];
-const results=cases.map(([name,body])=>{
- const r=spawnSync(process.execPath,['-e',`const assert=require('node:assert/strict');${body}`],{cwd,encoding:'utf8'});
+const results=cases.map(([name,body],position)=>{
+ const caseFile=path.join(cwd,`owned-api-case-${position}.cjs`);
+ fs.writeFileSync(caseFile,`'use strict';\nconst assert=require('node:assert/strict');${body}\n`);
+ const r=spawnSync(process.execPath,[caseFile],{cwd,encoding:'utf8'});
  return {name,pass:r.status===0,status:r.status,signal:r.signal,stdout:r.stdout,stderr:r.stderr,error:r.error?String(r.error):null};
 });
 fs.writeFileSync('owned-api-case-results.json',JSON.stringify({node:process.version,cases:results,passed:results.filter(x=>x.pass).length,failed:results.filter(x=>!x.pass).length,skipped:0,original_SDK_cases_replaced:false},null,2)+'\n');
