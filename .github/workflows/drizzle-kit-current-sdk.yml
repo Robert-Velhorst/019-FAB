@@ -5,6 +5,7 @@ on:
       - qualify/fab-drizzle-current-parent-20261028
     paths:
       - .github/scripts/qualify_drizzle_current_parent.py
+      - .github/qualifications/drizzle-current-workspace-profile.json
       - .github/workflows/drizzle-kit-current-sdk.yml
 permissions:
   contents: read

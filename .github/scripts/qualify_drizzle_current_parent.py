@@ -42,20 +42,44 @@ def prepare(profile):
     with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as tf:
         assert json.load(tf.extractfile("package/package.json")) == kit
     assert kit["version"] == "0.31.11"
+    current_profile = json.loads((OWNER / ".github/qualifications/drizzle-current-workspace-profile.json").read_bytes())
+    assert current_profile["publisher_commit"] == COMMIT
+    assert len(current_profile["manifests"]) == 10
+    changed_declarations = []
+    if profile == "candidate":
+        for relative, spec in current_profile["manifests"].items():
+            assert relative == "package.json" or relative.count("/") == 1
+            path = SDK / relative
+            raw = path.read_text()
+            assert hashlib.sha256(path.read_bytes()).hexdigest() == spec["original_sha256"] == original[relative]
+            expected = json.loads(raw)
+            for change in [c for c in current_profile["changes"] if c["path"] == relative]:
+                section, name = change["section"], change["name"]
+                assert section in {"dependencies", "devDependencies", "optionalDependencies"}
+                assert expected[section][name] == change["original"]
+                heading = re.search(r'(?m)^([ \t]*)"' + re.escape(section) + r'": \{\r?$', raw)
+                assert heading
+                closing = re.search(r"(?m)^" + re.escape(heading[1]) + r"\}", raw[heading.end():])
+                assert closing
+                end = heading.end() + closing.start()
+                block = raw[heading.end():end]
+                old = json.dumps(name) + ": " + json.dumps(change["original"])
+                new = json.dumps(name) + ": " + json.dumps(change["target"])
+                assert block.count(old) == 1
+                raw = raw[:heading.end()] + block.replace(old, new) + raw[end:]
+                expected[section][name] = change["target"]
+                changed_declarations.append(change)
+            assert json.loads(raw) == expected
+            path.write_text(raw)
     root_path = SDK / "package.json"
     raw = root_path.read_text()
     assert root["packageManager"] == "pnpm@10.6.3"
     root_path.write_text(raw.replace('"pnpm@10.6.3"', '"pnpm@12.16.1"'))
-    if profile == "candidate":
-        path = SDK / "drizzle-kit/package.json"
-        raw = path.read_text()
-        for name, prior, target in [("@drizzle-team/brocli", "^0.10.2", "^0.12.1"), ("esbuild", "^0.25.4", "^0.28.2")]:
-            old = json.dumps(name) + ": " + json.dumps(prior)
-            new = json.dumps(name) + ": " + json.dumps(target)
-            assert raw.count(old) == 1
-            raw = raw.replace(old, new)
-        path.write_text(raw)
+    assert json.loads((SDK / "drizzle-kit/package.json").read_bytes())["scripts"] == kit["scripts"]
     save("original-source-hashes.json", original)
+    save("prepared-manifest-hashes.json", {name: hashlib.sha256((SDK / name).read_bytes()).hexdigest()
+         for name in current_profile["manifests"]})
+    save("candidate-declaration-changes.json", changed_declarations)
     node = subprocess.check_output(["node", "--version"], text=True).strip()
     pnpm = subprocess.check_output(["pnpm", "--version"], cwd=SDK, text=True).strip()
     assert node == "v26.12.1" and pnpm == "12.16.1"
@@ -63,7 +87,9 @@ def prepare(profile):
          "profile": profile, "SDK_version": kit["version"], "original_SDK_scripts": kit["scripts"],
          "actual_node": node, "actual_pnpm": pnpm,
          "root_package_manager_profile_change": "10.6.3 to12.16.1, both comparison profiles",
-         "candidate_changes": "Only Brocli and esbuild dependency declarations; every dependency retained",
+         "candidate_changes": "Current stable direct declarations across all ten workspace manifests; every dependency, original peer, historical alias and workspace binding retained",
+         "changed_declarations": len(changed_declarations),
+         "public_release_names_reviewed": len(current_profile["releases"]),
          "original_SDK_files": 169, "original_test_directory_files": 75, "full_acceptance": False})
 
 
@@ -120,11 +146,14 @@ def audit():
     original = json.loads((OUT / "original-source-hashes.json").read_bytes())
     current = tracked()
     changed = [name for name in original if original[name] != current.get(name)]
-    allowed = {"package.json", "drizzle-kit/package.json", "pnpm-lock.yaml"}
+    prepared = json.loads((OUT / "prepared-manifest-hashes.json").read_bytes())
+    manifest_preservation = all(current.get(name) == digest for name, digest in prepared.items())
+    allowed = set(prepared) | {"pnpm-lock.yaml"}
     save("source-preservation.json", {"original_payloads": len(original), "changed": changed,
-         "all_original_cases_helpers_fixtures_and_commands_unchanged": set(changed) <= allowed,
+         "prepared_manifests_unchanged_after_resolution_or_original_commands": manifest_preservation,
+         "all_original_cases_helpers_fixtures_and_commands_unchanged": set(changed) <= allowed and manifest_preservation,
          "full_SDK_or_application_adoption": False})
-    assert original.keys() == current.keys() and set(changed) <= allowed
+    assert original.keys() == current.keys() and set(changed) <= allowed and manifest_preservation
 
 
 def restore():
@@ -133,6 +162,7 @@ def restore():
     current_input = json.loads((OUT / "input.json").read_bytes())
     assert original_input == current_input
     assert json.loads((source / "original-source-hashes.json").read_bytes()) == json.loads((OUT / "original-source-hashes.json").read_bytes())
+    assert json.loads((source / "prepared-manifest-hashes.json").read_bytes()) == json.loads((OUT / "prepared-manifest-hashes.json").read_bytes())
     assert json.loads((source / "preinstall-version-policy.json").read_bytes())["passed"]
     result = json.loads((source / "resolve-result.json").read_bytes())
     lock = (source / "resolved-pnpm-lock.yaml").read_bytes()
