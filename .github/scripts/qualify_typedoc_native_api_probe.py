@@ -34,9 +34,9 @@ with tarfile.open(fileobj=io.BytesIO(archive),mode='r:gz') as tar:
         assert member.isfile() or member.isdir()
         if not member.isfile():continue
         parts=pathlib.PurePosixPath(member.name).parts;assert len(parts)>1 and '..' not in parts and member.size<128*1024*1024;name='/'.join(parts[1:]);raw=tar.extractfile(member).read();digest=hashlib.sha256(raw).hexdigest();assert hashlib.sha256((platform/name).read_bytes()).hexdigest()==digest;platform_payloads[name]={'bytes':len(raw),'sha256':digest}
-assert 'bin/tsgo' in platform_payloads
+assert 'lib/tsc' in platform_payloads and len(platform_payloads)==114
 save('official-native-platform-before.json',{'package':platform_name,'version':'7.0.2','integrity':platform_metadata['dist']['integrity'],'archive_sha256':hashlib.sha256(archive).hexdigest(),'metadata_sha256':hashlib.sha256(metadata_raw).hexdigest(),'payloads':platform_payloads})
-assert run('actual-native-binary-version',[str(platform/'bin/tsgo'),'--version'])==0
+assert run('actual-native-binary-version',[str(platform/'lib/tsc'),'--version'])==0
 assert re.search(r'^Version 7\.0\.2\s*$',(out/'actual-native-binary-version.log').read_text(),re.M)
 case_exit=run('owned-native-api-feature-cases',['node','--test','owned-native-api.test.mjs'])
 assert hashlib.sha256((project/'owned-native-api.test.mjs').read_bytes()).hexdigest()==case_hash
