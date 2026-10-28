@@ -1,0 +1,41 @@
+name: TSHY stable native compiler and original SDK
+on:
+  pull_request:
+    paths:
+      - .github/qualification/tshy-stable-native-original-sdk.json
+      - .github/scripts/qualify_tshy_stable_native_sdk.py
+      - .github/workflows/tshy-stable-native-original-sdk.yml
+permissions:
+  contents: read
+jobs:
+  stable-native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [native-builder-runtime, complete-original-SDK]
+    env:
+      TSHY_PROFILE: ${{ matrix.profile }}
+      npm_config_engine_strict: 'true'
+      npm_config_strict_peer_deps: 'true'
+      npm_config_legacy_peer_deps: 'false'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26.12.1'
+      - name: Set current stable npm
+        run: npm install --global npm@12.2.1
+      - name: Prove real stable compiler and retain complete original SDK gates
+        run: python .github/scripts/qualify_tshy_stable_native_sdk.py
+      - name: Retain full provenance, original commands and unsuppressed failures
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tshy-${{ matrix.profile }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: tshy-stable-native-evidence/
+          if-no-files-found: error
+          retention-days: 14
