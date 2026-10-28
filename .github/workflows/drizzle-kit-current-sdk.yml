@@ -1,0 +1,176 @@
+name: Drizzle Kit current parent full original SDK
+on:
+  push:
+    branches:
+      - qualify/fab-drizzle-current-parent-20261028
+    paths:
+      - .github/scripts/qualify_drizzle_current_parent.py
+      - .github/workflows/drizzle-kit-current-sdk.yml
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: drizzle-sdk-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  resolve:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [baseline, candidate]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: drizzle-team/drizzle-orm
+          ref: 15454dbe49d827c6081f3d0231e2e7985e517295
+          path: vendor-drizzle
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '26.12.1'
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+        with:
+          version: 12.16.1
+          run_install: false
+      - name: Verify publisher identity and prepare explicit metadata profile
+        run: python .github/scripts/qualify_drizzle_current_parent.py prepare --profile ${{ matrix.profile }}
+      - name: Resolve full original workspace normally before any SDK installer
+        run: python .github/scripts/qualify_drizzle_current_parent.py resolve
+      - name: Reject all prerelease and unclassified selections before installation
+        run: python .github/scripts/qualify_drizzle_current_parent.py policy
+      - name: Check original source and case preservation
+        if: always()
+        run: python .github/scripts/qualify_drizzle_current_parent.py audit
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: drizzle-sdk-lock-${{ matrix.profile }}-${{ github.run_id }}
+          path: drizzle-sdk-evidence
+          if-no-files-found: error
+          retention-days: 14
+  original-sdk:
+    needs: resolve
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [baseline, candidate]
+    services:
+      postgres-postgis:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: drizzle
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 54322:5432
+      postgres-vector:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: drizzle
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 54321:5432
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: drizzle
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 55433:5432
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: drizzle
+        options: >-
+          --health-cmd "mysqladmin ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 33306:3306
+      singlestore:
+        image: ghcr.io/singlestore-labs/singlestoredb-dev:latest
+        env:
+          ROOT_PASSWORD: singlestore
+        ports:
+          - 33307:3306
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: drizzle-team/drizzle-orm
+          ref: 15454dbe49d827c6081f3d0231e2e7985e517295
+          path: vendor-drizzle
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '26.12.1'
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+        with:
+          version: 12.16.1
+          run_install: false
+      - name: Verify publisher identity and prepare explicit metadata profile
+        run: python .github/scripts/qualify_drizzle_current_parent.py prepare --profile ${{ matrix.profile }}
+      - name: Retrieve only this profile's successful normal-resolution input
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "drizzle-sdk-lock-${{ matrix.profile }}-$GITHUB_RUN_ID" --dir drizzle-lock-input
+      - name: Verify and restore exact resolved input
+        run: python .github/scripts/qualify_drizzle_current_parent.py restore
+      - name: Repeat selected-version policy before original installer
+        run: python .github/scripts/qualify_drizzle_current_parent.py policy
+      - name: Run original publisher workspace installer
+        run: python .github/scripts/qualify_drizzle_current_parent.py install
+      - name: Run original publisher Prisma generation command
+        run: python .github/scripts/qualify_drizzle_current_parent.py prisma
+      - name: Run original publisher complete build command
+        run: python .github/scripts/qualify_drizzle_current_parent.py build
+      - name: Run original publisher Drizzle Kit shard command
+        env:
+          PG_CONNECTION_STRING: postgres://postgres:postgres@localhost:55433/drizzle
+          PG_VECTOR_CONNECTION_STRING: postgres://postgres:postgres@localhost:54321/drizzle
+          PG_POSTGIS_CONNECTION_STRING: postgres://postgres:postgres@localhost:54322/drizzle
+          MYSQL_CONNECTION_STRING: mysql://root:root@localhost:33306/drizzle
+          LIBSQL_URL: file:local.db
+          SINGLESTORE_CONNECTION_STRING: singlestore://root:singlestore@localhost:33307/
+        run: python .github/scripts/qualify_drizzle_current_parent.py test
+      - name: Preserve complete raw dependency audit without waivers
+        if: always()
+        run: python .github/scripts/qualify_drizzle_current_parent.py raw-audit
+      - name: Verify every original source case helper fixture and command
+        if: always()
+        run: python .github/scripts/qualify_drizzle_current_parent.py audit
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: drizzle-original-sdk-${{ matrix.profile }}-${{ github.run_id }}
+          path: drizzle-sdk-evidence
+          if-no-files-found: error
+          retention-days: 14
