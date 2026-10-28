@@ -1,0 +1,1644 @@
+{
+  "repository": "jshint/jshint",
+  "commit": "6d06f8f8fccc0b89a54bfe58af83a54bc1fae414",
+  "source_payloads": [
+    {
+      "path": ".circleci/config.yml",
+      "git_blob": "319d86928e93be818106d94148a9123344a5aeee",
+      "sha256": "8f1525c4a00c46572fd27391d63bc8dfcb55788f0aee1342fe618752b71ca9c6",
+      "bytes": 3212
+    },
+    {
+      "path": ".gitignore",
+      "git_blob": "b0b6a5c9fad4ccc966935692d189c5851c524182",
+      "sha256": "3f6912d314fbdc0777e326f2ccb424c53247644d15e8bbeafa9aef4bb2ec1c07",
+      "bytes": 278
+    },
+    {
+      "path": ".gitmodules",
+      "git_blob": "629e46752bc46fa012de82b9622370330ab958a7",
+      "sha256": "cc65882acd0da9d75f91d16aae63cc4de76617fd4805dccc4cd7835a4c7f95f6",
+      "bytes": 105
+    },
+    {
+      "path": ".jscsrc",
+      "git_blob": "cfb510f61e991944a64018b4b29d05b0da00e544",
+      "sha256": "5cf19e221aca02a1b4edbd2d0287924461e3ffeecfb53d4176dc0dd7b2b01e91",
+      "bytes": 1240
+    },
+    {
+      "path": ".jshintrc",
+      "git_blob": "ec9baa042c6291317acd4f63c44970eeee08ccf4",
+      "sha256": "63206c456a221e605afe77862745ed6dd8ebf00be8c974a9bfe2e9a6226b3c3c",
+      "bytes": 193
+    },
+    {
+      "path": ".mailmap",
+      "git_blob": "f99345272fc5a32295df075a0219872f7358e8fa",
+      "sha256": "0441249b70b89abcbb84ed519eb02356939dac4225f23c9b756bb427adde5d09",
+      "bytes": 1832
+    },
+    {
+      "path": "CHANGELOG.md",
+      "git_blob": "a03df6a346f29e1b1c2376388047b1e335a06dc6",
+      "sha256": "9658942e3826ee81f8071e610acc8abc274c44d9972708b39d2780a30fcf5c5c",
+      "bytes": 79109
+    },
+    {
+      "path": "CODE_OF_CONDUCT.md",
+      "git_blob": "2f4396c59e616ab450070826b8d8b37b6eb4f273",
+      "sha256": "ae4ab58b82a32d0c6137d096cc9bfed2503c1c8214bf214e8ad110bba76f9ba2",
+      "bytes": 3335
+    },
+    {
+      "path": "CONTRIBUTING.md",
+      "git_blob": "c9dcfe9b8fbedf0f5a5c098d5059eab3b021276e",
+      "sha256": "9690262b8ab8a1d6294af69b79bf5f846e3191dc7834b8698b7e34c1e8cd0718",
+      "bytes": 7493
+    },
+    {
+      "path": "LICENSE",
+      "git_blob": "0e247b19fcde7369e8d249cded2f4e209fb41434",
+      "sha256": "ddefbbbf8ebb8e69a66d36848cb613b91b691686fdf4b8a2aec61d496adb59ca",
+      "bytes": 1074
+    },
+    {
+      "path": "README.md",
+      "git_blob": "d06742285028d4f6ef0279b07bbe9f2ae05ea3c1",
+      "sha256": "e655605f00512416da0b94ce8149453b54c071c7650c61069aa2ae81ca83a001",
+      "bytes": 5164
+    },
+    {
+      "path": "appveyor.yml",
+      "git_blob": "37f2bd463995933ce4aa756124cbdf2ac8e08fdc",
+      "sha256": "0257046edbc6b3d6f2e52f7d52e23d22711b7747cef290c811ee97758bc3d96d",
+      "bytes": 1269
+    },
+    {
+      "path": "bin/build",
+      "git_blob": "1f3f73745b943d81448ed89384f74e4113a0f3cb",
+      "sha256": "945d6ad54ac4d16468da79499b9219a12ffde8faa8245afa969cfa9b73e3b2ba",
+      "bytes": 754
+    },
+    {
+      "path": "bin/jshint",
+      "git_blob": "f56105fd8f16b64d264badc6921fea2511763290",
+      "sha256": "fb8798c9090412684dab72800449fc3ddcb0409ad63f6cdf07850b19fcc21051",
+      "bytes": 71
+    },
+    {
+      "path": "data/ascii-identifier-data.js",
+      "git_blob": "00b5c6442c5a50e8a016857716075e08be558fcf",
+      "sha256": "1bf3d920f73d48765b73a8d8122611de91536a57eda21c42b425cdbc625196a8",
+      "bytes": 524
+    },
+    {
+      "path": "data/es5-identifier-names.js",
+      "git_blob": "7124ed6c4c2f33a45559ea842b62bc26ce5f68cd",
+      "sha256": "8e16dd5f20782f175461337b02984d53e4bcffc031e333455aef5916186f90b9",
+      "bytes": 9029
+    },
+    {
+      "path": "data/non-ascii-identifier-part-only.js",
+      "git_blob": "3ff44ce337569310f5fb22b9d6a66eae57c7bc4d",
+      "sha256": "de4fae6132437f94e45100da2368d61e558955077c76fcc12e52e1bfe3547983",
+      "bytes": 8635
+    },
+    {
+      "path": "data/non-ascii-identifier-start.js",
+      "git_blob": "32442f1e4ee32bc1e97b63291ab1327dd974eae3",
+      "sha256": "bbd2f3d210a36789f82bfe5bcdb5eb4e763b935efa0302d98eb3d01a0d6eb504",
+      "bytes": 287210
+    },
+    {
+      "path": "dist/jshint-rhino.js",
+      "git_blob": "321796752d903ab58fcf1c2281d0eef81c7e3859",
+      "sha256": "0c0df8e72361847bf3c8b60f967c6b1dc374dd01cba7e3de3962d196c8716a91",
+      "bytes": 1286243
+    },
+    {
+      "path": "dist/jshint.js",
+      "git_blob": "4688313f1d14e6780149ef0b5422bf81d3d70081",
+      "sha256": "0ec5d400207b5447ab927c05bfb3cec3020b46a1de97d98b7a36011d93a7531f",
+      "bytes": 1286205
+    },
+    {
+      "path": "docs/cli.md",
+      "git_blob": "609ce21d8278ae82c7c372fe14de9301958b2a59",
+      "sha256": "fca89a672f887f80e8f3279b6c622f77ce029c4c3ad38c8a50041e571babe9c5",
+      "bytes": 7644
+    },
+    {
+      "path": "docs/faq.md",
+      "git_blob": "33d76e905f243a8ec5077b87d9ef6809e058d5c6",
+      "sha256": "8600f16076bf683b8fab64ce9cc1dc35a809866bd31f9cad2abc3674cc7ba868",
+      "bytes": 2200
+    },
+    {
+      "path": "docs/install.md",
+      "git_blob": "64a3412840354182becbdab33637273d071f89a6",
+      "sha256": "dda5b92487a3e2439383b4c0a824caff40d6ff96ae98b0a6f4495145cb0a43d3",
+      "bytes": 5565
+    },
+    {
+      "path": "docs/relicensing-2020-commits-lacking-signatures.csv",
+      "git_blob": "ddde3931c74ec1fc4d558f749e65ba9cc354a86d",
+      "sha256": "d2d095628ab198d9530c9f2e434563227b1904d0a45322d0374a392b09cdd7be",
+      "bytes": 9571
+    },
+    {
+      "path": "docs/relicensing-2020.md",
+      "git_blob": "faa9c7d53984bacc55a0427c6f337b86a2fb1ad7",
+      "sha256": "0e40520e6c763a0615d473e22dccf52bd5500bcc7cc465760aca26ede2425995",
+      "bytes": 5600
+    },
+    {
+      "path": "docs/reporters.md",
+      "git_blob": "14e3e9933fb567123ca7ccdfb18be0a1262c786c",
+      "sha256": "7193b40208a50e51e2de5992389a7dc489cb5f54c5a9353ae3cc94db0869e104",
+      "bytes": 1613
+    },
+    {
+      "path": "examples/.customignore",
+      "git_blob": "35c909fd2f0eef8c2354a8b00d98c943d9d412d6",
+      "sha256": "8aea69426b360fdf003736a6786111f6b71b01a9e81b68d64ac26f97cc877847",
+      "bytes": 11
+    },
+    {
+      "path": "examples/.jshintignore",
+      "git_blob": "f81b806c1a87c3b445f01f9adc3a8c1cdb6173bb",
+      "sha256": "7c47f4c68f7a7ca76c77ed67c92fc15c45c1279baaa25d7762df374355e51b40",
+      "bytes": 84
+    },
+    {
+      "path": "examples/.jshintrc",
+      "git_blob": "f77978f74e47e9be0e7940205d533acb82616ac0",
+      "sha256": "4178c1360f5356659c8aff3469d66fca9b07162b6047daa61e8652894974305c",
+      "bytes": 6388
+    },
+    {
+      "path": "examples/reporter.js",
+      "git_blob": "5fbfa5073b80c835be78559400278a5f1e85a4c3",
+      "sha256": "dc8c42b89e997054dd50545d150a8aa0773081405ee3f16b8e94fcd537293e79",
+      "bytes": 430
+    },
+    {
+      "path": "package-lock.json",
+      "git_blob": "8bee0d15362bdda20b2f7c57a61dd91e0d62c7ce",
+      "sha256": "d68ae9da14df1568b81fd8c9acbea1428024287a3eebe5135c42363af9ccf0fa",
+      "bytes": 536374
+    },
+    {
+      "path": "package.json",
+      "git_blob": "6c58c4bc8c3484cd51fe1dacb4fcf487feae2cb4",
+      "sha256": "3e25c1b75c02a35bc1953e29954caf0481db9a3a639dadb233e17d8a3f504053",
+      "bytes": 2371
+    },
+    {
+      "path": "res/jshint.ai",
+      "git_blob": "8d4492cabcee628565c6a101069ddede7c0b44d1",
+      "sha256": "6c4bf3145b5ffc14c77b74980ee5a54bdec2e6d2313deaf7e5f250bb94792d81",
+      "bytes": 1071891
+    },
+    {
+      "path": "scripts/build.js",
+      "git_blob": "3a647ef7b20f56820138ef8223f5adef1bcc61ba",
+      "sha256": "0155b0923368ef0bb2a7683e7304be0c1fe6dc37dd88e0bc2c55836b4985c9af",
+      "bytes": 1121
+    },
+    {
+      "path": "scripts/generate-identifier-data.js",
+      "git_blob": "b1e0c4cefcbed5de19f3e9ed1f7a1ab6547a5737",
+      "sha256": "738cbe6be0711582ad4a5a8766669ac2044bd9a0cb622c4010b30f294f732546",
+      "bytes": 3373
+    },
+    {
+      "path": "scripts/remove-dev-dependencies.js",
+      "git_blob": "7b5149b543ecbdc008968e9a4952841e7becfaa8",
+      "sha256": "22f8be9de3870f762399576a2c86764747e4383a71983eacdb0f2f1020177fff",
+      "bytes": 1320
+    },
+    {
+      "path": "src/cli.js",
+      "git_blob": "b4d0cb93c418efe421442b3cd5e52269e43a7d87",
+      "sha256": "0bb519cc876fc8e078abe71a128d9a8374aeee4a705b3088d86e6b4bdd40d947",
+      "bytes": 21527
+    },
+    {
+      "path": "src/fs-utils.js",
+      "git_blob": "da19e05a2297ae9f87f3ddcc47fc4c7e8925f1fc",
+      "sha256": "b1658f61a2461a3044e646a67957260942f710631931098c28df0d5cda449d04",
+      "bytes": 1047
+    },
+    {
+      "path": "src/jshint.js",
+      "git_blob": "c02e77b8c64e2dcbd4fae2df9bee4fa55d0facef",
+      "sha256": "170bd9d7cb7ff08dac4407c677a502d45dfd8ae85a6bb92233b35039380cbd10",
+      "bytes": 198250
+    },
+    {
+      "path": "src/lex.js",
+      "git_blob": "7e5b5cdf1c74d8f4261e687d8da1c677b6fed1ee",
+      "sha256": "8560ff1a059465bb5e2494b2f4a7c8feb73a4849124f389b4460cf44eca98a1b",
+      "bytes": 58674
+    },
+    {
+      "path": "src/messages.js",
+      "git_blob": "4855108fe8047a843474fc7f6c8ce223c9830aad",
+      "sha256": "c5dcf430874749ce327d5ad5df383ff6b842ab8e1c245c6d056f3bc91891c6c7",
+      "bytes": 11896
+    },
+    {
+      "path": "src/name-stack.js",
+      "git_blob": "ba7b5547fa5908b59ca56716ccd4d812e7d26f5e",
+      "sha256": "f6d9bed90e2cf4cd714f67b5e46f1b601933647b6cc9fd2eb4fffc0823f6d7b1",
+      "bytes": 2675
+    },
+    {
+      "path": "src/options.js",
+      "git_blob": "53e70669dcf60d9a174db656f3456e9b00cc29c9",
+      "sha256": "0d5d0d4c8f22629fc21e27a9b9e99830def5ef5a7d3b1df7328dc15c4030118e",
+      "bytes": 40053
+    },
+    {
+      "path": "src/platforms/rhino.js",
+      "git_blob": "caf2db21361671dc0eabe7207be44cc20006ecf6",
+      "sha256": "40c78ba6a0ccfc85baca498f9a080e8164c3ed0672038ec3549785a0027aeaf6",
+      "bytes": 2676
+    },
+    {
+      "path": "src/prod-params.js",
+      "git_blob": "c9842c3698cb10257d56ed7229c1d1272cd5a209",
+      "sha256": "7cc5b086cbdfa48b752a03ee244809b3fad6ccc5227e43b3f0cce7709876cd24",
+      "bytes": 1500
+    },
+    {
+      "path": "src/reg.js",
+      "git_blob": "7e8407ed1dd754c286069ad51c12d71015cb6662",
+      "sha256": "43b1abd352008ad73588f101e1e5decc239759cfee217c0c014a6f3dc98669a0",
+      "bytes": 1909
+    },
+    {
+      "path": "src/reporters/checkstyle.js",
+      "git_blob": "8f7672a0920a0baf52ceb5722fc3090ad53931c8",
+      "sha256": "e38a9e875f10914d8063d3b444127663b6db6f6081a0954db44271d516c968c2",
+      "bytes": 2288
+    },
+    {
+      "path": "src/reporters/default.js",
+      "git_blob": "e73d75d9475b85f406854cc718ec724c865f4c79",
+      "sha256": "97c377b594959e53673c19ed4e13609881b06ac50f1d1ffe84a1031e1bdb12c6",
+      "bytes": 678
+    },
+    {
+      "path": "src/reporters/jslint_xml.js",
+      "git_blob": "f1439c08f3bbcb8490a5454133f58bf5d08d2748",
+      "sha256": "3c357ba23589dbcc92abb1ce744b737e210598511fd00080a71366b552be448a",
+      "bytes": 1327
+    },
+    {
+      "path": "src/reporters/non_error.js",
+      "git_blob": "9828042f5b5474da4c03353a6f1c2e8ede9ad3b4",
+      "sha256": "f17014d3c79f1125a49cf0b3feb035b5ffa50ddd870dd3677f492bd55e563c73",
+      "bytes": 1246
+    },
+    {
+      "path": "src/reporters/unix.js",
+      "git_blob": "ced0b6c2e822992450bdfd7605d581cd2a74e99a",
+      "sha256": "4131a5ba7c9ae1510bda2799a0124ba6d5eeefb883955c1ef4cfd31730f13505",
+      "bytes": 811
+    },
+    {
+      "path": "src/scope-manager.js",
+      "git_blob": "27178ed7a4f7bbb5dc3a5815fbf55b45108cad0a",
+      "sha256": "621fc9ca414d5a06be6c3aa149df062d05d711677a4b8312f72039cbfb127ffc",
+      "bytes": 37457
+    },
+    {
+      "path": "src/state.js",
+      "git_blob": "0788b30f5b5038f26fa104a34091ba8c4acf46d2",
+      "sha256": "6ec18ec97a71002246cc1f61e532206db4339121748fe601c9e8f41d06a79182",
+      "bytes": 5106
+    },
+    {
+      "path": "src/style.js",
+      "git_blob": "af94d767f9a1d75a49fcbe12129cd371e08e597e",
+      "sha256": "e41cee10bf1ed187baa221aa15d20919e3f2e3ca3ffe57ae5053beb3ada01362",
+      "bytes": 3414
+    },
+    {
+      "path": "src/validate-unicode-escape-sequence.js",
+      "git_blob": "b1ea0507e5dbfee44ec12f164acfa96c5b417192",
+      "sha256": "e3fdb753df3e38efad243cf56205514504ecb4be38af25054c072d0f69b7a6a6",
+      "bytes": 9831
+    },
+    {
+      "path": "src/vars.js",
+      "git_blob": "1b1d402f6b24b079f688afa83c6479f9d4e5bc00",
+      "sha256": "a6ee7194db5d76fdfd86efa3f6fe48bd4cf25714947e80e71103d29ab822c3d4",
+      "bytes": 23331
+    },
+    {
+      "path": "tests/browser.js",
+      "git_blob": "33d70c8aef3b73b1833203f62cf69fe20ab3cca0",
+      "sha256": "5def1dac59b2966a7e5b5305a75d58714a8ac2cec048d47c750c6662563d4373",
+      "bytes": 975
+    },
+    {
+      "path": "tests/cli.js",
+      "git_blob": "85e9706bc8d8a8ad476c2c1a1fe642d70e7e92b9",
+      "sha256": "b3c4cb3764662f31d718b0baed54a29595a88418bfe1569ca11ba630c3a48cf1",
+      "bytes": 52601
+    },
+    {
+      "path": "tests/helpers/browser/fixture-fs.js",
+      "git_blob": "760b2a4280071c180f9ecb16633702c1297d3ae9",
+      "sha256": "13728186917e8e4a7ae8ec55d6f510268fdd3ef115fb4ba089055ba0fcfa86ea",
+      "bytes": 149
+    },
+    {
+      "path": "tests/helpers/browser/index.html",
+      "git_blob": "eac62bcc393419a16169b77cad2a21498342cc6d",
+      "sha256": "b32316fcd151fae4da805f6a68126bd6a160767b5b208f8dd51ca373e484ecd0",
+      "bytes": 229
+    },
+    {
+      "path": "tests/helpers/browser/run-all.js.tmpl",
+      "git_blob": "7937efff8f0372a82cfc8d65337cb14dcf045a4e",
+      "sha256": "fd5ccafee15a4a096de52aaba6d8e097f6a70cef48f293faa48033a175fb046f",
+      "bytes": 1195
+    },
+    {
+      "path": "tests/helpers/browser/server.js",
+      "git_blob": "16b76166f8db70ab964b38d7456da888555acb7f",
+      "sha256": "a74485014a9db1aac837e15a2e153451d24eca64e71ce856de69e28527940c11",
+      "bytes": 6018
+    },
+    {
+      "path": "tests/helpers/fixture.js",
+      "git_blob": "72d448ffd6eb7c1a9a30694b6a42eab90cf3388a",
+      "sha256": "78dd8d34fbcfcfa5634a5af64bdfe6ba67f1666a40bd198d1bc95d0b28d020b8",
+      "bytes": 180
+    },
+    {
+      "path": "tests/helpers/testhelper.js",
+      "git_blob": "d27cd69f1e5bcc13c36935019253b6df216e874a",
+      "sha256": "09bc648e6e1624f86113324d38b74421554b72abbc8e3d62084120656f204cf4",
+      "bytes": 6418
+    },
+    {
+      "path": "tests/regression/libs/backbone.js",
+      "git_blob": "b2e49322b95a653813fdbb47a59302676a0499d3",
+      "sha256": "8cfe610f087cebadbcca1e57ed077b1be9f9e2145899c73d5bf9a497ec4dabfa",
+      "bytes": 42591
+    },
+    {
+      "path": "tests/regression/libs/codemirror3.js",
+      "git_blob": "c5fca4281c1cde57005a3aab5db311557f2295fc",
+      "sha256": "bb7ec6489de45cb6454cf6fc4ffd1d5069f63426e9ae7cd2ee57c16a46681946",
+      "bytes": 178452
+    },
+    {
+      "path": "tests/regression/libs/jquery-1.7.js",
+      "git_blob": "c65850ee416c5ae731b699764641ff9651a39d8c",
+      "sha256": "000ab77e332f4508f5565c17aaf87dd237ee09bc3c28ba16d2d0c96a4bdceda1",
+      "bytes": 249250
+    },
+    {
+      "path": "tests/regression/libs/json2.js",
+      "git_blob": "3b0c872d133a5ce8483604235dd1ea57502aaa9e",
+      "sha256": "4b05fd300b023998641714cb534c7c0d6b91bd4fb7ce461959ac28f9db0ec328",
+      "bytes": 17521
+    },
+    {
+      "path": "tests/regression/libs/lodash.js",
+      "git_blob": "91af0d73070657ca4d72026f3169e19536e364b1",
+      "sha256": "18a5a42fa973f627855a285b220aaf4f0e090bebb26dc39f31dd049ca4dcc4c6",
+      "bytes": 140510
+    },
+    {
+      "path": "tests/regression/libs/prototype-17.js",
+      "git_blob": "ba0a16d9e17e1988c4560a70c4e5d4c8d188b252",
+      "sha256": "bdab258fd8ea2874dc9495c96e88fa15579d98477c64578658a7b0f22d92005b",
+      "bytes": 163312
+    },
+    {
+      "path": "tests/regression/npm.js",
+      "git_blob": "e043d2306459ecdf82b608ed23f6df3be991d91a",
+      "sha256": "c3a03b0ed2bb5f098af3071a3f59ac4f4f8dac7805f837b5283fc87949330dd2",
+      "bytes": 180
+    },
+    {
+      "path": "tests/regression/thirdparty.js",
+      "git_blob": "30dd7292ffebcc78e17be3edfa561f19d9a4becc",
+      "sha256": "29492e41191a1266c13fb2c5d1ee80cb2a1aa7e39a89da384084dc7397a3113e",
+      "bytes": 9327
+    },
+    {
+      "path": "tests/test262/expectations.txt",
+      "git_blob": "1f7e2d62d24fd9abafa21a73a6a9ac187cce09c9",
+      "sha256": "9c8e595b0fe5b2a5d048f57e52fbe1f2a0c58ff48aca8d2e3d49f8d7a028a496",
+      "bytes": 889174
+    },
+    {
+      "path": "tests/test262/index.js",
+      "git_blob": "3c81d4c04c227cf4a803f99f0e2e2e72e953e081",
+      "sha256": "90d1fdf109e9c6e8129ddb37d8abe2f04dc99bcf3b9433746bc6081524cd860b",
+      "bytes": 1734
+    },
+    {
+      "path": "tests/test262/report.js",
+      "git_blob": "fd7e3fd4034e6ca31f597c1ea336d24ebe979ecd",
+      "sha256": "1188e2c911b4a225ef531be5655fb11f3abc891ddc3db476e360e10b50b63c05",
+      "bytes": 2163
+    },
+    {
+      "path": "tests/test262/test.js",
+      "git_blob": "d18dc7bda7d2cbb4537b613f5632052ca15df5c0",
+      "sha256": "167707c7229dbf3dfe70c181b69e49b5c9df197b037db252921debe2adf592f2",
+      "bytes": 1558
+    },
+    {
+      "path": "tests/unit/bigint.js",
+      "git_blob": "26c6fae59bc5e866c47ec7fb36f88756971c6636",
+      "sha256": "5ae61b8b136341be1272f9e4ea0f50a74a9680a706223d43dc8331192526ba86",
+      "bytes": 3538
+    },
+    {
+      "path": "tests/unit/core.js",
+      "git_blob": "47c723ba492bc6db48eee282c0ae025335547a8f",
+      "sha256": "90b43d37cf2573cc76e350772015269794fc8fae2e3248b05c4b7362691bb685",
+      "bytes": 72410
+    },
+    {
+      "path": "tests/unit/dynamic-import.js",
+      "git_blob": "151768d5825fd71fad8d92f0ef8de0870958c58d",
+      "sha256": "6f800f118f96592e5ba2c9914263dba148887688ac75b688aa02ab5a75a7c8af",
+      "bytes": 1839
+    },
+    {
+      "path": "tests/unit/envs.js",
+      "git_blob": "a064937f744d9aa20a8cdefcd6e7f72a4640054d",
+      "sha256": "94de3ec909352365fa7f88d3a8aa8bc26f6175df7563e7daae1cbe224ac58f51",
+      "bytes": 16190
+    },
+    {
+      "path": "tests/unit/fixtures/.jshintignore",
+      "git_blob": "1615b0c68a90b2e5bbdef717dff18d785a563aa0",
+      "sha256": "a3f5ab4e484521a93b5cbb92873b17921bce8ef70b45822073351f6c4bf0dbcb",
+      "bytes": 11
+    },
+    {
+      "path": "tests/unit/fixtures/asi.js",
+      "git_blob": "985e6534895bc9779488750ccc4e5816e18a3c8f",
+      "sha256": "b9dd2dbf459143d70f1ccb4fa39f74ab88d99a18eeec2516cfb7e82382de941e",
+      "bytes": 414
+    },
+    {
+      "path": "tests/unit/fixtures/blocks.js",
+      "git_blob": "1d44df8066875fd507f34e4510fd5e1c1e2837bb",
+      "sha256": "c6756e05d5ddadeef8361576c2015f0d49e6eab0bfc88e931658ca23f7e35d16",
+      "bytes": 374
+    },
+    {
+      "path": "tests/unit/fixtures/boss.js",
+      "git_blob": "07b3a344712cc793c592ba170261288f3ec0283f",
+      "sha256": "2c8a2ec140f34aff88655f71aa103043b010eb9c2aa77c2cfa26edbf1a0dbf82",
+      "bytes": 927
+    },
+    {
+      "path": "tests/unit/fixtures/browser.js",
+      "git_blob": "08d04aaa74f1043e846d1cc3c707ec78c1a501d2",
+      "sha256": "953c7dc4a2804a71db73a96f5d39d97050219bff012ec215ac48448e6ac5fd98",
+      "bytes": 950
+    },
+    {
+      "path": "tests/unit/fixtures/camelcase.js",
+      "git_blob": "6d5d688c5b82fa1e5ed77e27a4603882c0bd3536",
+      "sha256": "eff0c047be4be1925d6e88fd619ff2b52948ceade2911d7f1e1e932a9ba1f65f",
+      "bytes": 297
+    },
+    {
+      "path": "tests/unit/fixtures/caseExpressions.js",
+      "git_blob": "5689308190f38331e25bec554c425acd87a245b9",
+      "sha256": "189f98275672fb58c299a1257aae034e0b6db108c05766b68a37ffff4e62f05a",
+      "bytes": 210
+    },
+    {
+      "path": "tests/unit/fixtures/class-declaration.js",
+      "git_blob": "c81b64f236d123fab61568f81152390710a74707",
+      "sha256": "e79480da001efdee3833cf15f52d6bf959147d3ecb26082ec9a6a32efb8f8ffb",
+      "bytes": 239
+    },
+    {
+      "path": "tests/unit/fixtures/comma.js",
+      "git_blob": "c22d6dc99616715f5a580ef4acdc19ff671ed6ef",
+      "sha256": "fc80c88fd58f54057e5a732eb1399d6e7b39ad8ca12e690d467e957197b67357",
+      "bytes": 1115
+    },
+    {
+      "path": "tests/unit/fixtures/const.js",
+      "git_blob": "de530c2fe8cb647e2bab5d20bb49163266cc93fb",
+      "sha256": "b526176c8f4a389f8245c7c6c3d11dda2c13a7d8b08ad47c601cf8560bdcc953",
+      "bytes": 1735
+    },
+    {
+      "path": "tests/unit/fixtures/curly.js",
+      "git_blob": "d3767f1256c993064a7007fc26b16b186c689390",
+      "sha256": "4d55d1de2ea6f421d3589c554a25937c58e3f132ea2b935a20107c5faea19cf3",
+      "bytes": 125
+    },
+    {
+      "path": "tests/unit/fixtures/curly2.js",
+      "git_blob": "72e55da992225888ff1428d1ee93e88fb70eb639",
+      "sha256": "982caf18c467eb801d266a2db979506068890d908421075bbd51a5f806df7413",
+      "bytes": 141
+    },
+    {
+      "path": "tests/unit/fixtures/default-arguments.js",
+      "git_blob": "433566c955992a3bc90dded7c30c4ec232c86b46",
+      "sha256": "e843fe833988e76c9ed60cc0ce5afe8208d712ee54d7259921b4ff2766485349",
+      "bytes": 969
+    },
+    {
+      "path": "tests/unit/fixtures/destparam.js",
+      "git_blob": "80f5d99fd2383481cb4a1d55c479b8ff91654bb2",
+      "sha256": "f6c9d11ce7f9dce810605c04bdf8cc7bfbfc7c57b74cbc4f10e64d311ce99f1f",
+      "bytes": 977
+    },
+    {
+      "path": "tests/unit/fixtures/emptystmt.js",
+      "git_blob": "733a3f752aace052556d3dcdfce5512b0b4dc49c",
+      "sha256": "dc6dc005d6da004db14602ef77149a8c3728f983253d66d67dfadbf7de6ed08b",
+      "bytes": 230
+    },
+    {
+      "path": "tests/unit/fixtures/enforceall.js",
+      "git_blob": "5bd15196c2c0285f2b3a42e2e61f9e5cc35c7e79",
+      "sha256": "3cf1203cf946be71082c8385d701f3ac3513ded7f5ba805ba445981d0e55aa81",
+      "bytes": 74
+    },
+    {
+      "path": "tests/unit/fixtures/eqeqeq.js",
+      "git_blob": "b9520cf7ace6ab12869fe1373c9bf57125ad2659",
+      "sha256": "a34f4778180faa13e3a7f7d7382b574de72f6a001c723db1dec1ed5370a59fb0",
+      "bytes": 166
+    },
+    {
+      "path": "tests/unit/fixtures/es5.funcexpr.js",
+      "git_blob": "fb8ec78acbd047959130aeae3d1bdcc87a12f12b",
+      "sha256": "779533b63df4f7430e9bc41ce132aea69f4f0f011df3afb4a365bd4030ab6195",
+      "bytes": 410
+    },
+    {
+      "path": "tests/unit/fixtures/es5.js",
+      "git_blob": "ed2f19698817e8de043cabee3e3a825b530d1896",
+      "sha256": "bce4f7d904ae53da276bfa2cf3bc5c559e89d0e37e86ccc88e2cc56246504b1a",
+      "bytes": 1560
+    },
+    {
+      "path": "tests/unit/fixtures/es5Reserved.js",
+      "git_blob": "b6392f415f33153ad008c01ffafdead6a1792550",
+      "sha256": "b2d5247cf6839eaedfd87cc148b8fb5841a6c4f9153107f338a20e94d832319e",
+      "bytes": 136
+    },
+    {
+      "path": "tests/unit/fixtures/es6-export-star-from.js",
+      "git_blob": "8e868a10d9a95cbe3854f91dec50c75a78ba8c23",
+      "sha256": "90b8c73219157841e78089b43691a52885353aa481b6063785aac83fa4cdf1d9",
+      "bytes": 58
+    },
+    {
+      "path": "tests/unit/fixtures/es6-import-export.js",
+      "git_blob": "cb5a21ac9080035d535edada4a743d12972393fa",
+      "sha256": "19e2269124a6bf026b2249f2ecdd8d5f72e17d97005dac435c17aa056e9ad112",
+      "bytes": 1285
+    },
+    {
+      "path": "tests/unit/fixtures/es6-template-literal-tagged.js",
+      "git_blob": "d0cc007d564a6cd6a5bd723b8280ead7af22543d",
+      "sha256": "b54e045b9a80ab668abb4ffbab1b758040e0e3241e77d63856695249c2d5037f",
+      "bytes": 418
+    },
+    {
+      "path": "tests/unit/fixtures/es6-template-literal.js",
+      "git_blob": "149fea8b8ef9b888d69cb6b48efe9bda294c646c",
+      "sha256": "af2963cd20117d78b2a5f1b27e6dd886931004a16c6b489eed052a0a34f66b88",
+      "bytes": 372
+    },
+    {
+      "path": "tests/unit/fixtures/exported.js",
+      "git_blob": "f1fb3cc12b13d85c80d0d6f8941e4f4cb9be56c5",
+      "sha256": "e6d4b13fb99d3c524a662ac5deaa61e8896939cab77ba523cb5f29f8fc63fe77",
+      "bytes": 481
+    },
+    {
+      "path": "tests/unit/fixtures/forin.js",
+      "git_blob": "782c2564d4cdba361f0f6f142e2fef42e86cd73a",
+      "sha256": "60bb40e14ad9cf6690f07ca4cf1eae1b3d291050efd33505d3bdbc704c5aab89",
+      "bytes": 1248
+    },
+    {
+      "path": "tests/unit/fixtures/function-declaration.js",
+      "git_blob": "870ef5e22e464feebfc12f2b8410cd17a2e32e31",
+      "sha256": "754cc423ffdaff3482569683f144ae42010ac9212c7ceb1e09b77d4b0786497f",
+      "bytes": 179
+    },
+    {
+      "path": "tests/unit/fixtures/functionScopedOptions.js",
+      "git_blob": "891b65b25f737a26aab305306727ec694ab9f1a7",
+      "sha256": "d6526a7d0ac31237b1f22fb12b7a475edd01fb83679374b9e6a32c8854ff1f43",
+      "bytes": 100
+    },
+    {
+      "path": "tests/unit/fixtures/gh-2194.js",
+      "git_blob": "cbd7e2693cf49e53576ab7c42e381e8f4ee440cc",
+      "sha256": "8c7eccd8793babaa09ff0287cd89c23ac1cf4e98c32de9d1f3b9519e34adec43",
+      "bytes": 116
+    },
+    {
+      "path": "tests/unit/fixtures/gh-226.js",
+      "git_blob": "40d002b201b7d52e4076502fa012548977e3b22e",
+      "sha256": "b763670797477b89cbc67f430f7afa990a2b18830e467667016306f6727f02c1",
+      "bytes": 230
+    },
+    {
+      "path": "tests/unit/fixtures/gh-334.js",
+      "git_blob": "f97365b0eeaae55bb90ef257c7e8546ee0dde24c",
+      "sha256": "a03d789a1c646bd9e2f85eff5cf29259133dadb415e23715316ff415e638e61c",
+      "bytes": 240
+    },
+    {
+      "path": "tests/unit/fixtures/gh-738-browser.js",
+      "git_blob": "1db10df3c7ce457bce790ee0cf497ccb562d308a",
+      "sha256": "d17c32daf6a7091f3391de4548daab1d8e24f3381bb0c9b98688b924d0165f06",
+      "bytes": 465
+    },
+    {
+      "path": "tests/unit/fixtures/gh-738-node.js",
+      "git_blob": "d749e27eb78dbee234358a55a9c09d7f79be499e",
+      "sha256": "09ea89780b44eb373c159c5e2c7d04fb406424d9efcd05d1a77b0bae6394731b",
+      "bytes": 465
+    },
+    {
+      "path": "tests/unit/fixtures/gh1227.js",
+      "git_blob": "a7a2cf6475acaf5a3b7a48fe42420c5ab5664176",
+      "sha256": "fdbaf29429c850ff14766261ee4f59e23532aa726e0170d4c899e30e70929788",
+      "bytes": 296
+    },
+    {
+      "path": "tests/unit/fixtures/gh1632-1.js",
+      "git_blob": "5885209bf6cab31f20520861aa5ff0dc19f75a90",
+      "sha256": "f71b1f791d92bfa2a97bb2cb8ad1777f1c128fc2b9d102e396e63e59e1b58779",
+      "bytes": 210
+    },
+    {
+      "path": "tests/unit/fixtures/gh1632-2.js",
+      "git_blob": "a668c4eb0c284f78b8afdd4989d209cf259e780d",
+      "sha256": "5aef21c4e87f5536a0311f31154142fea08860596ed18e8a5caa0a599c6b0e28",
+      "bytes": 71
+    },
+    {
+      "path": "tests/unit/fixtures/gh1632-3.js",
+      "git_blob": "aec2f0ae69b07cd5374c1e19834b2cde84224641",
+      "sha256": "685641b7a8d146b8426e74c059da68c717849e9ccf812f20b040036dfa30c7c1",
+      "bytes": 70
+    },
+    {
+      "path": "tests/unit/fixtures/gh1768-1.js",
+      "git_blob": "30a26660b8d4d8dae539c3190427fc6de523a4f8",
+      "sha256": "de29a5dd098de351ccb4e5ec66f291ce4dc95d85eb4229763310d819142b5c60",
+      "bytes": 34
+    },
+    {
+      "path": "tests/unit/fixtures/gh1768-2.js",
+      "git_blob": "cc4b5ba71fe51edcef3cb89963950119f7f4f683",
+      "sha256": "4ac80372c49c125c82d2ff747d1f9471453af83204523590670acc0a7bbd8163",
+      "bytes": 32
+    },
+    {
+      "path": "tests/unit/fixtures/gh1768-3.js",
+      "git_blob": "03a792b59839dec420f94fca09a27fc25ae54599",
+      "sha256": "44db57d137d56d7da511cb300e928a085774d2b85d92a08c72d6f4f5f36d3923",
+      "bytes": 30
+    },
+    {
+      "path": "tests/unit/fixtures/gh1768-4.js",
+      "git_blob": "302841ddcac36aa89c4dc4880f0ac88ae10767e0",
+      "sha256": "e0a6416ee5fe9de160b8797157d6104fab6af8e75affd066fce8e6c212aa7e37",
+      "bytes": 31
+    },
+    {
+      "path": "tests/unit/fixtures/gh1768-5.js",
+      "git_blob": "b5e6fafff4361f6eff1016d16dabd0eefdb64efa",
+      "sha256": "30b0d6c1a00ccc2d7d35b782b89e7b8f6a7dac898e77ae668e51ab27e73cae8f",
+      "bytes": 44
+    },
+    {
+      "path": "tests/unit/fixtures/gh1768-6.js",
+      "git_blob": "6b0af6cd3c8f1d89c36bafac8d46fa078ced2852",
+      "sha256": "e62c5a1231580f1eae7b33938dcfaff28a0f5956bba52001fef0a8cd5fd5509f",
+      "bytes": 46
+    },
+    {
+      "path": "tests/unit/fixtures/gh1802.js",
+      "git_blob": "a3fbdc350b1fa93ba845ffd383b7af5bb6eafbb9",
+      "sha256": "a65f77de3efbad197a00c7481d83e57478ed3f0a46cf70367ea0e1e0970b3e97",
+      "bytes": 47
+    },
+    {
+      "path": "tests/unit/fixtures/gh247.js",
+      "git_blob": "663f5109aaea16a7d8b77f1183f2cd134b1a8297",
+      "sha256": "f536ed86ff46b34945d3b1233d9f856bfd8ea40958103a6ad169a5e66296c35e",
+      "bytes": 514
+    },
+    {
+      "path": "tests/unit/fixtures/gh431.js",
+      "git_blob": "bea92c2d89114802f71dde34d115c151762f9983",
+      "sha256": "710b603f2e66bcbc44f1989c0e1ac0e01f45733c99c1f86b758ed2bdedacbf16",
+      "bytes": 187
+    },
+    {
+      "path": "tests/unit/fixtures/gh56.js",
+      "git_blob": "eebcd0d56c920aaafc9487ddf631521909d752db",
+      "sha256": "685ff567b47f24bfa8a61c824436e21e8c7cc889571fa3db853fa1a43f33e123",
+      "bytes": 147
+    },
+    {
+      "path": "tests/unit/fixtures/gh618.js",
+      "git_blob": "f637d1691af3ce9c5f84d3064c387574a9b3c24a",
+      "sha256": "69017341ade62290bec7c2fd853c5f1ef0f66b5306fe516cc8bda88d54ef8bdb",
+      "bytes": 134
+    },
+    {
+      "path": "tests/unit/fixtures/gh668.js",
+      "git_blob": "b48b53443444085e9e2f97530d6732c50e723f34",
+      "sha256": "04dc1dee8c736bf9d0d7be99e64d9bf7dcff294a953890d40b56224a853e03c0",
+      "bytes": 105
+    },
+    {
+      "path": "tests/unit/fixtures/gh826.js",
+      "git_blob": "92ece4124896357299108c2323f9b2ef681ac47b",
+      "sha256": "5ea8cad33d4b57a806d23d1d97f1bf4eb91c4dc807515e13cb923ae42a81646b",
+      "bytes": 937
+    },
+    {
+      "path": "tests/unit/fixtures/gh870.js",
+      "git_blob": "de149f6f5988a22df138f1dfb433fcee064e2104",
+      "sha256": "d25a480b68d111d7680729aa9dd998a890519c97e5a7d2274596d415d2e15f93",
+      "bytes": 136
+    },
+    {
+      "path": "tests/unit/fixtures/gh878.js",
+      "git_blob": "d58fde23355720f9ee0d1aacfd26c190be33eb1f",
+      "sha256": "7ec9c731c078e7d0f98215de212ff20d1122d29d365c7dba7bc04173e0401ff6",
+      "bytes": 54
+    },
+    {
+      "path": "tests/unit/fixtures/gh988.js",
+      "git_blob": "10b3edc251f14bf312a5a435a47a82c5791f57be",
+      "sha256": "cbd7de22b47d2bb9a1f836bbafeb167f1a3400646adc6a8c400e541fb8834d24",
+      "bytes": 1135
+    },
+    {
+      "path": "tests/unit/fixtures/gruntComment.js",
+      "git_blob": "231802f7021783fe6610d6241174814793c4d42e",
+      "sha256": "9224f4b62a544877329d3b67e209e30c14be271bdbec87e8d16ecf1465d6cb86",
+      "bytes": 395
+    },
+    {
+      "path": "tests/unit/fixtures/identifiers.js",
+      "git_blob": "c42893021192f1e0a3431327a1b8bb2b86a1f635",
+      "sha256": "1778e3656fcae5d94e1bec5d0c8294f241da409429296c2f2677625f211e351e",
+      "bytes": 1219
+    },
+    {
+      "path": "tests/unit/fixtures/ignore-w117.js",
+      "git_blob": "ce6c0b8de51f025f124fe451ce12052024ba0e8d",
+      "sha256": "c2de4f975039fe0de612496a9de4678a1198492b6ef713b244fa56198897172d",
+      "bytes": 272
+    },
+    {
+      "path": "tests/unit/fixtures/ignoreDelimiters.js",
+      "git_blob": "e07b5ae16e99ee91eb9c9596d208af3f84d3df17",
+      "sha256": "dd4c0e36c45ef9fb11cb5a0555aeb801b6d5ce901551bf26b2a03b5e43e9d59c",
+      "bytes": 321
+    },
+    {
+      "path": "tests/unit/fixtures/ignored.js",
+      "git_blob": "bb4694ea54ae62f5bc3eba41c6c1781fd44f6d7a",
+      "sha256": "1bddb6aa1fc4f8a80d10dcd81e767dd152d2d09d310fa2d0e8b9a6ff40580dad",
+      "bytes": 123
+    },
+    {
+      "path": "tests/unit/fixtures/immed.js",
+      "git_blob": "35e4f550ec951ae0cc3a53f4c55011aabf4a1e45",
+      "sha256": "cdef476df1f55403413e95748485dddc6a39f71459ae52b09d253d81f368f76a",
+      "bytes": 599
+    },
+    {
+      "path": "tests/unit/fixtures/inline-tabs-spaces.js",
+      "git_blob": "c2f2f5dbb34e543db4b6df83cb18f64f2a0d3e24",
+      "sha256": "17af60f42ee21fa35c8a432c0ae6747a79f27d6a61fad67f11b283cd44c7942f",
+      "bytes": 221
+    },
+    {
+      "path": "tests/unit/fixtures/insideEval.js",
+      "git_blob": "27d11bc1688c856560c9242ca9c2ceb065ccf99c",
+      "sha256": "3020e93add1405e7d741c7964f175f4db2a29929d5556a9c1d532467b69d44e4",
+      "bytes": 338
+    },
+    {
+      "path": "tests/unit/fixtures/jslintInverted.js",
+      "git_blob": "e87ad4bf85235d98e84ede2d86bf2e598ce8068d",
+      "sha256": "623b83f2e03fe311dcba2928310963110c0adb10756c4521dee3a0c55832f789",
+      "bytes": 44
+    },
+    {
+      "path": "tests/unit/fixtures/jslintOptions.js",
+      "git_blob": "c99eb5adc2bb77a536e6c74557236f2d9ba1536e",
+      "sha256": "c6edec1909607ec5b0dd9850dc6f8402768a9106900992a03fd55cea1917172c",
+      "bytes": 103
+    },
+    {
+      "path": "tests/unit/fixtures/jslintRenamed.js",
+      "git_blob": "7f6e532abcb2161e29f82c39391833dcbacc681b",
+      "sha256": "da28ee8e553526b1eb7fa2a710d878546a3daebf42568e7ec9e8ca3bbe28b88f",
+      "bytes": 51
+    },
+    {
+      "path": "tests/unit/fixtures/lastsemic.js",
+      "git_blob": "ef97abb9c11738dca55a077ad1f3773b1e0d416f",
+      "sha256": "31460f88c69eba6dbef3bcc389aef50f5c5902276a773d1745e9b5dee9527962",
+      "bytes": 103
+    },
+    {
+      "path": "tests/unit/fixtures/latedef-esnext.js",
+      "git_blob": "078a373b187dad29e9425a4a9a487a5800e510d2",
+      "sha256": "cf83609453a2948832430e6454ba5fe15d1dab06f8bc7628b439d72d3251e9d6",
+      "bytes": 1130
+    },
+    {
+      "path": "tests/unit/fixtures/latedef-inline.js",
+      "git_blob": "ecd3eb750162540ad42d88a5184c45e6a6bc945e",
+      "sha256": "4972d99a1de417ca8b885b344cc017d81fedb9a18f2af7341f9e71e62e992341",
+      "bytes": 435
+    },
+    {
+      "path": "tests/unit/fixtures/latedef.js",
+      "git_blob": "7df9d3080314ce60ed2323f7ee97ee5c68c7311a",
+      "sha256": "d5b48d47d13be796d8a7248cc9a00003e7ea908926e18aa0c29464f159de8279",
+      "bytes": 319
+    },
+    {
+      "path": "tests/unit/fixtures/latedefundef.js",
+      "git_blob": "232a7de6e564967536dd5ea623a80fc442adaac9",
+      "sha256": "5a353d05233dce34d915ebf0d804483fbebdfde7e27f974845a8b68a2d1ab597",
+      "bytes": 374
+    },
+    {
+      "path": "tests/unit/fixtures/laxbreak.js",
+      "git_blob": "4d514dc37bb42d971e5413aad92c38c6cdbfb11a",
+      "sha256": "96a69a933ea06d4af773f0af70a9d6684a6a111a916edccb13b352bdfab08c8b",
+      "bytes": 133
+    },
+    {
+      "path": "tests/unit/fixtures/laxcomma.js",
+      "git_blob": "b5e0952f88c8a8209b38873db04dd59608a353da",
+      "sha256": "50a0647092cfeb3d4e4e15d2aa434cfb3f7e260fc957662c8a55472d1991b03e",
+      "bytes": 303
+    },
+    {
+      "path": "tests/unit/fixtures/leak.js",
+      "git_blob": "cc91f9fc2459d988d892940ae125835658a57ad0",
+      "sha256": "eead96053ea1e5f5883f670990dd91de6e0d4f444685504944d45a4374d66f32",
+      "bytes": 81
+    },
+    {
+      "path": "tests/unit/fixtures/loopfunc.js",
+      "git_blob": "59a0cb703bfd8bb8d5ce06bbf251c1bc3a743f26",
+      "sha256": "a5494bf938b22de2282252702ff315197c8de83dc53da14a2e87602f2feabf10",
+      "bytes": 703
+    },
+    {
+      "path": "tests/unit/fixtures/mappingstart.js",
+      "git_blob": "4a09f483ea6352a5b0c20314319934326e83305c",
+      "sha256": "228a71a8ab8b37dfa55d6e0c74beba0b2f926e83458079023c3072b85592be07",
+      "bytes": 74
+    },
+    {
+      "path": "tests/unit/fixtures/max-cyclomatic-complexity-per-function.js",
+      "git_blob": "54297753077bd1b122d5534decef3e6b69b2be4c",
+      "sha256": "882feb1a4d790d106f17df48146c6124b8d598218742ab760d4bbdcf2bab4917",
+      "bytes": 1830
+    },
+    {
+      "path": "tests/unit/fixtures/max-nested-block-depth-per-function.js",
+      "git_blob": "f088977c1f34ecf3147770a52cde9af332b26cd1",
+      "sha256": "7054d51020c3d296ff25788e7a10ecc73f849004559ec8b286ed1200f2c1dfbb",
+      "bytes": 525
+    },
+    {
+      "path": "tests/unit/fixtures/max-parameters-per-function.js",
+      "git_blob": "5b175d4603a095ab048f8bbe73315e41c01f4fe2",
+      "sha256": "bc863e7137394c791c5b488a3258a5447e6c21827a1b15761b3fe66e441bb0f1",
+      "bytes": 284
+    },
+    {
+      "path": "tests/unit/fixtures/max-statements-per-function.js",
+      "git_blob": "788c26517bd8beec48860f8a430fec02f344c970",
+      "sha256": "6a36cefef173e81471ee59c4f5123ffa8d7286768fd74e1f99ff40bf825b5874",
+      "bytes": 333
+    },
+    {
+      "path": "tests/unit/fixtures/maxlen.js",
+      "git_blob": "304a3fa8147e4df23fd1f60f27366885e71ac13e",
+      "sha256": "31ed6a7dd767c249ca8142c9a3d044a72f814512e959f104a67e7d58465d2ca4",
+      "bytes": 577
+    },
+    {
+      "path": "tests/unit/fixtures/multiline-global-declarations.js",
+      "git_blob": "cd44b162c6c44151f9eacd6205e3e6500af35ce6",
+      "sha256": "8d7db1f90ebc873603e3dff34fb9412016d2ce76ab196feabd56302dda97f864",
+      "bytes": 114
+    },
+    {
+      "path": "tests/unit/fixtures/nativeobject.js",
+      "git_blob": "ea0830bbcf395ed533c0428649eaac014a60a251",
+      "sha256": "a67cd40ebef56e871c397fb1c65742a3dbdbff49274dde39c8c5d7fa3f8e0371",
+      "bytes": 504
+    },
+    {
+      "path": "tests/unit/fixtures/nbsp.js",
+      "git_blob": "22128aff70818ec7678c16b1a1cbb89cf74a69eb",
+      "sha256": "0af90a56767618df7bf4ebb7bc99aec39ac8c9fd3234f05cd7d2e6a6b0b665b4",
+      "bytes": 34
+    },
+    {
+      "path": "tests/unit/fixtures/nestedFunctions-locations.js",
+      "git_blob": "c1808333a0040d97ac534218e173e374a04b1bf0",
+      "sha256": "65ce7d377fd666faab6316ef370149412f31633964cfa3f3ac5953b518e986eb",
+      "bytes": 3787
+    },
+    {
+      "path": "tests/unit/fixtures/nestedFunctions.js",
+      "git_blob": "9362ca8e856d92dc0d65ab117fd1a84190b2e20d",
+      "sha256": "910761aeddcf886165e2a38fcae20443c8546df5c0b4a84ed0c9b34ed7ca5cfb",
+      "bytes": 1735
+    },
+    {
+      "path": "tests/unit/fixtures/newcap.js",
+      "git_blob": "85988ebcff2f970881bf79077ebd76cd273250ce",
+      "sha256": "638e8efb28ed05dfe841ca4157bf0c9207a02ab1e4790b15bbcc2c15f1c28e13",
+      "bytes": 486
+    },
+    {
+      "path": "tests/unit/fixtures/noarg.js",
+      "git_blob": "91871710cfc1d32c2660a6715b77ae80774d2c45",
+      "sha256": "f06bd8ba5b8d386cba76d04bb679c273de8a15c87eab7375745aebbc5e3bee12",
+      "bytes": 102
+    },
+    {
+      "path": "tests/unit/fixtures/onevar.js",
+      "git_blob": "2bda2ddc894d07b8cdeb60e7b06c2d21bb494c4b",
+      "sha256": "b7d0f87d809a3bbafca092e2ddc77d4bbbeec97271f1df95d382a1d0e02d7b3b",
+      "bytes": 89
+    },
+    {
+      "path": "tests/unit/fixtures/parsingCommas.js",
+      "git_blob": "be8cda19c94de2d66075b26df029c7558d06d9da",
+      "sha256": "47a8890a8dc732358f57550c7898bd54920108d4473dbd02f2b6021149f028cd",
+      "bytes": 60
+    },
+    {
+      "path": "tests/unit/fixtures/peek-over-directives.js",
+      "git_blob": "f66465f44710260e1bf86a25519c80e33b381207",
+      "sha256": "497520643594bcbf5a5c0dea5ffd952efa22bfaee39787c9c807ec8213141595",
+      "bytes": 2518
+    },
+    {
+      "path": "tests/unit/fixtures/protoiterator.js",
+      "git_blob": "c1b3113b7e57c9755b90e323927250a21e229b93",
+      "sha256": "2935c7b6923915a9880c137ed1901d7ace34ee4de1ecbeb17df1aee53f993704",
+      "bytes": 812
+    },
+    {
+      "path": "tests/unit/fixtures/quotes.js",
+      "git_blob": "cf3478d352bcf8f0930d4f5d21cd5b3f1b61efc5",
+      "sha256": "cef8f2a84c7c1296a88fa2168f91389ee9014c7c8b082c788422a661c663bb21",
+      "bytes": 75
+    },
+    {
+      "path": "tests/unit/fixtures/quotes2.js",
+      "git_blob": "733b7a09d697edc3c82e90d52da65d51b87a3b03",
+      "sha256": "b1c0ae9c0db07990e0bcd9124ea919da6b290309f0b93f873a859dbad94833e9",
+      "bytes": 75
+    },
+    {
+      "path": "tests/unit/fixtures/quotes3.js",
+      "git_blob": "3ca753172e5a3b2febb327d20ce2e811582f2884",
+      "sha256": "bf9c0a2707b1567c24d4b8c22e8ef82942aaaa5596aabb6246f5e902cd54c74b",
+      "bytes": 597
+    },
+    {
+      "path": "tests/unit/fixtures/quotes4.js",
+      "git_blob": "91e58ac8a01e4597c83fe4ff2c6e20b16fa9df22",
+      "sha256": "ffa42359f6549eb5fbef320849fe7eb0fa366c2fadb40ef21f9bcc4c2736b0a1",
+      "bytes": 43
+    },
+    {
+      "path": "tests/unit/fixtures/redef-es6.js",
+      "git_blob": "c99a9a441fa3524d2996c37986995dd5e7bbb118",
+      "sha256": "e84eddf2f3ef4362e7a9a286008fdfb71a9f912d1e7310c1212c349c59945b29",
+      "bytes": 3919
+    },
+    {
+      "path": "tests/unit/fixtures/redef.js",
+      "git_blob": "81ef7b1ce27496daff0da9b6be42e2103c5aff10",
+      "sha256": "32e95818507d15a568e62bb5ff7e16ba3c8dc7dcb3b7ea08b6273406ad3dc505",
+      "bytes": 256
+    },
+    {
+      "path": "tests/unit/fixtures/regex_array.js",
+      "git_blob": "bc5e83da1c77f0f8ce5f709514f3b12c27fab48a",
+      "sha256": "ce5e20fed7c47d41feece2edac0b139579aa44c3b4b6b06b2a4c303a8176bfcb",
+      "bytes": 37
+    },
+    {
+      "path": "tests/unit/fixtures/removeglobals.js",
+      "git_blob": "670602cf0abe8abf63d7378edada635d0ff2c216",
+      "sha256": "22380bf130f5be00cd5d7f6375ae19d848207aff7a67d41f889fd40a299831dc",
+      "bytes": 38
+    },
+    {
+      "path": "tests/unit/fixtures/reserved.js",
+      "git_blob": "e76b9c4f333e055c950a8b718418e8b1298655e0",
+      "sha256": "3b38ab7217dbd94e6f68b194cafbb5f0187a5809ebacc1a7038c0a9544e60835",
+      "bytes": 191
+    },
+    {
+      "path": "tests/unit/fixtures/return.js",
+      "git_blob": "e115450afae27c9fdf775b93cdcb09c6170887f8",
+      "sha256": "95cfb6f1eb7947b6c503e50ed1aba532e3c709e37c9c04d5c92c1dc33f33cf3c",
+      "bytes": 423
+    },
+    {
+      "path": "tests/unit/fixtures/safeasi.js",
+      "git_blob": "f3e1983cab02c54ffbf404daddad1190a2a16a58",
+      "sha256": "c24f45ddc1003572abfea3146e85cacd3c10cbbffe9f774de65771164d53a756",
+      "bytes": 203
+    },
+    {
+      "path": "tests/unit/fixtures/scope-cross-blocks.js",
+      "git_blob": "7ef655967e8d36c3fb687ff0d816b48eddb89fd9",
+      "sha256": "429d845810b37d23fe65f2b8670c0aa60c5ad15d2d3e9454e0c815e535446b69",
+      "bytes": 598
+    },
+    {
+      "path": "tests/unit/fixtures/scope-redef.js",
+      "git_blob": "57576762fb604fd005dd8e2115d39d3276a54846",
+      "sha256": "48e448d89d4325ae7373deb951d6013d457eba3ea54ca9e358a5c5d76ed367cc",
+      "bytes": 313
+    },
+    {
+      "path": "tests/unit/fixtures/scope.js",
+      "git_blob": "72ac758c15fd5fbe9c75fbcf86cdf0e8593abda4",
+      "sha256": "fc50546764095d020f39e1d05f819eff39817e59199b41e34757272acf37bd79",
+      "bytes": 773
+    },
+    {
+      "path": "tests/unit/fixtures/scripturl.js",
+      "git_blob": "b2c1e61c2328d75c25ca40331546b57a61b2377c",
+      "sha256": "7fe91aed12f468210bbeade124351338ef8eff81ad55b6707b78b7a3d0def81e",
+      "bytes": 162
+    },
+    {
+      "path": "tests/unit/fixtures/shadow-inline.js",
+      "git_blob": "9326a46475780643197483bad919eb80a7d414cd",
+      "sha256": "d09d393f23b9e92de44ff9075f6576c91008f62c2ab7fec00289c35ac51f9365",
+      "bytes": 579
+    },
+    {
+      "path": "tests/unit/fixtures/shelljs.js",
+      "git_blob": "f7140197148a19ca4dd83e7f2415512d5e5fffe0",
+      "sha256": "2b1ec26c9db92da5c5ccd043bc229d1a09ea744fcc82bc04d2512b0a138c6da5",
+      "bytes": 295
+    },
+    {
+      "path": "tests/unit/fixtures/strict_incorrect.js",
+      "git_blob": "a4feeee828fb8efa6368fd17d13c83e141dea251",
+      "sha256": "eac1f3c7dc5f6df1ca1f02e9ca1b548198d3282f6cfc9cfbdeb2c3a546524ffe",
+      "bytes": 787
+    },
+    {
+      "path": "tests/unit/fixtures/strict_newcap.js",
+      "git_blob": "e3de246cfc8efa5d9c833ca68c99cb7f480741b2",
+      "sha256": "b927cf97b7c644ade017799bc125d0b4deeca5048037e27cfd91c4beb169684b",
+      "bytes": 282
+    },
+    {
+      "path": "tests/unit/fixtures/strict_this.js",
+      "git_blob": "8ba10e7e7a043b25e9febafc43c997989d57cc08",
+      "sha256": "2d2b158de7f5f1295e31b8a0505d527861a0786a798b8f7de448ebef87f44ad4",
+      "bytes": 220
+    },
+    {
+      "path": "tests/unit/fixtures/strict_this2.js",
+      "git_blob": "6187951a040d35473f0f864fc99ff8e14c36824e",
+      "sha256": "5a76fa3c56aa12cde33fa84f5295df85d32cbbd85be6a22d232147cd30334267",
+      "bytes": 251
+    },
+    {
+      "path": "tests/unit/fixtures/strict_violations.js",
+      "git_blob": "c55a552e3235af8c5980a6011de0dde5d024c435",
+      "sha256": "071d7c347047167b42180e46b7142802d1aba0a54709e22de2b69aa090218611",
+      "bytes": 236
+    },
+    {
+      "path": "tests/unit/fixtures/strings.js",
+      "git_blob": "29243af38d5d34e828728459190fd8dd42c57e0b",
+      "sha256": "600e516ee2c3fe2f4466f71c5eb1b82a764fb2f841615ecc3f3d8927e55c4734",
+      "bytes": 555
+    },
+    {
+      "path": "tests/unit/fixtures/supernew.js",
+      "git_blob": "887071db66e09cd30b7a5adc73276b9813b6b4ea",
+      "sha256": "d2d726d08f87b75d43122de5cdb34e5aa6bbd866b5719b82d7b75685b60e6cea",
+      "bytes": 159
+    },
+    {
+      "path": "tests/unit/fixtures/switchDefaultFirst.js",
+      "git_blob": "a2c92debbe54d39d325e12bccb42f154f2491469",
+      "sha256": "34d506a3f58ff786a6d43356aa34e1ac589808ab064aea16b08e37a433bebe19",
+      "bytes": 178
+    },
+    {
+      "path": "tests/unit/fixtures/switchFallThrough.js",
+      "git_blob": "5ea3d143e39d6600724a2600e090e20aaea501d9",
+      "sha256": "5250bb5054c80a1933a719231cca9fa08a6014a271226e9705aec6d0ac7dd983",
+      "bytes": 840
+    },
+    {
+      "path": "tests/unit/fixtures/trycatch.js",
+      "git_blob": "85d66597e2302af64f1c3c875c53656bb2d41201",
+      "sha256": "556bef99fe61f4dc1e25951893e12f542a221cf41bc808e432f8fcb5ce06be02",
+      "bytes": 338
+    },
+    {
+      "path": "tests/unit/fixtures/typeofcomp.js",
+      "git_blob": "7eda0f43030aadc780a6c0be9ea3f6f8f4841a79",
+      "sha256": "82ceaba7cdb51fc8aea751994571dd6e493a132a757be264c4c31b6af88c354a",
+      "bytes": 576
+    },
+    {
+      "path": "tests/unit/fixtures/undef.js",
+      "git_blob": "065f2021c5796c1141580a93a26c4c5b9b82065e",
+      "sha256": "742c88b4b551a8415ce14a4a2a9c2380877882881941c08065b14b650e764281",
+      "bytes": 852
+    },
+    {
+      "path": "tests/unit/fixtures/undef_func.js",
+      "git_blob": "4f375117990051dd6540cd85c0734dcef93b37d6",
+      "sha256": "36229f2e80cfb424b90a8df984d5b7f59c50369601640898cc4d274f2441848c",
+      "bytes": 93
+    },
+    {
+      "path": "tests/unit/fixtures/undefstrict.js",
+      "git_blob": "472b1595fa7ad311bf219941d1ac53d4826a989f",
+      "sha256": "ae3b6f261d7db084f8c47ecf7863048b490e152a5d22415a545b8d73711ed517",
+      "bytes": 61
+    },
+    {
+      "path": "tests/unit/fixtures/unignored.js",
+      "git_blob": "c3488bb33c1e172b7cd77aec38b667676fd77640",
+      "sha256": "9349263f705ee91c9580ca374ce469acde9b999f6ff932d0786dc9a311892c82",
+      "bytes": 57
+    },
+    {
+      "path": "tests/unit/fixtures/unused-cross-blocks.js",
+      "git_blob": "e1c841acfe795fb548a89be2d8178733fa7e9287",
+      "sha256": "09c74787bff21ef9b98a511a10d59117713519ee218fb8e877fc7fcfcfa9b19d",
+      "bytes": 1212
+    },
+    {
+      "path": "tests/unit/fixtures/unused.js",
+      "git_blob": "ccc4530ca99946dcc01ddb67fc7464fde5af8548",
+      "sha256": "19d0c231aa59bcfe90eb6e0edfac3d6079cc0bfb6f27d53b1414eaed92912821",
+      "bytes": 2164
+    },
+    {
+      "path": "tests/unit/fixtures/unusedglobals.js",
+      "git_blob": "366d8a54676836851fa59ed851be8cb4aadf0369",
+      "sha256": "bf1e8fbec1c8791add62fad41fc68a08439f773fe3bd5659d95380a950d3a462",
+      "bytes": 53
+    },
+    {
+      "path": "tests/unit/fixtures/with.js",
+      "git_blob": "e2be9dc7df20ef7aa4eba713e9b2bd768fecf175",
+      "sha256": "d5dd9f539b86e31c7f6091f97c6061233b7ad1a5a5988957758b5c1ad072885a",
+      "bytes": 153
+    },
+    {
+      "path": "tests/unit/fixtures/yield-expressions.js",
+      "git_blob": "400e2e06b2030d8c88526158fff1c68e4c288b7b",
+      "sha256": "7c0fae581da5df73bc57a7522fa8f761f91e43fd113e521effa9da7fd20da239",
+      "bytes": 2059
+    },
+    {
+      "path": "tests/unit/module-api.js",
+      "git_blob": "565852cd005d62c60dc9c56d28169444c11c03ba",
+      "sha256": "750fe77b4efce503137b450505e36edc4da58cd7690db0673686695a6fcef37a",
+      "bytes": 2082
+    },
+    {
+      "path": "tests/unit/objrestspread.js",
+      "git_blob": "d000a42cb52daaa438e92c8f7e0465d4688c9303",
+      "sha256": "bc9f8846c480ef0fa21ea23fb645dbef9d2a843ce3f431f95b4f20bc5943bfce",
+      "bytes": 4009
+    },
+    {
+      "path": "tests/unit/options.js",
+      "git_blob": "defcc3962f46e5fde37565d0683df047b1173be7",
+      "sha256": "6743dac60024e5af456f257d90c536eca34da719cad82c87e7a18d8d7d3cc6fe",
+      "bytes": 162095
+    },
+    {
+      "path": "tests/unit/parser.js",
+      "git_blob": "5cfbef0e836d76092482b92570b05dab45bb2ed9",
+      "sha256": "72530e9d6cbcbfb7e33687a1dfa315299b4d597f56d0bdfee0d1ec6c8fddcb00",
+      "bytes": 397077
+    },
+    {
+      "path": "tests/website.js",
+      "git_blob": "68c95b1e95fbd0c73aece4ca53ae76281b8e6bec",
+      "sha256": "23536dbebbfdb2a147076ff5272cfd096a5fbef865622d1d6f326ff5b95f4220",
+      "bytes": 1043
+    }
+  ],
+  "candidate_manifest": {
+    "name": "jshint",
+    "version": "2.13.6+owned.current-parents.1",
+    "homepage": "http://jshint.com/",
+    "description": "Static analysis tool for JavaScript",
+    "author": {
+      "name": "Anton Kovalyov",
+      "email": "anton@kovalyov.net",
+      "url": "http://anton.kovalyov.net/"
+    },
+    "repository": {
+      "type": "git",
+      "url": "https://github.com/jshint/jshint.git"
+    },
+    "bugs": {
+      "url": "https://github.com/jshint/jshint/issues"
+    },
+    "bin": {
+      "jshint": "./bin/jshint"
+    },
+    "scripts": {
+      "browser-test-server": "node tests/helpers/browser/server",
+      "build": "node bin/build",
+      "coverage": "istanbul -- cover ./node_modules/nodeunit/bin/nodeunit tests/unit",
+      "coverage-report": "npm run coverage && istanbul report html",
+      "data": "node scripts/generate-identifier-data",
+      "fetch-test262": "git submodule init && git submodule update",
+      "pretest": "node ./bin/jshint src && jscs src",
+      "changelog": "conventional-changelog -p jshint -i CHANGELOG.md -w",
+      "github-release": "conventional-github-releaser -p jshint",
+      "test-all": "npm run test-node && npm run test-browser && npm run test-262",
+      "test-262": "node tests/test262",
+      "test-browser": "node tests/browser",
+      "test-cli": "nodeunit tests/cli.js",
+      "test-node": "npm run test-unit && npm run test-cli && npm run test-regression",
+      "test-regression": "nodeunit tests/regression",
+      "test-unit": "nodeunit tests/unit",
+      "test-website": "node tests/website.js",
+      "test": "npm run test-node && npm run test-browser"
+    },
+    "main": "./src/jshint.js",
+    "dependencies": {
+      "cli": "1.0.1",
+      "console-browserify": "1.2.0",
+      "exit": "0.1.2",
+      "htmlparser2": "12.0.0",
+      "lodash": "4.18.1",
+      "minimatch": "11.0.2",
+      "strip-json-comments": "5.0.3"
+    },
+    "devDependencies": {
+      "async": "3.2.6",
+      "browserify": "17.0.1",
+      "conventional-changelog": "8.1.3",
+      "conventional-github-releaser": "3.1.5",
+      "coveralls": "3.1.1",
+      "istanbul": "0.4.5",
+      "jscs": "3.0.7",
+      "mock-stdin": "1.0.0",
+      "nodeunit": "0.11.3",
+      "puppeteer": "25.16.0",
+      "regenerate": "1.5.0",
+      "results-interpreter": "1.0.0",
+      "sinon": "22.1.0",
+      "test262-stream": "1.4.0",
+      "unicode-5.2.0": "0.7.5",
+      "unicode-11.0.0": "0.7.8"
+    },
+    "license": "MIT",
+    "preferGlobal": true,
+    "files": [
+      "bin",
+      "data",
+      "dist",
+      "src"
+    ],
+    "private": true,
+    "engines": {
+      "node": ">=26.12.1"
+    }
+  },
+  "candidate_cli": "\"use strict\";\n\nvar _                 = require(\"lodash\");\nvar cli               = require(\"cli\");\nvar path              = require(\"path\");\nvar minimatch         = require(\"minimatch\").minimatch;\nvar htmlparser        = require(\"htmlparser2\");\nvar exit              = require(\"exit\");\nvar stripJsonComments = require(\"strip-json-comments\").default;\nvar JSHINT            = require(\"./jshint.js\").JSHINT;\nvar defReporter       = require(\"./reporters/default\").reporter;\nvar fsUtils           = require(\"./fs-utils\");\n\nvar OPTIONS = {\n  \"config\": [\"c\", \"Custom configuration file\", \"string\", false ],\n  \"reporter\": [\"reporter\", \"Custom reporter (<PATH>|jslint|checkstyle|unix)\", \"string\", undefined ],\n  \"prereq\": [\n    \"prereq\",\n    \"Comma-separated list of prerequisites (paths). E.g. files which include \" +\n    \"definitions of global variables used throughout your project\",\n    \"string\",\n    null\n  ],\n  \"exclude\": [\"exclude\",\n    \"Exclude files matching the given filename pattern (same as .jshintignore)\", \"string\", null],\n  \"exclude-path\": [\"exclude-path\", \"Pass in a custom jshintignore file path\", \"string\", null],\n  \"filename\": [\"filename\",\n    \"Pass in a filename when using STDIN to emulate config lookup for that file name\",\n    \"string\", null],\n  \"verbose\": [\"verbose\", \"Show message codes\"],\n  \"show-non-errors\": [\"show-non-errors\", \"Show additional data generated by jshint\"],\n  \"extra-ext\": [\"e\",\n    \"Comma-separated list of file extensions to use (default is .js)\", \"string\", \"\"],\n\n  \"extract\": [\n    \"extract\",\n    \"Extract inline scripts contained in HTML (auto|always|never, default to never)\",\n    \"string\",\n    \"never\"\n  ],\n\n  // Deprecated options.\n  \"jslint-reporter\": [\n    \"jslint-reporter\",\n    deprecated(\"Use a jslint compatible reporter\", \"--reporter=jslint\")\n  ],\n\n  \"checkstyle-reporter\": [\n    \"checkstyle-reporter\",\n    deprecated(\"Use a CheckStyle compatible XML reporter\", \"--reporter=checkstyle\")\n  ]\n};\n\n/**\n * Returns the same text but with a deprecation notice.\n * Useful for options descriptions.\n *\n * @param {string} text\n * @param {string} alt (optional) Alternative command to include in the\n *                 deprecation notice.\n *\n * @returns {string}\n */\nfunction deprecated(text, alt) {\n  if (!alt) {\n    return text + \" (DEPRECATED)\";\n  }\n\n  return text + \" (DEPRECATED, use \" + alt + \" instead)\";\n}\n\n/**\n * Tries to find a configuration file in either project directory\n * or in the home directory. Configuration files are named\n * '.jshintrc'.\n *\n * @param {string} file path to the file to be linted\n * @returns {string} a path to the config file\n */\nfunction findConfig(file) {\n  var dir  = path.dirname(path.resolve(file));\n  var envs = getHomeDir();\n  var proj = findFile(\".jshintrc\", dir);\n  var home;\n\n  if (proj)\n    return proj;\n\n  else if (envs) {\n    home = path.normalize(path.join(envs, \".jshintrc\"));\n\n    if (fsUtils.exists(home))\n      return home;\n  }\n\n  return null;\n}\n\nfunction getHomeDir() {\n  var homePath = \"\";\n  var environment = global.process.env;\n  var paths = [\n    environment.USERPROFILE,\n    environment.HOME,\n    environment.HOMEPATH,\n    environment.HOMEDRIVE + environment.HOMEPATH\n  ];\n\n  while (paths.length) {\n    homePath = paths.shift();\n    if (fsUtils.exists(homePath)) {\n      return homePath;\n    }\n  }\n}\n\n/**\n * Tries to find JSHint configuration within a package.json file\n * (if any). It search in the current directory and then goes up\n * all the way to the root just like findFile.\n *\n * @param   {string} file path to the file to be linted\n * @returns {object} config object\n */\nfunction loadNpmConfig(file) {\n  var dir = path.dirname(path.resolve(file));\n  var fp  = findFile(\"package.json\", dir);\n\n  if (!fp)\n    return null;\n\n  try {\n    return require(fp).jshintConfig;\n  } catch (e) {\n    return null;\n  }\n}\n\n/**\n * Tries to import a reporter file and returns its reference.\n *\n * @param {string} fp a path to the reporter file\n * @returns {object} imported module for the reporter or 'null'\n *                   if a module cannot be imported.\n */\nfunction loadReporter(fp) {\n  try {\n    return require(fp).reporter;\n  } catch (err) {\n    return null;\n  }\n}\n\n// Storage for memoized results from find file\n// Should prevent lots of directory traversal &\n// lookups when liniting an entire project\nvar findFileResults = {};\n\n/**\n * Searches for a file with a specified name starting with\n * 'dir' and going all the way up either until it finds the file\n * or hits the root.\n *\n * @param {string} name filename to search for (e.g. .jshintrc)\n * @param {string} dir  directory to start search from (default:\n *                      current working directory)\n *\n * @returns {string} normalized filename\n */\nfunction findFile(name, cwd) {\n  cwd = cwd || process.cwd();\n\n  var filename = path.normalize(path.join(cwd, name));\n  if (findFileResults[filename] !== undefined) {\n    return findFileResults[filename];\n  }\n\n  var parent = path.resolve(cwd, \"../\");\n\n  if (fsUtils.exists(filename)) {\n    findFileResults[filename] = filename;\n    return filename;\n  }\n\n  if (cwd === parent) {\n    findFileResults[filename] = null;\n    return null;\n  }\n\n  return findFile(name, parent);\n}\n\n/**\n * Loads a list of files that have to be skipped. JSHint assumes that\n * the list is located in a file called '.jshintignore'.\n *\n * @return {array} a list of files to ignore.\n */\nfunction loadIgnores(params) {\n  var file = findFile(params.excludePath || \".jshintignore\", params.cwd) || \"\";\n\n  if (!file && !params.exclude) {\n    return [];\n  }\n\n  var lines = (file ? fsUtils.readFile(file) : \"\").split(\"\\n\");\n  var exclude = params.exclude || \"\";\n  lines.unshift.apply(lines, exclude.split(\",\"));\n\n  return lines\n    .filter(function(line) {\n      return !!line.trim();\n    })\n    .map(function(line) {\n      if (line[0] === \"!\")\n        return \"!\" + path.resolve(path.dirname(file), line.substr(1).trim());\n\n      return path.join(path.dirname(file), line.trim());\n    });\n}\n\n/**\n * Checks whether we should ignore a file or not.\n *\n * @param {string} fp       a path to a file\n * @param {array}  patterns a list of patterns for files to ignore\n *\n * @return {boolean} 'true' if file should be ignored, 'false' otherwise.\n */\nfunction isIgnored(fp, patterns) {\n  return patterns.some(function(ip) {\n    if (minimatch(path.resolve(fp), ip, { nocase: true, dot: true })) {\n      return true;\n    }\n\n    if (path.resolve(fp) === ip) {\n      return true;\n    }\n\n    if (fsUtils.isDirectory(fp) && ip.match(/^[^\\/\\\\]*[\\/\\\\]?$/) &&\n      fp.match(new RegExp(\"^\" + ip + \".*\"))) {\n      return true;\n    }\n  });\n}\n\n/**\n * Extract JS code from a given source code. The source code my be either HTML\n * code or JS code. In the latter case, no extraction will be done unless\n * 'always' is given.\n *\n * @param {string} code a piece of code\n * @param {string} when 'always' will extract the JS code, no matter what.\n * 'never' won't do anything. 'auto' will check if the code looks like HTML\n * before extracting it.\n *\n * @return {string} the extracted code\n */\nfunction extract(code, when) {\n  // A JS file won't start with a less-than character, whereas a HTML file\n  // should always start with that.\n  if (when !== \"always\" && (when !== \"auto\" || !/^\\s*</.test(code)))\n    return code;\n\n  var inscript = false;\n  var index = 0;\n  var js = [];\n  var startOffset;\n\n  // Test if current tag is a valid <script> tag.\n  function onopen(name, attrs) {\n    if (name !== \"script\")\n      return;\n\n    if (attrs.type && !/text\\/javascript/.test(attrs.type.toLowerCase()))\n      return;\n\n    // Mark that we're inside a <script> a tag and push all new lines\n    // in between the last </script> tag and this <script> tag to preserve\n    // location information.\n    inscript = true;\n    js.push.apply(js, code.slice(index, parser.endIndex).match(/\\r\\n|\\n|\\r/g));\n    startOffset = null;\n  }\n\n  function onclose(name) {\n    if (name !== \"script\" || !inscript)\n      return;\n\n    inscript = false;\n    index = parser.startIndex;\n    startOffset = null;\n  }\n\n  function ontext(data) {\n    if (!inscript)\n      return;\n\n    var lines = data.split(/\\r\\n|\\n|\\r/);\n\n    if (!startOffset) {\n      lines.some(function(line) {\n        if (!line) return;\n        startOffset = /^(\\s*)/.exec(line)[1];\n        return true;\n      });\n    }\n\n    // check for startOffset again to remove leading white space from first line\n    if (startOffset) {\n      lines = lines.map(function(line) {\n        return line.replace(startOffset, \"\");\n      });\n      data = lines.join(\"\\n\");\n    }\n\n    js.push(data); // Collect JavaScript code.\n  }\n\n  var parser = new htmlparser.Parser({ onopentag: onopen, onclosetag: onclose, ontext: ontext });\n  parser.end(code);\n\n  return js.join(\"\");\n}\n\n/**\n * Crude version of source maps: extract how much JavaSscript in HTML\n * was shifted based on first JS line. For example if first js line\n * is offset by 4 spaces, each line in this js fragment will have offset 4\n * to restore the original column.\n *\n * @param {string} code a piece of code\n * @param {string} when 'always' will extract the JS code, no matter what.\n * 'never' won't do anything. 'auto' will check if the code looks like HTML\n * before extracting it.\n *\n * @return {Array} extracted offsets\n */\nfunction extractOffsets(code, when) {\n  // A JS file won't start with a less-than character, whereas a HTML file\n  // should always start with that.\n  if (when !== \"always\" && (when !== \"auto\" || !/^\\s*</.test(code)))\n    return;\n\n  var inscript = false;\n  var index = 0;\n  var lineCounter = 0;\n  var startOffset;\n  var offsets = [];\n\n  // Test if current tag is a valid <script> tag.\n  function onopen(name, attrs) {\n    if (name !== \"script\")\n      return;\n\n    if (attrs.type && !/text\\/javascript/.test(attrs.type.toLowerCase()))\n      return;\n\n    // Mark that we're inside a <script> a tag and push all new lines\n    // in between the last </script> tag and this <script> tag to preserve\n    // location information.\n    inscript = true;\n    var fragment = code.slice(index, parser.endIndex);\n    var n = (fragment.match(/\\r\\n|\\n|\\r/g) || []).length;\n    lineCounter += n;\n    startOffset = null;\n  }\n\n  function onclose(name) {\n    if (name !== \"script\" || !inscript)\n      return;\n\n    inscript = false;\n    index = parser.startIndex;\n    startOffset = null;\n  }\n\n  function ontext(data) {\n    if (!inscript)\n      return;\n\n    var lines = data.split(/\\r\\n|\\n|\\r/);\n\n    if (!startOffset) {\n      lines.some(function(line) {\n        if (!line) return;\n        startOffset = /^(\\s*)/.exec(line)[1];\n        return true;\n      });\n    }\n\n    // check for startOffset again to remove leading white space from first line\n    lines.forEach(function() {\n      lineCounter += 1;\n      if (startOffset) {\n        offsets[lineCounter] = startOffset.length;\n      } else {\n        offsets[lineCounter] = 0;\n      }\n    });\n  }\n\n  var parser = new htmlparser.Parser({ onopentag: onopen, onclosetag: onclose, ontext: ontext });\n  parser.end(code);\n  return offsets;\n}\n\n/**\n * Recursively gather all files that need to be linted,\n * excluding those that user asked to ignore.\n *\n * @param {string} fp      a path to a file or directory to lint\n * @param {array}  files   a pointer to an array that stores a list of files\n * @param {array}  ignores a list of patterns for files to ignore\n * @param {array}  ext     a list of non-dot-js extensions to lint\n */\nfunction collect(fp, files, ignores, ext) {\n  if (ignores && isIgnored(fp, ignores)) {\n    return;\n  }\n\n  if (!fsUtils.exists(fp)) {\n    cli.error(\"Can't open \" + fp);\n    return;\n  }\n\n  if (fsUtils.isDirectory(fp)) {\n    fsUtils.readDirectory(fp).forEach(function(item) {\n      var itempath = path.join(fp, item);\n      if (fsUtils.isDirectory(itempath) || item.match(ext)) {\n        collect(itempath, files, ignores, ext);\n      }\n    });\n\n    return;\n  }\n\n  files.push(fp);\n}\n\n/**\n * Runs JSHint against provided file and saves the result\n *\n * @param {string} code    code that needs to be linted\n * @param {object} results a pointer to an object with results\n * @param {object} config  an object with JSHint configuration\n * @param {object} data    a pointer to an object with extra data\n * @param {string} file    (optional) file name that is being linted\n */\nfunction lint(code, results, config, data, file) {\n  var globals;\n  var lintData;\n  var buffer = [];\n\n  config = config || {};\n  config = JSON.parse(JSON.stringify(config));\n\n  if (config.prereq) {\n    config.prereq.forEach(function(fp) {\n      fp = path.join(config.dirname, fp);\n      if (fsUtils.exists(fp))\n        buffer.push(fsUtils.readFile(fp));\n    });\n    delete config.prereq;\n  }\n\n  if (config.globals) {\n    globals = config.globals;\n    delete config.globals;\n  }\n\n  if (config.overrides) {\n    if (file) {\n      _.each(config.overrides, function(options, pattern) {\n        if (minimatch(path.normalize(file), pattern, { nocase: true, matchBase: true })) {\n          if (options.globals) {\n            globals = _.extend(globals || {}, options.globals);\n            delete options.globals;\n          }\n          _.extend(config, options);\n        }\n      });\n    }\n\n    delete config.overrides;\n  }\n\n  delete config.dirname;\n\n  buffer.push(code);\n  buffer = buffer.join(\"\\n\");\n  buffer = buffer.replace(/^\\uFEFF/, \"\"); // Remove potential Unicode BOM.\n\n  if (!JSHINT(buffer, config, globals)) {\n    JSHINT.errors.forEach(function(err) {\n      if (err) {\n        results.push({ file: file || \"stdin\", error: err });\n      }\n    });\n  }\n\n  lintData = JSHINT.data();\n\n  if (lintData) {\n    lintData.file = file || \"stdin\";\n    data.push(lintData);\n  }\n}\n\nvar exports = {\n  extract: extract,\n  exit: exit,\n\n  /**\n   * Returns a configuration file or nothing, if it can't be found.\n   */\n  getConfig: function(fp) {\n    return loadNpmConfig(fp) || exports.loadConfig(findConfig(fp));\n  },\n\n  /**\n   * Loads and parses a configuration file.\n   *\n   * @param {string} fp a path to the config file\n   * @returns {object} config object\n   */\n  loadConfig: function(fp) {\n    if (!fp) {\n      return {};\n    }\n\n    if (!fsUtils.exists(fp)) {\n      cli.error(\"Can't find config file: \" + fp);\n      exports.exit(1);\n    }\n\n    try {\n      var config = JSON.parse(stripJsonComments(fsUtils.readFile(fp)));\n      config.dirname = path.dirname(fp);\n\n      if (config['extends']) {\n        var baseConfig = exports.loadConfig(path.resolve(config.dirname, config['extends']));\n        config = _.merge({}, baseConfig, config, function(a, b) {\n          if (_.isArray(a)) {\n            return a.concat(b);\n          }\n        });\n        delete config['extends'];\n      }\n\n      return config;\n    } catch (err) {\n      cli.error(\"Can't parse config file: \" + fp + \"\\nError:\" + err);\n      exports.exit(1);\n    }\n  },\n\n  /**\n   * Gathers all files that need to be linted\n   *\n   * @param {object} post-processed options from 'interpret':\n   *                   args     - CLI arguments\n   *                   ignores  - A list of files/dirs to ignore (defaults to .jshintignores)\n   *                   extensions - A list of non-dot-js extensions to check\n   */\n  gather: function(opts) {\n    var files = [];\n\n    var reg = new RegExp(\"\\\\.(js\" +\n      (!opts.extensions ? \"\" : \"|\" +\n        opts.extensions.replace(/,/g, \"|\").replace(/[\\. ]/g, \"\")) + \")$\");\n\n    var ignores = !opts.ignores ? loadIgnores({ cwd: opts.cwd }) :\n                                  opts.ignores.map(function(target) {\n                                    return path.resolve(target);\n                                  });\n\n    opts.args.forEach(function(target) {\n      collect(target, files, ignores, reg);\n    });\n\n    return files;\n  },\n\n  /**\n   * Gathers all files that need to be linted, lints them, sends them to\n   * a reporter and returns the overall result.\n   *\n   * @param {object} post-processed options from 'interpret':\n   *                 args     - CLI arguments\n   *                 config   - Configuration object\n   *                 reporter - Reporter function\n   *                 ignores  - A list of files/dirs to ignore\n   *                 extensions - A list of non-dot-js extensions to check\n   * @param {function} cb a callback to call when function is finished\n   *                   asynchronously.\n   *\n   * @returns {bool} 'true' if all files passed, 'false' otherwise and 'null'\n   *                 when function will be finished asynchronously.\n   */\n  run: function(opts, cb) {\n    var files = exports.gather(opts);\n    var results = [];\n    var data = [];\n\n    function mergeCLIPrereq(config) {\n      if (opts.prereq) {\n        config.prereq = (config.prereq || []).concat(opts.prereq.split(/\\s*,\\s*/));\n      }\n    }\n\n    var filename;\n    var lintStdinFile;\n\n    // There is an if(filename) check in the lint() function called below.\n    // passing a filename of undefined is the same as calling the function\n    // without a filename.  If there is no opts.filename, filename remains\n    // undefined and lint() is effectively called with 4 parameters.\n    if (opts.filename) {\n      filename = opts.filename;\n      var ignores = !opts.ignores ? loadIgnores({ cwd: opts.cwd }) :\n                                  opts.ignores.map(function(target) {\n                                    return path.resolve(target);\n                                  });\n      lintStdinFile = (opts.useStdin && !isIgnored(filename, ignores));\n    } else {\n      lintStdinFile = opts.useStdin;\n    }\n\n    if (lintStdinFile) {\n      cli.withStdin(function(code) {\n        var config = opts.config;\n\n        if (filename && !config) {\n          config = exports.getConfig(filename);\n        }\n\n        config = config || {};\n\n        mergeCLIPrereq(config);\n\n        lint(extract(code, opts.extract), results, config, data, filename);\n        (opts.reporter || defReporter)(results, data, { verbose: opts.verbose });\n        cb(results.length === 0);\n\n      });\n      return null;\n    }\n\n    files.forEach(function(file) {\n      var config = opts.config || exports.getConfig(file);\n      var code;\n      var errors = [];\n\n      try {\n        code = fsUtils.readFile(file);\n      } catch (err) {\n        cli.error(\"Can't open \" + file);\n        exports.exit(1);\n      }\n\n      mergeCLIPrereq(config);\n\n      lint(extract(code, opts.extract), errors, config, data, file);\n\n      if (errors.length) {\n        var offsets = extractOffsets(code, opts.extract);\n        if (offsets && offsets.length) {\n          errors.forEach(function(errorInfo) {\n            var line = errorInfo.error.line;\n            if (line >= 0 && line < offsets.length && offsets[line]) {\n              errorInfo.error.character += offsets[line];\n            }\n          });\n        }\n\n        results = results.concat(errors);\n      }\n    });\n\n    (opts.reporter || defReporter)(results, data, { verbose: opts.verbose });\n    return results.length === 0;\n  },\n\n  /**\n   * Helper exposed for testing.\n   * Used to determine is stdout has any buffered output before exiting the program\n   */\n  getBufferSize: function() {\n    return process.stdout.bufferSize;\n  },\n\n  /**\n   * Main entrance function. Parses arguments and calls 'run' when\n   * its done. This function is called from bin/jshint file.\n   *\n   * @param {object} args, arguments in the process.argv format.\n   */\n  interpret: function(args) {\n    cli.setArgv(args);\n    cli.options = {};\n\n    cli.enable(\"version\", \"glob\", \"help\");\n    cli.setApp(path.resolve(__dirname + \"/../package.json\"));\n\n    var options = cli.parse(OPTIONS);\n    // Use config file if specified\n    var config;\n    if (options.config) {\n      config = exports.loadConfig(options.config);\n    }\n\n    switch (true) {\n    // JSLint reporter\n    case options.reporter === \"jslint\":\n    case options[\"jslint-reporter\"]:\n      options.reporter = \"./reporters/jslint_xml.js\";\n      break;\n\n    // CheckStyle (XML) reporter\n    case options.reporter === \"checkstyle\":\n    case options[\"checkstyle-reporter\"]:\n      options.reporter = \"./reporters/checkstyle.js\";\n      break;\n\n    // Unix reporter\n    case options.reporter === \"unix\":\n      options.reporter = \"./reporters/unix.js\";\n      break;\n\n    // Reporter that displays additional JSHint data\n    case options[\"show-non-errors\"]:\n      options.reporter = \"./reporters/non_error.js\";\n      break;\n\n    // Custom reporter\n    case options.reporter !== undefined:\n      options.reporter = path.resolve(process.cwd(), options.reporter);\n    }\n\n    var reporter;\n    if (options.reporter) {\n      reporter = loadReporter(options.reporter);\n\n      if (reporter === null) {\n        cli.error(\"Can't load reporter file: \" + options.reporter);\n        exports.exit(1);\n      }\n    }\n\n    // This is a hack. exports.run is both sync and async function\n    // because I needed stdin support (and cli.withStdin is async)\n    // and was too lazy to change tests.\n\n    function done(passed) {\n      /*jshint eqnull:true */\n\n      if (passed == null)\n        return;\n\n      exports.exit(passed ? 0 : 2);\n    }\n\n    done(exports.run({\n      args:       cli.args,\n      config:     config,\n      reporter:   reporter,\n      ignores:    loadIgnores({ exclude: options.exclude, excludePath: options[\"exclude-path\"] }),\n      extensions: options[\"extra-ext\"],\n      verbose:    options.verbose,\n      extract:    options.extract,\n      filename:   options.filename,\n      prereq:     options.prereq,\n      useStdin:   { \"-\": true, \"/dev/stdin\": true }[args[args.length - 1]]\n    }, done));\n  }\n};\n\nmodule.exports = exports;\n",
+  "candidate_cli_sha256": "a0806a67edd90489ffe4afbe3c8f02632a714a8da4b2e58a47042124be5c1ebf",
+  "original_scripts": {
+    "browser-test-server": "node tests/helpers/browser/server",
+    "build": "node bin/build",
+    "coverage": "istanbul -- cover ./node_modules/nodeunit/bin/nodeunit tests/unit",
+    "coverage-report": "npm run coverage && istanbul report html",
+    "data": "node scripts/generate-identifier-data",
+    "fetch-test262": "git submodule init && git submodule update",
+    "pretest": "node ./bin/jshint src && jscs src",
+    "changelog": "conventional-changelog -p jshint -i CHANGELOG.md -w",
+    "github-release": "conventional-github-releaser -p jshint",
+    "test-all": "npm run test-node && npm run test-browser && npm run test-262",
+    "test-262": "node tests/test262",
+    "test-browser": "node tests/browser",
+    "test-cli": "nodeunit tests/cli.js",
+    "test-node": "npm run test-unit && npm run test-cli && npm run test-regression",
+    "test-regression": "nodeunit tests/regression",
+    "test-unit": "nodeunit tests/unit",
+    "test-website": "node tests/website.js",
+    "test": "npm run test-node && npm run test-browser"
+  },
+  "current_declarations": [
+    {
+      "name": "async",
+      "highest_stable": "3.2.6",
+      "entire_stable_namespace_retired": false,
+      "deprecated": null,
+      "engines": null,
+      "peers": null,
+      "source": "https://registry.npmjs.org/async",
+      "metadata_sha256": "e7c311bfd5b406c54fb20e3e5a68ae19de176219936637a3950fa4c6a2931307"
+    },
+    {
+      "name": "browserify",
+      "highest_stable": "17.0.1",
+      "entire_stable_namespace_retired": false,
+      "deprecated": null,
+      "engines": {
+        "node": ">= 0.8"
+      },
+      "peers": null,
+      "source": "https://registry.npmjs.org/browserify",
+      "metadata_sha256": "c34fdb0356ef84e298aff84526abfda12e631da87952288db93412d9c0e3e15c"
+    },
+    {
+      "name": "cli",
+      "highest_stable": "1.0.1",
+      "entire_stable_namespace_retired": false,
+      "deprecated": null,
+      "engines": {
+        "node": ">=0.2.5"
+      },
+      "peers": null,
+      "source": "https://registry.npmjs.org/cli",
+      "metadata_sha256": "0aa1c62c2fc3780af4e087f38535316522e151b404ffba23eba17e407b5b58b8"
+    },
+    {
+      "name": "console-browserify",
+      "highest_stable": "1.2.0",
+      "entire_stable_namespace_retired": false,
+      "deprecated": null,
+      "engines": null,
+      "peers": null,
+      "source": "https://registry.npmjs.org/console-browserify",
+      "metadata_sha256": "d7e6ddf905504100dcd3c375479df8d52da513fe9a05c53005981d18cb39331f"
+    },
+    {
+      "name": "conventional-changelog",
+      "highest_stable": "8.1.3",
+      "entire_stable_namespace_retired": false,
+      "deprecated": null,
+      "engines": {
+        "node": ">=22"
+      },
+      "peers": null,
+      "source": "https://registry.npmjs.org/conventional-changelog",
+      "metadata_sha256": "2c9c0200a01edd9ea11ea38588625cb3f589f535188f75f335e2f20ba14e506d"
+    },
+    {
+      "name": "conventional-github-releaser",
+      "highest_stable": "3.1.5",
+      "entire_stable_namespace_retired": false,
+      "deprecated": null,
+      "engines": {
+        "node": ">=6.9.0"
+      },
+      "peers": null,
+      "source": "https://registry.npmjs.org/conventional-github-releaser",
+      "metadata_sha256": "8a62034cac0c5a9f9716ba1f5ce522ad6cb4f854471f5d5cb0b15d514738ffdc"
+    },
+    {
+      "name": "coveralls",
+      "highest_stable": "3.1.1",
+      "entire_stable_namespace_retired": false,
+      "deprecated": null,
+      "engines": {
+        "node": ">=6"
+      },
+      "peers": null,
+      "source": "https://registry.npmjs.org/coveralls",
+      "metadata_sha256": "67135204f048def3a80a3400cfd5a4e799eb05f3cf735e7fe5cda0c796160594"
+    },
+    {
+      "name": "exit",
+      "highest_stable": "0.1.2",
+      "entire_stable_namespace_retired": false,
+      "deprecated": null,
+      "engines": {
+        "node": ">= 0.8.0"
+      },
+      "peers": null,
+      "source": "https://registry.npmjs.org/exit",
+      "metadata_sha256": "ebe4c60c9ec7e55d9eb095f8eb572b58bbed99a1b77a7df2990715619b607038"
+    },
+    {
+      "name": "htmlparser2",
+      "highest_stable": "12.0.0",
+      "entire_stable_namespace_retired": false,
+      "deprecated": null,
+      "engines": {
+        "node": ">=20.19.0"
+      },
+      "peers": null,
+      "source": "https://registry.npmjs.org/htmlparser2",
+      "metadata_sha256": "4c8c0a488eefea8e3815865c4f9d7adb454f2b556735d1cfe8bf5f084ff8d966"
+    },
+    {
+      "name": "istanbul",
+      "highest_stable": "0.4.5",
+      "entire_stable_namespace_retired": true,
+      "deprecated": "This module is no longer maintained, try this instead:\n  npm i nyc\nVisit https://istanbul.js.org/integrations for other alternatives.",
+      "engines": null,
+      "peers": null,
+      "source": "https://registry.npmjs.org/istanbul",
+      "metadata_sha256": "fa3e49c186bef01d8bba0b44e90bb60af9107962e58951680ab106cff1b9564d"
+    },
+    {
+      "name": "jscs",
+      "highest_stable": "3.0.7",
+      "entire_stable_namespace_retired": true,
+      "deprecated": "JSCS has merged with ESLint! See - https://medium.com/@markelog/jscs-end-of-the-line-bc9bf0b3fdb2",
+      "engines": {
+        "node": ">= 0.10.0"
+      },
+      "peers": null,
+      "source": "https://registry.npmjs.org/jscs",
+      "metadata_sha256": "56aa2432c2886e53485d63f6e49d3ac6d3973dc4733bc8d81346ff274b983ead"
+    },
+    {
+      "name": "lodash",
+      "highest_stable": "4.18.1",
+      "entire_stable_namespace_retired": false,
+      "deprecated": null,
+      "engines": null,
+      "peers": null,
+      "source": "https://registry.npmjs.org/lodash",
+      "metadata_sha256": "0a321242d836a1138f8cd46a841d3bc9950300e3e43499e409913134007512b4"
+    },
+    {
+      "name": "minimatch",
+      "highest_stable": "11.0.2",
+      "entire_stable_namespace_retired": false,
+      "deprecated": null,
+      "engines": {
+        "node": "18 || 20 || >=22"
+      },
+      "peers": null,
+      "source": "https://registry.npmjs.org/minimatch",
+      "metadata_sha256": "8b839feee55f69c52110c2e0c64f397cd0310b974f9e77d37d687869f33692f4"
+    },
+    {
+      "name": "mock-stdin",
+      "highest_stable": "1.0.0",
+      "entire_stable_namespace_retired": false,
+      "deprecated": null,
+      "engines": null,
+      "peers": null,
+      "source": "https://registry.npmjs.org/mock-stdin",
+      "metadata_sha256": "9f220f6820938d0df1a38d9b1a393229371a78753dac00daa721b330fa535bfe"
+    },
+    {
+      "name": "nodeunit",
+      "highest_stable": "0.11.3",
+      "entire_stable_namespace_retired": true,
+      "deprecated": "you are strongly encouraged to use other testing options",
+      "engines": null,
+      "peers": null,
+      "source": "https://registry.npmjs.org/nodeunit",
+      "metadata_sha256": "0aa57e9e9e18a6dac15d1083facc8340ea83426fc882a6cbd2757b7c4e2e26d2"
+    },
+    {
+      "name": "puppeteer",
+      "highest_stable": "25.16.0",
+      "entire_stable_namespace_retired": false,
+      "deprecated": null,
+      "engines": {
+        "node": ">=22.12.0"
+      },
+      "peers": null,
+      "source": "https://registry.npmjs.org/puppeteer",
+      "metadata_sha256": "0d9be140ae6df979d31bfdad6c53a5b41e0d11042f61bc2b768bde62004d0c56"
+    },
+    {
+      "name": "regenerate",
+      "highest_stable": "1.5.0",
+      "entire_stable_namespace_retired": false,
+      "deprecated": null,
+      "engines": null,
+      "peers": null,
+      "source": "https://registry.npmjs.org/regenerate",
+      "metadata_sha256": "ebb6e38e18ff1c8cf35f0929baa4ce059f60baebc07eed4ac95a50766c8510fa"
+    },
+    {
+      "name": "results-interpreter",
+      "highest_stable": "1.0.0",
+      "entire_stable_namespace_retired": false,
+      "deprecated": null,
+      "engines": null,
+      "peers": null,
+      "source": "https://registry.npmjs.org/results-interpreter",
+      "metadata_sha256": "c1841de668ef8a9b8c8a3978cc9daca90ba30ba41e815fdff365ce639de761c8"
+    },
+    {
+      "name": "sinon",
+      "highest_stable": "22.1.0",
+      "entire_stable_namespace_retired": false,
+      "deprecated": null,
+      "engines": null,
+      "peers": null,
+      "source": "https://registry.npmjs.org/sinon",
+      "metadata_sha256": "359dc367fc7c7b1ce88a8dead437c06ff6d9d2352dac61a32e28da7c52036a96"
+    },
+    {
+      "name": "strip-json-comments",
+      "highest_stable": "5.0.3",
+      "entire_stable_namespace_retired": false,
+      "deprecated": null,
+      "engines": {
+        "node": ">=14.16"
+      },
+      "peers": null,
+      "source": "https://registry.npmjs.org/strip-json-comments",
+      "metadata_sha256": "3ac7921fbdb99227e2f15a9e7386e2d5d577e6b839ecfeb03cccc11ff31055a3"
+    },
+    {
+      "name": "test262-stream",
+      "highest_stable": "1.4.0",
+      "entire_stable_namespace_retired": false,
+      "deprecated": null,
+      "engines": null,
+      "peers": null,
+      "source": "https://registry.npmjs.org/test262-stream",
+      "metadata_sha256": "9aa22b1f2bc505ae3fc4790f187844067e364fe91184af7bcb291353225ceba4"
+    },
+    {
+      "name": "unicode-11.0.0",
+      "highest_stable": "0.7.8",
+      "entire_stable_namespace_retired": true,
+      "deprecated": "Use @unicode/unicode-11.0.0 instead.",
+      "engines": null,
+      "peers": null,
+      "source": "https://registry.npmjs.org/unicode-11.0.0",
+      "metadata_sha256": "72f135b0984b0ccdcacf1967f0c48aebd18003cd5b6fed5af6a677bf0154e441"
+    },
+    {
+      "name": "unicode-5.2.0",
+      "highest_stable": "0.7.5",
+      "entire_stable_namespace_retired": true,
+      "deprecated": "Use @unicode/unicode-5.2.0 instead.",
+      "engines": null,
+      "peers": null,
+      "source": "https://registry.npmjs.org/unicode-5.2.0",
+      "metadata_sha256": "b59b57b4deea28ab83de4e0a7030e947aa4cde7e0129f5838f61af325deef6bf"
+    }
+  ],
+  "original_submodules": [
+    {
+      "path": "tests/test262/test262",
+      "mode": "160000",
+      "type": "commit",
+      "sha": "5908ed29ac04a9f5582bb774ca07f8089d3cddfd"
+    }
+  ],
+  "whole_SDK_qualified": false
+}
