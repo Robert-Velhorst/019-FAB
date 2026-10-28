@@ -34,6 +34,10 @@ if profile!='candidate-full-SDK':manifest.pop('devDependencies')
 if profile!='original-runtime':
     raw=d['candidate_cli'].encode();assert hashlib.sha256(raw).hexdigest()==d['candidate_cli_sha256'];(sdk/'src/cli.js').write_bytes(raw)
 (out/'publisher-original-package-lock.json').write_bytes((sdk/'package-lock.json').read_bytes())
+# Preserve the immutable publisher lock, then resolve the deliberately ported
+# manifests normally. Reusing its 2020 selections leaves fixable transitive
+# vulnerabilities despite current direct declarations.
+(sdk/'package-lock.json').rename(sdk.parent/'publisher-original-package-lock.json')
 initial={n:hashlib.sha256((sdk/n).read_bytes()).hexdigest() for n in expected if n!='package-lock.json'};save('SDK-source-before.json',initial)
 commands=[]
 def run(label,args,cwd=sdk):
