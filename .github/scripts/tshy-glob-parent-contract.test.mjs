@@ -31,6 +31,9 @@ for (const dialect of ['esm', 'commonjs']) {
   const resolver = await load('resolve-import', dialect);
   const remover = await load('rimraf', dialect);
   const synchronizer = await load('sync-content', dialect);
+  const braces = await load('brace-expansion', dialect);
+  const matcher = await load('minimatch', dialect);
+  const walker = await load('glob', dialect);
 
   for (const sync of [false, true]) {
     const kind = sync ? 'sync' : 'async';
@@ -106,4 +109,42 @@ for (const dialect of ['esm', 'commonjs']) {
       assert.equal(readFileSync(join(root, 'from/keep.txt'), 'utf8'), 'preserve');
     });
   }
+
+  test(`${dialect} brace expansion preserves nested alternatives and escaped literals`, () => {
+    assert.deepEqual(braces.expand('a{b,c{d,e}}f'), ['abf', 'acdf', 'acef']);
+    assert.deepEqual(braces.expand('a{b,c}{d,e}f'), ['abdf', 'abef', 'acdf', 'acef']);
+    assert.deepEqual(braces.expand(String.raw`x\{a,b\}y`), ['x{a,b}y']);
+    assert.deepEqual(braces.expand('plain.txt'), ['plain.txt']);
+  });
+
+  test(`${dialect} brace expansion preserves descending padded and stepped ranges`, () => {
+    assert.deepEqual(braces.expand('x{03..01}y'), ['x03y', 'x02y', 'x01y']);
+    assert.deepEqual(braces.expand('x{a..e..2}y'), ['xay', 'xcy', 'xey']);
+    assert.deepEqual(braces.expand('x{5..1..2}y'), ['x5y', 'x3y', 'x1y']);
+  });
+
+  test(`${dialect} minimatch preserves brace/globstar, dot and negated matching`, () => {
+    assert.equal(matcher.minimatch('src/nested/a.ts', 'src/**/{a,b}.{ts,js}'), true);
+    assert.equal(matcher.minimatch('src/nested/c.ts', 'src/**/{a,b}.{ts,js}'), false);
+    assert.equal(matcher.minimatch('src/.hidden.ts', 'src/**/*.ts'), false);
+    assert.equal(matcher.minimatch('src/.hidden.ts', 'src/**/*.ts', { dot: true }), true);
+    assert.equal(matcher.minimatch('src/a.ts', '!**/*.js'), true);
+    assert.equal(matcher.minimatch('src/a.js', '!**/*.js'), false);
+  });
+
+  test(`${dialect} glob preserves brace enumeration, dot policy and Path objects`, async t => {
+    const root = fixture(t);
+    write(root, 'lib/alpha.js');
+    write(root, 'src/nested/beta.ts');
+    write(root, 'src/.hidden.js');
+    write(root, 'other/keep.txt');
+    const pattern = '{lib,src}/**/*.{js,ts}';
+    const options = { cwd: root, nodir: true };
+    const expected = ['lib/alpha.js', 'src/nested/beta.ts'];
+    assert.deepEqual((await walker.glob(pattern, options)).sort(), expected);
+    assert.deepEqual(walker.globSync(pattern, options).sort(), expected);
+    const paths = await walker.glob(pattern, { ...options, withFileTypes: true });
+    assert.deepEqual(paths.map(path => path.relativePosix()).sort(), expected);
+    assert.deepEqual((await walker.glob(pattern, { ...options, dot: true })).sort(), ['lib/alpha.js', 'src/.hidden.js', 'src/nested/beta.ts']);
+  });
 }

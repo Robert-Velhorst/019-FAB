@@ -56,7 +56,7 @@ ntbefore={n:hashlib.sha256((ntroot/n).read_bytes()).hexdigest() for n in ntexpec
 
 # Verify complete public parent source/cases, then stage explicit consumer ports.
 gp=json.loads((owner/'.github/qualification/tshy-current-glob-parent-ports.json').read_bytes())
-gparents={p['name']:p for p in gp['parents']};assert set(gparents)=={'resolve-import','rimraf','sync-content'}
+gparents={p['name']:p for p in gp['parents']};assert set(gparents)=={'resolve-import','rimraf','sync-content','brace-expansion','minimatch','glob'}
 groot={};gbefore={};gsdk={};gmanifests={};garchives={}
 import gzip
 for name,p in gparents.items():
@@ -87,7 +87,7 @@ for name,p in gparents.items():
     assert source.keys()==expected_source.keys() and json.loads((parentroot/'package.json').read_bytes())==p['original_manifest']
     assert p['candidate_manifest'].get('scripts',{})==p['original_manifest'].get('scripts',{})
     gmanifest=json.loads(json.dumps(p['candidate_manifest']))
-    if name=='sync-content':gmanifest['dependencies']['rimraf']='file:'+str(sdk/'vendor/owned-rimraf.tgz')
+    for dependency,target in p['consumer_dependency_links'].items():gmanifest['dependencies'][dependency]='file:'+str(sdk/('vendor/owned-'+target+'.tgz'))
     assert gmanifest.get('scripts',{})==p['original_manifest'].get('scripts',{})
     (parentroot/'package.json').write_bytes((json.dumps(gmanifest,indent=2)+'\n').encode());gmanifests[name]=gmanifest
     buffer=io.BytesIO()

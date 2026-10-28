@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-28T15:11:49.313194+00:00",
+  "captured_at": "2026-10-28T15:26:46.968883+00:00",
   "parents": [
     {
       "name": "resolve-import",
@@ -3571,7 +3571,7 @@
       },
       "candidate_manifest": {
         "name": "resolve-import",
-        "version": "2.4.0+owned.glob14.1",
+        "version": "2.4.0+owned.currentgraph.2",
         "description": "Look up the file that an `import()` statement will resolve to, possibly relative to a given parentURL",
         "author": "Isaac Z. Schlueter <i@izs.me> (https://blog.izs.me)",
         "repository": {
@@ -3646,7 +3646,7 @@
           "node": "20 || >=22"
         },
         "dependencies": {
-          "glob": "14.0.3",
+          "glob": "file:../owned-glob",
           "walk-up-path": "^4.0.0"
         },
         "devDependencies": {
@@ -3797,6 +3797,9 @@
           }
         },
         "private": true
+      },
+      "consumer_dependency_links": {
+        "glob": "glob"
       }
     },
     {
@@ -5184,7 +5187,7 @@
       },
       "candidate_manifest": {
         "name": "rimraf",
-        "version": "6.1.3+owned.glob14.1",
+        "version": "6.1.3+owned.currentgraph.2",
         "type": "module",
         "tshy": {
           "main": true,
@@ -5244,7 +5247,7 @@
           "node": "20 || >=22"
         },
         "dependencies": {
-          "glob": "14.0.3",
+          "glob": "file:../owned-glob",
           "package-json-from-dist": "^1.0.1"
         },
         "keywords": [
@@ -5259,6 +5262,9 @@
         ],
         "module": "./dist/esm/index.js",
         "private": true
+      },
+      "consumer_dependency_links": {
+        "glob": "glob"
       }
     },
     {
@@ -5646,7 +5652,7 @@
       },
       "candidate_manifest": {
         "name": "sync-content",
-        "version": "2.0.4+owned.glob14.1",
+        "version": "2.0.4+owned.currentgraph.2",
         "description": "Synchronize the contents of one folder to another location, only copying files if contents differ.",
         "author": "Isaac Z. Schlueter <i@izs.me> (https://blog.izs.me)",
         "main": "./dist/commonjs/index.js",
@@ -5690,7 +5696,7 @@
           "typedoc": "typedoc --tsconfig .tshy/esm.json ./src/*.ts"
         },
         "dependencies": {
-          "glob": "14.0.3",
+          "glob": "file:../owned-glob",
           "mkdirp": "^3.0.1",
           "path-scurry": "3.0.0",
           "rimraf": "file:../owned-rimraf"
@@ -5710,15 +5716,2903 @@
         },
         "repository": "git@github.com/isaacs/sync-content",
         "private": true
+      },
+      "consumer_dependency_links": {
+        "glob": "glob",
+        "rimraf": "rimraf"
+      }
+    },
+    {
+      "name": "brace-expansion",
+      "highest_public_nonretired_stable": "5.0.12",
+      "metadata_sha256": "d64701dc19c759f500c7db606ff5bef33cdc1061ef16e01db42549b202d2739a",
+      "dependencies": {
+        "balanced-match": "^4.0.2"
+      },
+      "gitHead": "f3410159d768f56c9d9f4511d3e1b46425fc1099",
+      "repository": {
+        "url": "git+https://github.com/juliangruber/brace-expansion.git",
+        "type": "git"
+      },
+      "tarball": "https://registry.npmjs.org/brace-expansion/-/brace-expansion-5.0.12.tgz",
+      "integrity": "sha512-YovQ3rzhaLMIrDjNDMkNS01tea93qhEhG5xy8f6+R0l+dw3Ki+5sCoIoI942iuLZTHWogWktgwVDhU09iNEimQ==",
+      "archive_sha256": "ef8448ec78f20b692f04fa6d01f39b5ab34c66404bea3429f5a39c6c9e0be8b4",
+      "source_payloads": [
+        {
+          "path": "LICENSE",
+          "sha256": "9c63a23124d68cd30cd316a94a1a0bca34f032786df6df69fc4b5f136bac8d2e",
+          "bytes": 1144
+        },
+        {
+          "path": "dist/commonjs/index.js",
+          "sha256": "e0ede97c712339a70bae2c96c675b1ffd30052bdf57f37f5a97b5945c40a9ae6",
+          "bytes": 13985
+        },
+        {
+          "path": "dist/esm/index.js",
+          "sha256": "eea9a18920e1cde68f0068c36c040541ad6e93b0bb89eaab38c8ab49925b90a8",
+          "bytes": 13699
+        },
+        {
+          "path": "dist/commonjs/package.json",
+          "sha256": "8005a3491db7d92f36ac66369861589f9c47123d3a7c71e643fc2c06168cd45a",
+          "bytes": 25
+        },
+        {
+          "path": "dist/esm/package.json",
+          "sha256": "3ca9d4afd21425087cf31893b8f9f63c81b0b8408db5e343ca76e5f8aa26ab9a",
+          "bytes": 23
+        },
+        {
+          "path": "package.json",
+          "sha256": "8af7dc0916002266f3b01459ef691d9f834d8ecdb0e021263280a50b913d85fa",
+          "bytes": 1594
+        },
+        {
+          "path": "dist/commonjs/index.d.ts.map",
+          "sha256": "4081276536fa8a61b8ecf72c1b3cb65d354aa9f42b9952aa7c7aa3df69b76224",
+          "bytes": 465
+        },
+        {
+          "path": "dist/esm/index.d.ts.map",
+          "sha256": "4081276536fa8a61b8ecf72c1b3cb65d354aa9f42b9952aa7c7aa3df69b76224",
+          "bytes": 465
+        },
+        {
+          "path": "dist/commonjs/index.js.map",
+          "sha256": "030adad11afc034a17f6c008f25a3779e3988f56d067016cee00948725b00d24",
+          "bytes": 24935
+        },
+        {
+          "path": "dist/esm/index.js.map",
+          "sha256": "181bf3ff0deaaedfcf28b02c260ab5316cb2a012d89070ad44d298dcfd7166dc",
+          "bytes": 24979
+        },
+        {
+          "path": "README.md",
+          "sha256": "e93dbbc034d09eb64681e11304d21551467a391d29241538953b6d57859788db",
+          "bytes": 2775
+        },
+        {
+          "path": "dist/commonjs/index.d.ts",
+          "sha256": "b74929b2e5433150c0c7f6a3e7bcd1aadff6b82305584b25754ab38273ea731d",
+          "bytes": 454
+        },
+        {
+          "path": "dist/esm/index.d.ts",
+          "sha256": "b74929b2e5433150c0c7f6a3e7bcd1aadff6b82305584b25754ab38273ea731d",
+          "bytes": 454
+        }
+      ],
+      "original_manifest": {
+        "name": "brace-expansion",
+        "description": "Brace expansion as known from sh/bash",
+        "version": "5.0.12",
+        "files": [
+          "dist"
+        ],
+        "exports": {
+          "./package.json": "./package.json",
+          ".": {
+            "import": {
+              "types": "./dist/esm/index.d.ts",
+              "default": "./dist/esm/index.js"
+            },
+            "require": {
+              "types": "./dist/commonjs/index.d.ts",
+              "default": "./dist/commonjs/index.js"
+            }
+          }
+        },
+        "type": "module",
+        "scripts": {
+          "preversion": "npm test",
+          "postversion": "npm publish",
+          "prepublishOnly": "git push origin --follow-tags",
+          "prepare": "tshy",
+          "pretest": "npm run prepare",
+          "presnap": "npm run prepare",
+          "test": "tap",
+          "snap": "tap",
+          "format": "prettier --write .",
+          "format:check": "prettier --check .",
+          "benchmark": "node benchmark/index.js",
+          "typedoc": "typedoc --tsconfig .tshy/esm.json ./src/*.ts"
+        },
+        "devDependencies": {
+          "@types/brace-expansion": "^1.1.2",
+          "@types/node": "^25.2.1",
+          "mkdirp": "^3.0.1",
+          "prettier": "^3.3.2",
+          "tap": "^21.6.2",
+          "tshy": "^3.0.2",
+          "typedoc": "^0.28.5"
+        },
+        "dependencies": {
+          "balanced-match": "^4.0.2"
+        },
+        "license": "MIT",
+        "engines": {
+          "node": "20 || >=22"
+        },
+        "tshy": {
+          "exports": {
+            "./package.json": "./package.json",
+            ".": "./src/index.ts"
+          }
+        },
+        "main": "./dist/commonjs/index.js",
+        "types": "./dist/commonjs/index.d.ts",
+        "module": "./dist/esm/index.js",
+        "repository": {
+          "type": "git",
+          "url": "git+https://github.com/juliangruber/brace-expansion.git"
+        }
+      },
+      "original_SDK": {
+        "name": "brace-expansion",
+        "repository": "juliangruber/brace-expansion",
+        "commit": "f3410159d768f56c9d9f4511d3e1b46425fc1099",
+        "archive_sha256": "e57626607779f7b931f3c329f37e316a3e1ec3144e5bd1639d134bb0d979a49d",
+        "source_payloads": [
+          {
+            "path": ".github/workflows/ci.yml",
+            "mode": "100644",
+            "git_blob": "9715c9793bb932d015b56be59c16d91bea0320d4",
+            "sha256": "544fccf4a18282864a4ee58a4314a454f453340dc28ed3bb912f9be3dd1514cb",
+            "bytes": 1676
+          },
+          {
+            "path": ".gitignore",
+            "mode": "100644",
+            "git_blob": "548252f13e88fd914d90b3547ba23e9a9a2d14a2",
+            "sha256": "abaafa5b011a3736ceeb92dfccaba7098495ea0d0a09abb709348eb7ed6059d5",
+            "bytes": 42
+          },
+          {
+            "path": ".prettierignore",
+            "mode": "100644",
+            "git_blob": "cf134510ece8195b0d1c4a0653cfae137ab88611",
+            "sha256": "a19b906ba09812c934c3c831c8d72e4a74e62baccf424955c0f46bda3bc0edfc",
+            "bytes": 201
+          },
+          {
+            "path": ".prettierrc.json",
+            "mode": "100644",
+            "git_blob": "02b40d2aed3930bdaf6602ec0d0a4dbe7b3e5ce2",
+            "sha256": "43ae0d50438fd7e4c4535da4471437e61dbe77d62ae6dc28e91ffe9631e87e5e",
+            "bytes": 234
+          },
+          {
+            "path": ".tshy/build.json",
+            "mode": "100644",
+            "git_blob": "aea1a9e93b5db3468973ebeaad6dac0a77b10c02",
+            "sha256": "67c78efcea9cf62667b0b5d58c3f71524bbaf3b90900c5f6e84f5238c6724382",
+            "bytes": 150
+          },
+          {
+            "path": ".tshy/commonjs.json",
+            "mode": "100644",
+            "git_blob": "7c9db50b6a5c0a35d96484cf9e5032231007060e",
+            "sha256": "5ad5618ec74d4b7bdd38eb66937443b1a28a672e2910dac42047f19f7d341e9a",
+            "bytes": 280
+          },
+          {
+            "path": ".tshy/esm.json",
+            "mode": "100644",
+            "git_blob": "959294a84294938544a6a812f2687508959d1f0f",
+            "sha256": "c4a231bdebef82e5367a7df4d1c03490a4af3ea1144c1d02184816bb483719dc",
+            "bytes": 252
+          },
+          {
+            "path": "LICENSE",
+            "mode": "100644",
+            "git_blob": "46e7b75c91ced041ae473299398af2b0472dc352",
+            "sha256": "9c63a23124d68cd30cd316a94a1a0bca34f032786df6df69fc4b5f136bac8d2e",
+            "bytes": 1144
+          },
+          {
+            "path": "README.md",
+            "mode": "100644",
+            "git_blob": "073aceb3177ae7babf06970ec4238c00f2527419",
+            "sha256": "e93dbbc034d09eb64681e11304d21551467a391d29241538953b6d57859788db",
+            "bytes": 2775
+          },
+          {
+            "path": "SECURITY.md",
+            "mode": "100644",
+            "git_blob": "da9c516dd744b6c88dd8c91f58f7bcf8f7e8341b",
+            "sha256": "994ea9cf579d2164b7736a6728ba48773ae78b0ae8f20290bee63fc62bb7362e",
+            "bytes": 193
+          },
+          {
+            "path": "package-lock.json",
+            "mode": "100644",
+            "git_blob": "809915c1f045673ec2b92494e1a33a18fa65696e",
+            "sha256": "68a57ace6e2e76ff6d8fbcd0baf21ef90a772a99285b8e2abfc4011b9dd8d7ba",
+            "bytes": 158495
+          },
+          {
+            "path": "package.json",
+            "mode": "100644",
+            "git_blob": "a5c96ebe02f5f9c6c4216616ded0e81fcba53622",
+            "sha256": "8af7dc0916002266f3b01459ef691d9f834d8ecdb0e021263280a50b913d85fa",
+            "bytes": 1594
+          },
+          {
+            "path": "src/index.ts",
+            "mode": "100644",
+            "git_blob": "d01d0443fa7ec32dcaf14117ad0b03b7f8d02937",
+            "sha256": "62dbfc462e99d7a11fec1768d139657b1d94e14a5cc9e1f47d31d842c27a4e95",
+            "bytes": 13439
+          },
+          {
+            "path": "test/bash-results.txt",
+            "mode": "100644",
+            "git_blob": "e1689dfe0f6520fdf16883bee5a05f074a4666c5",
+            "sha256": "77894c1385e997ef38e309e27359629409efc4dd0ca4ba7083a1052ba8a398f3",
+            "bytes": 8668
+          },
+          {
+            "path": "test/cases.txt",
+            "mode": "100644",
+            "git_blob": "e811d747f329916d274600a9bb163287b7987614",
+            "sha256": "0040269c727e34aec459f43c17e9a398e3e4bfe79f69de262d7c7bbe6923e562",
+            "bytes": 2907
+          },
+          {
+            "path": "test/generate.sh",
+            "mode": "100755",
+            "git_blob": "e040e664d9f88126341d138388f433869a63159f",
+            "sha256": "0e660d6433bedd481edcec7274566cc1d6c29ac7f583e197f2f255b147c92fe4",
+            "bytes": 538
+          },
+          {
+            "path": "test/index.js",
+            "mode": "100644",
+            "git_blob": "658582f28a772cf5f515581fd9b61c983a955a5e",
+            "sha256": "604c41655358d8de1ff71a32f140d04162046d13843928727fced544856a2359",
+            "bytes": 18248
+          },
+          {
+            "path": "tsconfig.json",
+            "mode": "100644",
+            "git_blob": "7f39495db7598ba49d2727d9018d1c73108e85e0",
+            "sha256": "c1f5393c9d2aba46f89359858921d04e6a795b9881fad7db2fad10ae3bd9c4aa",
+            "bytes": 429
+          },
+          {
+            "path": "typedoc.json",
+            "mode": "100644",
+            "git_blob": "a004bc3a3f0cc81386cfa39116fecc15c8ad7711",
+            "sha256": "9171d263f91c3d10a50239a0840ee483609659027195579b50286cb8bab9d4b7",
+            "bytes": 180
+          }
+        ],
+        "original_case_helper_fixture_snapshot_paths": [
+          "test/bash-results.txt",
+          "test/cases.txt",
+          "test/generate.sh",
+          "test/index.js"
+        ],
+        "original_manifest": {
+          "name": "brace-expansion",
+          "description": "Brace expansion as known from sh/bash",
+          "version": "5.0.12",
+          "files": [
+            "dist"
+          ],
+          "exports": {
+            "./package.json": "./package.json",
+            ".": {
+              "import": {
+                "types": "./dist/esm/index.d.ts",
+                "default": "./dist/esm/index.js"
+              },
+              "require": {
+                "types": "./dist/commonjs/index.d.ts",
+                "default": "./dist/commonjs/index.js"
+              }
+            }
+          },
+          "type": "module",
+          "scripts": {
+            "preversion": "npm test",
+            "postversion": "npm publish",
+            "prepublishOnly": "git push origin --follow-tags",
+            "prepare": "tshy",
+            "pretest": "npm run prepare",
+            "presnap": "npm run prepare",
+            "test": "tap",
+            "snap": "tap",
+            "format": "prettier --write .",
+            "format:check": "prettier --check .",
+            "benchmark": "node benchmark/index.js",
+            "typedoc": "typedoc --tsconfig .tshy/esm.json ./src/*.ts"
+          },
+          "devDependencies": {
+            "@types/brace-expansion": "^1.1.2",
+            "@types/node": "^25.2.1",
+            "mkdirp": "^3.0.1",
+            "prettier": "^3.3.2",
+            "tap": "^21.6.2",
+            "tshy": "^3.0.2",
+            "typedoc": "^0.28.5"
+          },
+          "dependencies": {
+            "balanced-match": "^4.0.2"
+          },
+          "license": "MIT",
+          "engines": {
+            "node": "20 || >=22"
+          },
+          "tshy": {
+            "exports": {
+              "./package.json": "./package.json",
+              ".": "./src/index.ts"
+            }
+          },
+          "main": "./dist/commonjs/index.js",
+          "types": "./dist/commonjs/index.d.ts",
+          "module": "./dist/esm/index.js",
+          "repository": {
+            "type": "git",
+            "url": "git+https://github.com/juliangruber/brace-expansion.git"
+          }
+        },
+        "original_SDK_cases_executed": false
+      },
+      "vendor_path": "vendor/owned-brace-expansion",
+      "consumer_dependency_links": {},
+      "candidate_manifest": {
+        "name": "brace-expansion",
+        "description": "Brace expansion as known from sh/bash",
+        "version": "5.0.12+owned.currentgraph.2",
+        "files": [
+          "dist"
+        ],
+        "exports": {
+          "./package.json": "./package.json",
+          ".": {
+            "import": {
+              "types": "./dist/esm/index.d.ts",
+              "default": "./dist/esm/index.js"
+            },
+            "require": {
+              "types": "./dist/commonjs/index.d.ts",
+              "default": "./dist/commonjs/index.js"
+            }
+          }
+        },
+        "type": "module",
+        "scripts": {
+          "preversion": "npm test",
+          "postversion": "npm publish",
+          "prepublishOnly": "git push origin --follow-tags",
+          "prepare": "tshy",
+          "pretest": "npm run prepare",
+          "presnap": "npm run prepare",
+          "test": "tap",
+          "snap": "tap",
+          "format": "prettier --write .",
+          "format:check": "prettier --check .",
+          "benchmark": "node benchmark/index.js",
+          "typedoc": "typedoc --tsconfig .tshy/esm.json ./src/*.ts"
+        },
+        "devDependencies": {
+          "@types/brace-expansion": "^1.1.2",
+          "@types/node": "^25.2.1",
+          "mkdirp": "^3.0.1",
+          "prettier": "^3.3.2",
+          "tap": "^21.6.2",
+          "tshy": "^3.0.2",
+          "typedoc": "^0.28.5"
+        },
+        "dependencies": {
+          "balanced-match": "5.0.0"
+        },
+        "license": "MIT",
+        "engines": {
+          "node": "20 || >=22"
+        },
+        "tshy": {
+          "exports": {
+            "./package.json": "./package.json",
+            ".": "./src/index.ts"
+          }
+        },
+        "main": "./dist/commonjs/index.js",
+        "types": "./dist/commonjs/index.d.ts",
+        "module": "./dist/esm/index.js",
+        "repository": {
+          "type": "git",
+          "url": "git+https://github.com/juliangruber/brace-expansion.git"
+        },
+        "private": true
+      }
+    },
+    {
+      "name": "minimatch",
+      "highest_public_nonretired_stable": "11.0.2",
+      "metadata_sha256": "8b839feee55f69c52110c2e0c64f397cd0310b974f9e77d37d687869f33692f4",
+      "dependencies": {
+        "brace-expansion": "^5.0.12",
+        "@isaacs/nonrecursive-glob-match": "^1.0.2"
+      },
+      "gitHead": "43804554971ee0c526723fc5f7c898ce954c390e",
+      "repository": {
+        "url": "git+ssh://git@github.com/isaacs/minimatch.git",
+        "type": "git"
+      },
+      "tarball": "https://registry.npmjs.org/minimatch/-/minimatch-11.0.2.tgz",
+      "integrity": "sha512-pWTgz5CN3tjqyZNSK2tePlSmu9IwM41q8yn8Usdqqwe9TIHh+9dEpLLjF4uApsfPEAZY71qtSiA2B2APEr+1Yw==",
+      "archive_sha256": "e118e9d9150e71820608ecf8e1f8681cd4414b1e9d123e9320c88b2af4371548",
+      "source_payloads": [
+        {
+          "path": "dist/commonjs/assert-valid-pattern.js",
+          "sha256": "fcd3b0e6efee67b11249804cc64bf4d22c883395491f79bfb484869d61823600",
+          "bytes": 492
+        },
+        {
+          "path": "dist/esm/assert-valid-pattern.js",
+          "sha256": "90e8d3327d573b9d2391edf03dc7d50c1c0b468d720a4c0fb4a08a36ee5c50dc",
+          "bytes": 336
+        },
+        {
+          "path": "dist/commonjs/escape.js",
+          "sha256": "54b57f8f50c8e834f35a30c1848ac3f79acf8dd85894505f046afaf3965e63a0",
+          "bytes": 1253
+        },
+        {
+          "path": "dist/esm/escape.js",
+          "sha256": "8418e37c202bcd247e76b1c205d4eff9474f15fb76c1db1ef0688cb6a8ec3c94",
+          "bytes": 1133
+        },
+        {
+          "path": "dist/commonjs/index.js",
+          "sha256": "d89e8ca7dda77bd9dc9efed6920b0ed09deb2f478ada54110980daa3080d3f9b",
+          "bytes": 62059
+        },
+        {
+          "path": "dist/esm/index.js",
+          "sha256": "c2ac65e82b196476009b53e1939811c788cb001d910304c6108a1f665fac3c3d",
+          "bytes": 60839
+        },
+        {
+          "path": "dist/commonjs/unescape.js",
+          "sha256": "bec1bb4483a2c325599949dd6668b5b7daa2dcbe046c5a09899bc8c5b51c08c1",
+          "bytes": 1390
+        },
+        {
+          "path": "dist/esm/unescape.js",
+          "sha256": "2cd61ba96e616969f152445c61ec2ca129a0afd2028ea71309b862a4222304d6",
+          "bytes": 1264
+        },
+        {
+          "path": "dist/commonjs/package.json",
+          "sha256": "8005a3491db7d92f36ac66369861589f9c47123d3a7c71e643fc2c06168cd45a",
+          "bytes": 25
+        },
+        {
+          "path": "dist/esm/package.json",
+          "sha256": "3ca9d4afd21425087cf31893b8f9f63c81b0b8408db5e343ca76e5f8aa26ab9a",
+          "bytes": 23
+        },
+        {
+          "path": "package.json",
+          "sha256": "da9e760d834dabe347cd32b4cc7984f9945b014958daf561fe13fff6cc8675e8",
+          "bytes": 1862
+        },
+        {
+          "path": "dist/commonjs/assert-valid-pattern.d.ts.map",
+          "sha256": "6bda19e78c29faff99d261fb630e1b28ae01f61dd429861535834ae4fdbb9d59",
+          "bytes": 199
+        },
+        {
+          "path": "dist/esm/assert-valid-pattern.d.ts.map",
+          "sha256": "6bda19e78c29faff99d261fb630e1b28ae01f61dd429861535834ae4fdbb9d59",
+          "bytes": 199
+        },
+        {
+          "path": "dist/commonjs/assert-valid-pattern.js.map",
+          "sha256": "93d366c74b6028b0b32b257a681cb52d6b1243113916fdd6c2a67daf597d69e3",
+          "bytes": 832
+        },
+        {
+          "path": "dist/esm/assert-valid-pattern.js.map",
+          "sha256": "83dd43a7bb36f95e216c8473f43f731d9ce2d1a27cfc5246226efb8a1d5232d9",
+          "bytes": 815
+        },
+        {
+          "path": "dist/commonjs/escape.d.ts.map",
+          "sha256": "230a99e35af8c1a96bb303a6f649785d29ca23e9e688230641b931f1c1a5e365",
+          "bytes": 278
+        },
+        {
+          "path": "dist/esm/escape.d.ts.map",
+          "sha256": "230a99e35af8c1a96bb303a6f649785d29ca23e9e688230641b931f1c1a5e365",
+          "bytes": 278
+        },
+        {
+          "path": "dist/commonjs/escape.js.map",
+          "sha256": "b5f20d5a880214494df8a92d7cdec4e4d68b8b3470b81e4bf3c55f058bac6d28",
+          "bytes": 1890
+        },
+        {
+          "path": "dist/esm/escape.js.map",
+          "sha256": "d167494c1bc002ba3b3ae18bb41bc18b13a9f20631a3c24efe21f6394e107515",
+          "bytes": 1874
+        },
+        {
+          "path": "dist/commonjs/index.d.ts.map",
+          "sha256": "f2cab884aa4fe0129347d6a46f909af68f37f858dbe9797056c77b1bdced0651",
+          "bytes": 3835
+        },
+        {
+          "path": "dist/esm/index.d.ts.map",
+          "sha256": "f2cab884aa4fe0129347d6a46f909af68f37f858dbe9797056c77b1bdced0651",
+          "bytes": 3835
+        },
+        {
+          "path": "dist/commonjs/index.js.map",
+          "sha256": "0d85d99598bc532d2062c9d608b176f583b87e497c7947b8afee5c785ee26c97",
+          "bytes": 114991
+        },
+        {
+          "path": "dist/esm/index.js.map",
+          "sha256": "454d0be4f4ed15d0bea9ceab4ff4040d8c3d0127883701a0b7b92c5794bd005f",
+          "bytes": 115030
+        },
+        {
+          "path": "dist/commonjs/unescape.d.ts.map",
+          "sha256": "f9d8bff082045d428437be45a83e2a5c07cf1f3f4c3481a88779f1e24ecc76c5",
+          "bytes": 290
+        },
+        {
+          "path": "dist/esm/unescape.d.ts.map",
+          "sha256": "f9d8bff082045d428437be45a83e2a5c07cf1f3f4c3481a88779f1e24ecc76c5",
+          "bytes": 290
+        },
+        {
+          "path": "dist/commonjs/unescape.js.map",
+          "sha256": "7a386a679c12ea329eca1c76d10db048489d3292c9a5658574e9307b89392b1b",
+          "bytes": 2080
+        },
+        {
+          "path": "dist/esm/unescape.js.map",
+          "sha256": "11dca08b65b198c0a72baba3d8a866ff32f4875366e76d7205ca54b428bf39cf",
+          "bytes": 2064
+        },
+        {
+          "path": "LICENSE.md",
+          "sha256": "2c7c5d22ed5a8ee968c64757710979afcd77438c48b4a265b94e615babd8a901",
+          "bytes": 1550
+        },
+        {
+          "path": "README.md",
+          "sha256": "17a7bd7a21e56f7abf8b3ccd857c63ad3fdf4658f2246a828aee41a6692ba828",
+          "bytes": 20743
+        },
+        {
+          "path": "dist/commonjs/assert-valid-pattern.d.ts",
+          "sha256": "ff8872a24ed233ed9b80a521c1c5214ee996f4d649f537a1e8d12196d9f83d77",
+          "bytes": 119
+        },
+        {
+          "path": "dist/esm/assert-valid-pattern.d.ts",
+          "sha256": "ff8872a24ed233ed9b80a521c1c5214ee996f4d649f537a1e8d12196d9f83d77",
+          "bytes": 119
+        },
+        {
+          "path": "dist/commonjs/escape.d.ts",
+          "sha256": "a7224113134dbd16bcf5e95e31b02f2d3da83aa99756a4b3cd133031670c72fc",
+          "bytes": 781
+        },
+        {
+          "path": "dist/esm/escape.d.ts",
+          "sha256": "a7224113134dbd16bcf5e95e31b02f2d3da83aa99756a4b3cd133031670c72fc",
+          "bytes": 781
+        },
+        {
+          "path": "dist/commonjs/index.d.ts",
+          "sha256": "16c357d775998e72a60942626811db8e8297d9f6e408aebd5dcaf37b3486e3f9",
+          "bytes": 7528
+        },
+        {
+          "path": "dist/esm/index.d.ts",
+          "sha256": "16c357d775998e72a60942626811db8e8297d9f6e408aebd5dcaf37b3486e3f9",
+          "bytes": 7528
+        },
+        {
+          "path": "dist/commonjs/unescape.d.ts",
+          "sha256": "7d3795e78cdc9079f6b03c6f85145f469582795af61134bbcf0568ae2e1476fe",
+          "bytes": 956
+        },
+        {
+          "path": "dist/esm/unescape.d.ts",
+          "sha256": "7d3795e78cdc9079f6b03c6f85145f469582795af61134bbcf0568ae2e1476fe",
+          "bytes": 956
+        }
+      ],
+      "original_manifest": {
+        "author": "Isaac Z. Schlueter <i@izs.me> (http://blog.izs.me)",
+        "name": "minimatch",
+        "description": "a glob matcher in javascript",
+        "version": "11.0.2",
+        "repository": {
+          "type": "git",
+          "url": "git@github.com:isaacs/minimatch"
+        },
+        "main": "./dist/commonjs/index.js",
+        "types": "./dist/commonjs/index.d.ts",
+        "exports": {
+          "./package.json": "./package.json",
+          ".": {
+            "import": {
+              "types": "./dist/esm/index.d.ts",
+              "default": "./dist/esm/index.js"
+            },
+            "require": {
+              "types": "./dist/commonjs/index.d.ts",
+              "default": "./dist/commonjs/index.js"
+            }
+          }
+        },
+        "files": [
+          "dist"
+        ],
+        "scripts": {
+          "preversion": "npm test",
+          "postversion": "npm publish",
+          "prepublishOnly": "git push origin --follow-tags",
+          "prepare": "tshy",
+          "pretest": "npm run prepare",
+          "presnap": "npm run prepare",
+          "test": "tap",
+          "snap": "tap",
+          "format": "prettier --write .",
+          "benchmark": "node benchmark/index.js",
+          "typedoc": "typedoc --tsconfig .tshy/esm.json ./src/*.ts",
+          "lint": "oxlint --fix src test",
+          "postsnap": "npm run lint",
+          "postlint": "npm run format"
+        },
+        "engines": {
+          "node": "18 || 20 || >=22"
+        },
+        "devDependencies": {
+          "@types/node": "^26.6.5",
+          "mkdirp": "^3.0.1",
+          "oxlint": "^1.90.0",
+          "oxlint-tsgolint": "^7.0.2001",
+          "prettier": "^3.9.6",
+          "tap": "^21.7.5",
+          "tshy": "^4.1.3",
+          "typedoc": "^0.28.20"
+        },
+        "funding": {
+          "url": "https://github.com/sponsors/isaacs"
+        },
+        "license": "BlueOak-1.0.0",
+        "tshy": {
+          "exports": {
+            "./package.json": "./package.json",
+            ".": "./src/index.ts"
+          },
+          "selfLink": false
+        },
+        "type": "module",
+        "module": "./dist/esm/index.js",
+        "dependencies": {
+          "@isaacs/nonrecursive-glob-match": "^1.0.2",
+          "brace-expansion": "^5.0.12"
+        }
+      },
+      "original_SDK": {
+        "name": "minimatch",
+        "repository": "isaacs/minimatch",
+        "commit": "43804554971ee0c526723fc5f7c898ce954c390e",
+        "archive_sha256": "0f39c1cf05c64481d53c5cf5a2490cf3ad2d83783c1a991bcd49f29c0d9af2fe",
+        "source_payloads": [
+          {
+            "path": ".github/workflows/ci.yml",
+            "mode": "100644",
+            "git_blob": "30d1809c7417305a7dda65c8cd3ddc64eea4cc73",
+            "sha256": "a6830d727447db3d2e3c71c9eaf2f95e1ad9b57973b0e099c76c9aa795839429",
+            "bytes": 1512
+          },
+          {
+            "path": ".github/workflows/typedoc.yml",
+            "mode": "100644",
+            "git_blob": "08af735e20f7ba4be351ca4bcefe075d28a9f955",
+            "sha256": "45a51cb5cf72f9a1cc0cab16709b1ae34b2498196e91a5fd8bc7c132d014af87",
+            "bytes": 934
+          },
+          {
+            "path": ".gitignore",
+            "mode": "100644",
+            "git_blob": "3b11a64ec3d021f9f0bd76dae2931167309d44c6",
+            "sha256": "275e2c36800cbb1ed4481e6f8e7a6650a1a33d1e35cd039d4b8586245ccc277a",
+            "bytes": 92
+          },
+          {
+            "path": ".oxlintrc.json",
+            "mode": "100644",
+            "git_blob": "f08aa6d808824b10c7ff23f5508a0c8c44a2d26f",
+            "sha256": "db7ab0361ae62c1fd7e1d13d2fc8cd39a3541b5b02f132383fd0aeea60a613b3",
+            "bytes": 5476
+          },
+          {
+            "path": ".prettierignore",
+            "mode": "100644",
+            "git_blob": "cf134510ece8195b0d1c4a0653cfae137ab88611",
+            "sha256": "a19b906ba09812c934c3c831c8d72e4a74e62baccf424955c0f46bda3bc0edfc",
+            "bytes": 201
+          },
+          {
+            "path": ".prettierrc.json",
+            "mode": "100644",
+            "git_blob": "02b40d2aed3930bdaf6602ec0d0a4dbe7b3e5ce2",
+            "sha256": "43ae0d50438fd7e4c4535da4471437e61dbe77d62ae6dc28e91ffe9631e87e5e",
+            "bytes": 234
+          },
+          {
+            "path": ".tshy/build.json",
+            "mode": "100644",
+            "git_blob": "aea1a9e93b5db3468973ebeaad6dac0a77b10c02",
+            "sha256": "67c78efcea9cf62667b0b5d58c3f71524bbaf3b90900c5f6e84f5238c6724382",
+            "bytes": 150
+          },
+          {
+            "path": ".tshy/commonjs.json",
+            "mode": "100644",
+            "git_blob": "7c9db50b6a5c0a35d96484cf9e5032231007060e",
+            "sha256": "5ad5618ec74d4b7bdd38eb66937443b1a28a672e2910dac42047f19f7d341e9a",
+            "bytes": 280
+          },
+          {
+            "path": ".tshy/esm.json",
+            "mode": "100644",
+            "git_blob": "959294a84294938544a6a812f2687508959d1f0f",
+            "sha256": "c4a231bdebef82e5367a7df4d1c03490a4af3ea1144c1d02184816bb483719dc",
+            "bytes": 252
+          },
+          {
+            "path": "LICENSE.md",
+            "mode": "100644",
+            "git_blob": "8cb5cc6e616c0d9259b4965f9d2ce8528e4d2828",
+            "sha256": "2c7c5d22ed5a8ee968c64757710979afcd77438c48b4a265b94e615babd8a901",
+            "bytes": 1550
+          },
+          {
+            "path": "README.md",
+            "mode": "100644",
+            "git_blob": "75538279ac9dc56d8b7ccadf31127fddda50266a",
+            "sha256": "17a7bd7a21e56f7abf8b3ccd857c63ad3fdf4658f2246a828aee41a6692ba828",
+            "bytes": 20743
+          },
+          {
+            "path": "benchmark.js",
+            "mode": "100644",
+            "git_blob": "c10a6accd1b4617533d712f9f4784b1a665fe74b",
+            "sha256": "f8c91ae7598d39dea600f777693057c8f76fdd200bb63b3ecf7baa004ecd62a8",
+            "bytes": 431
+          },
+          {
+            "path": "benchmark/Makefile",
+            "mode": "100644",
+            "git_blob": "031ebdb06b4f6e9dcbd1035d56a76a1e926fdf89",
+            "sha256": "6710502e4e70f714a8ce246229bda6c079876a4045b60add6acd96c57158e06e",
+            "bytes": 187
+          },
+          {
+            "path": "benchmark/files.js",
+            "mode": "100644",
+            "git_blob": "f931ce6cc58d3e4a1361616a6b2ee7ac5f57c62e",
+            "sha256": "e5782f59b51258a44dd830cee6a9474ff36f1d1ed4ec0be26fcf1916c7a94718",
+            "bytes": 375
+          },
+          {
+            "path": "benchmark/gen-filenames.js",
+            "mode": "100644",
+            "git_blob": "3e18fbb21cceb69d29edd96a06835775a364fe54",
+            "sha256": "bfe856c1e36957bd0f1cd50fe37cca4d2f36473b91b94e9f3e3ab071da6f052c",
+            "bytes": 523
+          },
+          {
+            "path": "benchmark/gen-patterns.js",
+            "mode": "100644",
+            "git_blob": "dfdd97106e35957dfdc144b9a8123d970db62a70",
+            "sha256": "e4e157366afaa41114d5a1186ede5a8c225b535ca65dd49607439c9679fc8e34",
+            "bytes": 290
+          },
+          {
+            "path": "benchmark/gen-realistic-paths.mjs",
+            "mode": "100644",
+            "git_blob": "668181e71f994cf836599a01909b02dbff5b515d",
+            "sha256": "6dc351b6eabf09d89f20c80ed2d02803a4e0ac20f79a89d7dd4512765d7f1ccd",
+            "bytes": 1081
+          },
+          {
+            "path": "benchmark/index.js",
+            "mode": "100644",
+            "git_blob": "00d1fed7edd965e3ea16a4f63649081995e37d42",
+            "sha256": "0eb08709fb46ab70ab11cc1424d81e8039f94ce9511475c5dd7e9b1e36a777b2",
+            "bytes": 4255
+          },
+          {
+            "path": "benchmark/matches-anymatch.json",
+            "mode": "100644",
+            "git_blob": "9e0b41846b1188076f7524716d26356a87e169a2",
+            "sha256": "9dc0b519d90545d0358d4edae2bddb7cf37e7811d252f91487b25b2f5949ebc0",
+            "bytes": 57036
+          },
+          {
+            "path": "benchmark/matches-baseline.json",
+            "mode": "100644",
+            "git_blob": "9f34f445618445456c75e6f07ec49866025851f5",
+            "sha256": "fa04625f1ac83a86542ff6c5ee027a4d269adf2f78892aa97374636519aeb0c2",
+            "bytes": 343
+          },
+          {
+            "path": "benchmark/matches-glob-to-regexp.json",
+            "mode": "100644",
+            "git_blob": "d990477c937d0c28cc22c79f22659e36d2728986",
+            "sha256": "7860e390250decd1ef7ad078d6fc2b01edfc0524a6e16fcfefab20399e958465",
+            "bytes": 485007
+          },
+          {
+            "path": "benchmark/matches-micromatch.json",
+            "mode": "100644",
+            "git_blob": "27c9ff19282725108ff8df20e09d0f2bcb5df8ed",
+            "sha256": "b970421cf76b92dea9cbd95076078ea62e1d0c410f4083cab35b7dc5acacc189",
+            "bytes": 19140968
+          },
+          {
+            "path": "benchmark/matches-minimatch-3.json",
+            "mode": "100644",
+            "git_blob": "2669933d186430736ce0449834e52b64ebf285bf",
+            "sha256": "6eb1b79971db0cb504f0c6c764d36754c98be67aa6ab0bc0ae7703c29b6a2f29",
+            "bytes": 23719133
+          },
+          {
+            "path": "benchmark/matches-minimatch-4.json",
+            "mode": "100644",
+            "git_blob": "2669933d186430736ce0449834e52b64ebf285bf",
+            "sha256": "6eb1b79971db0cb504f0c6c764d36754c98be67aa6ab0bc0ae7703c29b6a2f29",
+            "bytes": 23719133
+          },
+          {
+            "path": "benchmark/matches-minimatch-5.json",
+            "mode": "100644",
+            "git_blob": "2669933d186430736ce0449834e52b64ebf285bf",
+            "sha256": "6eb1b79971db0cb504f0c6c764d36754c98be67aa6ab0bc0ae7703c29b6a2f29",
+            "bytes": 23719133
+          },
+          {
+            "path": "benchmark/matches-minimatch-current.json",
+            "mode": "100644",
+            "git_blob": "9e88ceaf1e2c4cdec965b991c012aec5bd1ab4ea",
+            "sha256": "131fbe87964327043a0314eace8a15c2f94906ac717c385c9b72a11596bc716a",
+            "bytes": 23857433
+          },
+          {
+            "path": "benchmark/matches-picomatch.json",
+            "mode": "100644",
+            "git_blob": "27c9ff19282725108ff8df20e09d0f2bcb5df8ed",
+            "sha256": "b970421cf76b92dea9cbd95076078ea62e1d0c410f4083cab35b7dc5acacc189",
+            "bytes": 19140968
+          },
+          {
+            "path": "benchmark/package-lock.json",
+            "mode": "100644",
+            "git_blob": "7abdc4346b9e452de0e2db65d7b34afac2401669",
+            "sha256": "7172a27f51d1d6c52628a6d52e6db50768fd37ee61a3d55d8940fa590b77f601",
+            "bytes": 77717
+          },
+          {
+            "path": "benchmark/package.json",
+            "mode": "100644",
+            "git_blob": "f0272d09c193041550ef0d84c01af58d0f96c0e0",
+            "sha256": "85b7351646ca6684a985242f295e10ae34fb7fbbd704f35baca0eb4b2d00a3b0",
+            "bytes": 647
+          },
+          {
+            "path": "benchmark/patterns.json",
+            "mode": "100644",
+            "git_blob": "803ef3bec54bcc6a8c28d0d0b0a852f4ca406cd2",
+            "sha256": "52ac5149693f1abffc1c710e5cd774163fd92af6f518a057c28b79118cae0163",
+            "bytes": 383
+          },
+          {
+            "path": "benchmark/patterns.txt",
+            "mode": "100644",
+            "git_blob": "fe7929edd6fb1e01d3c78b246af349fc7faff7ac",
+            "sha256": "86392f7a0ef0e17550136dd26b2066f9f70f00174876ba54c6877cb6cda163ee",
+            "bytes": 765
+          },
+          {
+            "path": "benchmark/realistic-paths.json",
+            "mode": "100644",
+            "git_blob": "0761be80e01dda946a8860fd7bd288db94b1c1a3",
+            "sha256": "32e67b783afc808276594144da3fe27fe006697b351371342811f3bc64cca084",
+            "bytes": 802987
+          },
+          {
+            "path": "benchmark/realistic.mjs",
+            "mode": "100644",
+            "git_blob": "b822081c8f15f15aa71bb82e256365d04f36617d",
+            "sha256": "d7110cdf8ba14a362150753c242731a895ba479f88ac0b7a16b9bf1cf57df2a7",
+            "bytes": 4172
+          },
+          {
+            "path": "changelog.md",
+            "mode": "100644",
+            "git_blob": "b2ef5c604f8bba9df2b2d720ca655be66a723a1a",
+            "sha256": "8e063a3e905f4affa1ff22ab52064178d235ff5c6045aa4d2a3afa1ed6847d11",
+            "bytes": 5058
+          },
+          {
+            "path": "package-lock.json",
+            "mode": "100644",
+            "git_blob": "d105bf21b13afda49857aaf9165b03e0ddaea583",
+            "sha256": "f0be52e5abe7e612f09fede50940b6a53d089cd0d6239f373ff600aa6a41bcdc",
+            "bytes": 155187
+          },
+          {
+            "path": "package.json",
+            "mode": "100644",
+            "git_blob": "05a883b2e702ee287d5e76d5246a78cf5c42795e",
+            "sha256": "da9e760d834dabe347cd32b4cc7984f9945b014958daf561fe13fff6cc8675e8",
+            "bytes": 1862
+          },
+          {
+            "path": "src/assert-valid-pattern.ts",
+            "mode": "100644",
+            "git_blob": "8da6010bae68282f779451ccf68d4a5c3b6fb48a",
+            "sha256": "8c005b3d77e34f87599bbfd348d9ac6ef9fc97044fd4170cc37d268c7ecfd9ee",
+            "bytes": 338
+          },
+          {
+            "path": "src/escape.ts",
+            "mode": "100644",
+            "git_blob": "4f86ff61b984bed2bb86f55e5eda060197e1e567",
+            "sha256": "9afe88446437ff605240a21d6c0a1afd8ebe839de679f57ae81a1828712b8068",
+            "bytes": 1207
+          },
+          {
+            "path": "src/index.ts",
+            "mode": "100644",
+            "git_blob": "7e7c2964357abb54ff2325fb999de06b3676e27b",
+            "sha256": "eff2f23257708f4bd102cf94d746c8f26f5887e993e6de0f3c139bdae924c37b",
+            "bytes": 60673
+          },
+          {
+            "path": "src/unescape.ts",
+            "mode": "100644",
+            "git_blob": "768be97ed7c1ed5faf2a467a8ddb94031cadd7bb",
+            "sha256": "7a6eb135b52447fc50f8adc0bb78332f7594bb298ff7b01fc4e4ac7967759403",
+            "bytes": 1323
+          },
+          {
+            "path": "tap-snapshots/test/basic.js.test.cjs",
+            "mode": "100644",
+            "git_blob": "880df75141b1a2b4a29e78ebd362ce2df8661da8",
+            "sha256": "0bfcff45d198e3b1b4a07998c0c94922dc979690147d66a1cdbb3ac3ee52108e",
+            "bytes": 15923
+          },
+          {
+            "path": "tap-snapshots/test/class-edge-cases.js.test.cjs",
+            "mode": "100644",
+            "git_blob": "2d14b853802da4823bae46cadd5eca4a3aa91e18",
+            "sha256": "f09d8698f895dbf15e782c93a5e60175d24f4b79cfdddd97b7b9f8751d167bc2",
+            "bytes": 940
+          },
+          {
+            "path": "tap-snapshots/test/escape-has-magic.js.test.cjs",
+            "mode": "100644",
+            "git_blob": "9b34cd6e914fa6339aed0acff318a69927e07deb",
+            "sha256": "b9dd489e737be250a150ee1eacafab7ef48b65911904c067f4257e136fd76f60",
+            "bytes": 61786
+          },
+          {
+            "path": "tap-snapshots/test/optimization-level-0.ts.test.cjs",
+            "mode": "100644",
+            "git_blob": "eadee8c2d487e309b07204b8dbdb12cd5fad8957",
+            "sha256": "191b52229378968009b821bd3ecca8e7839158ec277b9854865ae46abba90dc4",
+            "bytes": 18863
+          },
+          {
+            "path": "tap-snapshots/test/optimization-level-2.ts.test.cjs",
+            "mode": "100644",
+            "git_blob": "e7647edde8dd56b4d9bb5e19e146c3c633598895",
+            "sha256": "0e3f0dd18f403e3fdc6afb5fdd7fbc44c37e9774c1befac8e4ab708fc911cada",
+            "bytes": 66977
+          },
+          {
+            "path": "tap-snapshots/test/windows-no-magic-root.ts.test.cjs",
+            "mode": "100644",
+            "git_blob": "878bac525f26839b8b995772aea4f8249c27f32d",
+            "sha256": "7ce35a924b8c3a5fb9c108cb91c1e65c8c12da57e107e1d6ad7c7d38c65c5d04",
+            "bytes": 9192
+          },
+          {
+            "path": "test/basic.js",
+            "mode": "100644",
+            "git_blob": "727d307423c7c860b6b59831f0554ceb5d1758cf",
+            "sha256": "e28d414a348b8c9764c1c20173a816c7fa6ed03931092a6a237054b7c30a0e6a",
+            "bytes": 7858
+          },
+          {
+            "path": "test/brace-expand.js",
+            "mode": "100644",
+            "git_blob": "9520e68b2026b05cbf27152f4e379904874287a3",
+            "sha256": "2ebbcc48d3a99280e6d2985aff5c39875e709dd3ac6fbbf989ff5528cf101429",
+            "bytes": 1362
+          },
+          {
+            "path": "test/class-edge-cases.js",
+            "mode": "100644",
+            "git_blob": "eab02ceff3d82d92268dcf3165106318af1afdb4",
+            "sha256": "2b2ca4551535984a7a7bed1f453eb345ec47373e9bddeda91c3983271b0c847f",
+            "bytes": 961
+          },
+          {
+            "path": "test/consecutive-glob-stars.js",
+            "mode": "100644",
+            "git_blob": "95bfa6d0efd454f5598a2519e9b3daa7fdc145d7",
+            "sha256": "e3f7070296d58eafddea48e8d829e6d1bb08620ceeef9e8ba0e80cd9278715f8",
+            "bytes": 410
+          },
+          {
+            "path": "test/defaults.js",
+            "mode": "100644",
+            "git_blob": "7eafc205fa77992114d1e7a50c4b90c5dd311cc2",
+            "sha256": "6057c7440bcf437e6c8612b9247422f584ae6b0b22d5d69c822b7dc63298b293",
+            "bytes": 3131
+          },
+          {
+            "path": "test/end-check.ts",
+            "mode": "100644",
+            "git_blob": "df63195a849e9fb8aa2813b244b22063a65126c2",
+            "sha256": "4a5eed97198c8cfd97da53513ef9b3d424fdf4e00c923dd8f53d1e85bce3dbc9",
+            "bytes": 11600
+          },
+          {
+            "path": "test/escape-has-magic.js",
+            "mode": "100644",
+            "git_blob": "a8fdf4c10b6b928a50c85998bda7f257560219d6",
+            "sha256": "11a3c50ae630fc8412c81be42d97dfe48f7b622b00392ab360a7e1be72923134",
+            "bytes": 2759
+          },
+          {
+            "path": "test/escaping.js",
+            "mode": "100644",
+            "git_blob": "08548748718441f31d4b6bd39ee5a7211fe9676b",
+            "sha256": "47532cc89e62f1b9a6c183d11b62e98254492fbff6cd58a3b3a07165f29b0fef",
+            "bytes": 1655
+          },
+          {
+            "path": "test/extglob-ending-with-state-char.js",
+            "mode": "100644",
+            "git_blob": "14e3f07b78f943cd1672e68bbc27f7e4ee41a7eb",
+            "sha256": "76ffd111ae32298e15d6c2dcc92c90c54e7436493f18d7f2d32dd2ad62792fdb",
+            "bytes": 215
+          },
+          {
+            "path": "test/extglob-unfinished.js",
+            "mode": "100644",
+            "git_blob": "e0698efec98c1299368fb86f411332397446d74d",
+            "sha256": "dc3f6a0b11479d4e1a6427277f8846d56c2882e34471bd46a3c314d8dbc44d06",
+            "bytes": 331
+          },
+          {
+            "path": "test/match-rows.ts",
+            "mode": "100644",
+            "git_blob": "df866b7d79f414d073a74606abda0b2291b843ed",
+            "sha256": "7cb0d68d56df4638b96c9f181c65cf297afd5fdaa0af31e22e514779c1c57bc1",
+            "bytes": 1845
+          },
+          {
+            "path": "test/merge-rows.ts",
+            "mode": "100644",
+            "git_blob": "b11b3e7e6ef937860e5bc25c0c916b5225e82b30",
+            "sha256": "abfd9f823ae2be6b574ee23b3da34040d3016cf37b2f9f6fbdd9ccaa0a0a1bc0",
+            "bytes": 1685
+          },
+          {
+            "path": "test/multiple-non-adjacent-globstars.ts",
+            "mode": "100644",
+            "git_blob": "02d8729b7171cb0ce91f0843eb29ae0914f670ec",
+            "sha256": "968dd32795eaa608619af379049c60bbe90a59f98c1f3d7963eb75703edb87e0",
+            "bytes": 4000
+          },
+          {
+            "path": "test/negative-extglob-anchoring.js",
+            "mode": "100644",
+            "git_blob": "b9ee2b63e4aa2e82c21bd0b5dc1dfce74960957e",
+            "sha256": "3b37c0b50883350221bd25bf0ad6ffcf8408a587764f494200f58ddaea132478",
+            "bytes": 228
+          },
+          {
+            "path": "test/nested-extglob.ts",
+            "mode": "100644",
+            "git_blob": "024f8c69c270b836876737c3da2c3b9308c30cd7",
+            "sha256": "604935d9b89e8579ef0617f15550d60243a83b7ae0e79d355c7cf9281ab4f0bc",
+            "bytes": 1012
+          },
+          {
+            "path": "test/nocase-magic.js",
+            "mode": "100644",
+            "git_blob": "ed0918050a0d09fcf1c890863081f28fd34c8cac",
+            "sha256": "ca6cec9d6ce617b92dc58175726f91d4764231c48b91e63a222dfe640a994c7a",
+            "bytes": 321
+          },
+          {
+            "path": "test/normalize.ts",
+            "mode": "100644",
+            "git_blob": "a3b275c934fd3ebe4c50b57fb056348c6ac21292",
+            "sha256": "a76286d1d453418b2664787c3e0eda50910cf175e670723131630e1f214e4961",
+            "bytes": 1799
+          },
+          {
+            "path": "test/optimization-level-0.ts",
+            "mode": "100644",
+            "git_blob": "6a762f3792ef5ef507bc42b5ccac0ce53bbfe62e",
+            "sha256": "bbe8ca7467e0c8644041e6f45c2221f3fd986e081e47da34db4b047e15a7bb0b",
+            "bytes": 153
+          },
+          {
+            "path": "test/optimization-level-2.ts",
+            "mode": "100644",
+            "git_blob": "cee60ce71007bdeddcd81c513d182cc48eb97ad5",
+            "sha256": "1b23fb976c7a98b90d0623d8c3f83b6372cd14393b31d5ede007691fd79dd0b5",
+            "bytes": 2240
+          },
+          {
+            "path": "test/partial.ts",
+            "mode": "100644",
+            "git_blob": "ccbc8526740ef37695ec4dcf76f7ebe660f5f566",
+            "sha256": "733dd743267fad9a4c5b3678091c46cc43516f736b2f8a303cb8ddb37a6f3af8",
+            "bytes": 1279
+          },
+          {
+            "path": "test/patterns.js",
+            "mode": "100644",
+            "git_blob": "713c24d4ec0308c96f944d906798b91e764c85a4",
+            "sha256": "bf1bae488cc5461922e8b5dedfd7f2d81a1a56ca8d562ac79873b1780cbba795",
+            "bytes": 15796
+          },
+          {
+            "path": "test/preprocess-limits.ts",
+            "mode": "100644",
+            "git_blob": "4f03d974089207c7fc4912777a95e44979a1a559",
+            "sha256": "ef0be3019d8c73e515427d565b07f5af2119f0b1873ed281814bdb0052546ee6",
+            "bytes": 1113
+          },
+          {
+            "path": "test/preserve-multiple-slashes.ts",
+            "mode": "100644",
+            "git_blob": "eaa304ff721a82eea4e14c6e2b3409d7845855a7",
+            "sha256": "af1ee7054204961d5d68c75e6335ccf5e05aa4730af87188884e37151338814f",
+            "bytes": 211
+          },
+          {
+            "path": "test/redos.js",
+            "mode": "100644",
+            "git_blob": "5dae97ab010dba1c39a824dbbb7bc733fcf0e476",
+            "sha256": "73594ef1b98072856e9aca3a39dd5dcb11c8695ca47cbf67ee027334cbbed04f",
+            "bytes": 660
+          },
+          {
+            "path": "test/split-cache.ts",
+            "mode": "100644",
+            "git_blob": "d0dda8a57770105fe3cb85990b058513351ccdf9",
+            "sha256": "6bf9597994f86b2cd7ecd435a38821a60a97d9c7cb486f587aeddb44c3a984b8",
+            "bytes": 1277
+          },
+          {
+            "path": "test/the-sky-is-full-of-stars-at-least-100.ts",
+            "mode": "100644",
+            "git_blob": "58a6acc77bae32af3dc7267bb5af95f8398ec1cc",
+            "sha256": "e26818c22471475daaaf9f104150af059ac02b082e0348c1be735d13a2695e5a",
+            "bytes": 264
+          },
+          {
+            "path": "test/tricky-negations.js",
+            "mode": "100644",
+            "git_blob": "026cc37d3a3f52637c7f8560db7962a5f91e27bb",
+            "sha256": "a4285b37584d2e565c23ed574ec315e05c39c89c167299cc9ad6a14c49a30d9a",
+            "bytes": 2294
+          },
+          {
+            "path": "test/unc.ts",
+            "mode": "100644",
+            "git_blob": "1238b7cbbdafba54e5c4e1458db03bdc5acb3c5c",
+            "sha256": "3045f9ff4b3bee4172a8119fb3304eca020b9dcadd30ace64f336d7dae1202c7",
+            "bytes": 5233
+          },
+          {
+            "path": "test/usurp.ts",
+            "mode": "100644",
+            "git_blob": "cc98ec78090ab4cf411422386a955da7e2f404ee",
+            "sha256": "5bd20e33fb6b7003e6cb63c0bc4f3b788bd83a4c650e429a8a1e5539a8858cc9",
+            "bytes": 798
+          },
+          {
+            "path": "test/win-path-sep.js",
+            "mode": "100644",
+            "git_blob": "984e2237f662b7b2543347d28e79a61622366327",
+            "sha256": "efe0bd1dd119bfa96443f1a421c2615d40ea8ef39993e89b7ba096633e4594b6",
+            "bytes": 1125
+          },
+          {
+            "path": "test/windows-no-magic-root.ts",
+            "mode": "100644",
+            "git_blob": "56a7331fddc6ff11677be58d685cf7ac0e6f1ffa",
+            "sha256": "8595a74223cc5369bd2ca29a29edae202b7a0cf8924207b42429fec2e5961142",
+            "bytes": 738
+          },
+          {
+            "path": "test/windows-root-dotdot.ts",
+            "mode": "100644",
+            "git_blob": "f5ef346171a9fa3d687ab8c581760f6adb77dc67",
+            "sha256": "2333d9d48abe1e6134123d653a3f0c2c63f01f530270da9fd7bb9b8b208ecf44",
+            "bytes": 2155
+          },
+          {
+            "path": "tsconfig.json",
+            "mode": "100644",
+            "git_blob": "8954fcdf1c5b7cb3fe9c75543610af7fea0c9fbe",
+            "sha256": "dbbb5aa5f65549eacd634cbfe7c52b20b1b2e1324c0c11c83efed80015dbd537",
+            "bytes": 486
+          },
+          {
+            "path": "typedoc.json",
+            "mode": "100644",
+            "git_blob": "bbbf6550f39b83d59c941211b9a7c98a8238bf88",
+            "sha256": "94b2b91217d2940abfd925b6e04792749b40802e53f103c0abd0cacc5e6af113",
+            "bytes": 220
+          }
+        ],
+        "original_case_helper_fixture_snapshot_paths": [
+          "tap-snapshots/test/basic.js.test.cjs",
+          "tap-snapshots/test/class-edge-cases.js.test.cjs",
+          "tap-snapshots/test/escape-has-magic.js.test.cjs",
+          "tap-snapshots/test/optimization-level-0.ts.test.cjs",
+          "tap-snapshots/test/optimization-level-2.ts.test.cjs",
+          "tap-snapshots/test/windows-no-magic-root.ts.test.cjs",
+          "test/basic.js",
+          "test/brace-expand.js",
+          "test/class-edge-cases.js",
+          "test/consecutive-glob-stars.js",
+          "test/defaults.js",
+          "test/end-check.ts",
+          "test/escape-has-magic.js",
+          "test/escaping.js",
+          "test/extglob-ending-with-state-char.js",
+          "test/extglob-unfinished.js",
+          "test/match-rows.ts",
+          "test/merge-rows.ts",
+          "test/multiple-non-adjacent-globstars.ts",
+          "test/negative-extglob-anchoring.js",
+          "test/nested-extglob.ts",
+          "test/nocase-magic.js",
+          "test/normalize.ts",
+          "test/optimization-level-0.ts",
+          "test/optimization-level-2.ts",
+          "test/partial.ts",
+          "test/patterns.js",
+          "test/preprocess-limits.ts",
+          "test/preserve-multiple-slashes.ts",
+          "test/redos.js",
+          "test/split-cache.ts",
+          "test/the-sky-is-full-of-stars-at-least-100.ts",
+          "test/tricky-negations.js",
+          "test/unc.ts",
+          "test/usurp.ts",
+          "test/win-path-sep.js",
+          "test/windows-no-magic-root.ts",
+          "test/windows-root-dotdot.ts"
+        ],
+        "original_manifest": {
+          "author": "Isaac Z. Schlueter <i@izs.me> (http://blog.izs.me)",
+          "name": "minimatch",
+          "description": "a glob matcher in javascript",
+          "version": "11.0.2",
+          "repository": {
+            "type": "git",
+            "url": "git@github.com:isaacs/minimatch"
+          },
+          "main": "./dist/commonjs/index.js",
+          "types": "./dist/commonjs/index.d.ts",
+          "exports": {
+            "./package.json": "./package.json",
+            ".": {
+              "import": {
+                "types": "./dist/esm/index.d.ts",
+                "default": "./dist/esm/index.js"
+              },
+              "require": {
+                "types": "./dist/commonjs/index.d.ts",
+                "default": "./dist/commonjs/index.js"
+              }
+            }
+          },
+          "files": [
+            "dist"
+          ],
+          "scripts": {
+            "preversion": "npm test",
+            "postversion": "npm publish",
+            "prepublishOnly": "git push origin --follow-tags",
+            "prepare": "tshy",
+            "pretest": "npm run prepare",
+            "presnap": "npm run prepare",
+            "test": "tap",
+            "snap": "tap",
+            "format": "prettier --write .",
+            "benchmark": "node benchmark/index.js",
+            "typedoc": "typedoc --tsconfig .tshy/esm.json ./src/*.ts",
+            "lint": "oxlint --fix src test",
+            "postsnap": "npm run lint",
+            "postlint": "npm run format"
+          },
+          "engines": {
+            "node": "18 || 20 || >=22"
+          },
+          "devDependencies": {
+            "@types/node": "^26.6.5",
+            "mkdirp": "^3.0.1",
+            "oxlint": "^1.90.0",
+            "oxlint-tsgolint": "^7.0.2001",
+            "prettier": "^3.9.6",
+            "tap": "^21.7.5",
+            "tshy": "^4.1.3",
+            "typedoc": "^0.28.20"
+          },
+          "funding": {
+            "url": "https://github.com/sponsors/isaacs"
+          },
+          "license": "BlueOak-1.0.0",
+          "tshy": {
+            "exports": {
+              "./package.json": "./package.json",
+              ".": "./src/index.ts"
+            },
+            "selfLink": false
+          },
+          "type": "module",
+          "module": "./dist/esm/index.js",
+          "dependencies": {
+            "@isaacs/nonrecursive-glob-match": "^1.0.2",
+            "brace-expansion": "^5.0.12"
+          }
+        },
+        "original_SDK_cases_executed": false
+      },
+      "vendor_path": "vendor/owned-minimatch",
+      "consumer_dependency_links": {
+        "brace-expansion": "brace-expansion"
+      },
+      "candidate_manifest": {
+        "author": "Isaac Z. Schlueter <i@izs.me> (http://blog.izs.me)",
+        "name": "minimatch",
+        "description": "a glob matcher in javascript",
+        "version": "11.0.2+owned.currentgraph.2",
+        "repository": {
+          "type": "git",
+          "url": "git@github.com:isaacs/minimatch"
+        },
+        "main": "./dist/commonjs/index.js",
+        "types": "./dist/commonjs/index.d.ts",
+        "exports": {
+          "./package.json": "./package.json",
+          ".": {
+            "import": {
+              "types": "./dist/esm/index.d.ts",
+              "default": "./dist/esm/index.js"
+            },
+            "require": {
+              "types": "./dist/commonjs/index.d.ts",
+              "default": "./dist/commonjs/index.js"
+            }
+          }
+        },
+        "files": [
+          "dist"
+        ],
+        "scripts": {
+          "preversion": "npm test",
+          "postversion": "npm publish",
+          "prepublishOnly": "git push origin --follow-tags",
+          "prepare": "tshy",
+          "pretest": "npm run prepare",
+          "presnap": "npm run prepare",
+          "test": "tap",
+          "snap": "tap",
+          "format": "prettier --write .",
+          "benchmark": "node benchmark/index.js",
+          "typedoc": "typedoc --tsconfig .tshy/esm.json ./src/*.ts",
+          "lint": "oxlint --fix src test",
+          "postsnap": "npm run lint",
+          "postlint": "npm run format"
+        },
+        "engines": {
+          "node": "18 || 20 || >=22"
+        },
+        "devDependencies": {
+          "@types/node": "^26.6.5",
+          "mkdirp": "^3.0.1",
+          "oxlint": "^1.90.0",
+          "oxlint-tsgolint": "^7.0.2001",
+          "prettier": "^3.9.6",
+          "tap": "^21.7.5",
+          "tshy": "^4.1.3",
+          "typedoc": "^0.28.20"
+        },
+        "funding": {
+          "url": "https://github.com/sponsors/isaacs"
+        },
+        "license": "BlueOak-1.0.0",
+        "tshy": {
+          "exports": {
+            "./package.json": "./package.json",
+            ".": "./src/index.ts"
+          },
+          "selfLink": false
+        },
+        "type": "module",
+        "module": "./dist/esm/index.js",
+        "dependencies": {
+          "@isaacs/nonrecursive-glob-match": "^1.0.2",
+          "brace-expansion": "file:../owned-brace-expansion"
+        },
+        "private": true
+      }
+    },
+    {
+      "name": "glob",
+      "highest_public_nonretired_stable": "14.0.3",
+      "metadata_sha256": "90419b2d0c1049053362239360a7a411298f4a2d52ed0bd0e9aeb6a7acdca2f6",
+      "dependencies": {
+        "minipass": "^7.1.3",
+        "minimatch": "^11.0.2",
+        "path-scurry": "^3.0.0"
+      },
+      "gitHead": "fc93fd5dab2bd40ea02681e8a1f027dacca216ce",
+      "repository": {
+        "url": "git+ssh://git@github.com/isaacs/node-glob.git",
+        "type": "git"
+      },
+      "tarball": "https://registry.npmjs.org/glob/-/glob-14.0.3.tgz",
+      "integrity": "sha512-A1vjIwC3qpdCso45Iw127gnp7sPhqgY8lUQhDrArIs+GbmfaaVPFuoyy7WyLT9EPZCRZ7j7aLdwUhQmHWesEow==",
+      "archive_sha256": "f936d47081e316874bcd0ad9ed38a4275c7a16f5dd3300917231e0030a0acd91",
+      "source_payloads": [
+        {
+          "path": "dist/commonjs/glob.js",
+          "sha256": "4d3e7409894bf7ea62c26a6503c8e3276215687d582eeae2ae052ddcca25317e",
+          "bytes": 8373
+        },
+        {
+          "path": "dist/esm/glob.js",
+          "sha256": "0c860d405b7856a292888cda14ba024319ab983cbf861574237ca0cfb1b66e06",
+          "bytes": 8166
+        },
+        {
+          "path": "dist/commonjs/has-magic.js",
+          "sha256": "d795c663fbdc40e41275b3d4745d73eb5fe8745eb841a740f1329a3d86db1c95",
+          "bytes": 1025
+        },
+        {
+          "path": "dist/esm/has-magic.js",
+          "sha256": "63e4c0b96c89e30b6dcee52579f9024bccbd9a98caaa012a6d5e408c3729e7bd",
+          "bytes": 884
+        },
+        {
+          "path": "dist/commonjs/ignore.js",
+          "sha256": "4f67a9c6fef8cad9233f4a4e67b6d92c3688a93f8be16838ab7266af8c617759",
+          "bytes": 5238
+        },
+        {
+          "path": "dist/esm/ignore.js",
+          "sha256": "90cfb2be460c3bc42df26e468eea58647ccea84de0c90618f21f299ae3e194db",
+          "bytes": 5063
+        },
+        {
+          "path": "dist/commonjs/index.js",
+          "sha256": "be0581401dff74824abe8ecd4f177d96535fdc1fe1b6698a9b4a4a9c4448bb61",
+          "bytes": 2876
+        },
+        {
+          "path": "dist/esm/index.js",
+          "sha256": "c1c6edeb1f365b61dba99c88592aba8bf36fde8bc6d9f7c515e78086d87e2380",
+          "bytes": 1647
+        },
+        {
+          "path": "dist/commonjs/index.min.js",
+          "sha256": "e0e787fa4b225c70db7aab2886011cae21855ef232908db066ce054c8f8ded16",
+          "bytes": 99718
+        },
+        {
+          "path": "dist/esm/index.min.js",
+          "sha256": "2f9b6d6d8afd271d48c25fdf87643983192cfefac359713c341136a39d635d49",
+          "bytes": 93188
+        },
+        {
+          "path": "dist/commonjs/pattern.js",
+          "sha256": "1608dc63d9a395dfce8ec61e4fb73f459ff213b624c5323e4bfbc8b6e2778c38",
+          "bytes": 8097
+        },
+        {
+          "path": "dist/esm/pattern.js",
+          "sha256": "25151d7323d21e3df22036ef104d814fc03a30614b0f602fc3fa8647820c9325",
+          "bytes": 7958
+        },
+        {
+          "path": "dist/commonjs/processor.js",
+          "sha256": "6ed7bff55123d39c38a33dd4d910c09349410aad4a9789e07e631f511bf51d03",
+          "bytes": 11575
+        },
+        {
+          "path": "dist/esm/processor.js",
+          "sha256": "2e48ffab67ede96c9ec710775171e66a77277adff4fe2803b8f9c17cd0d92d33",
+          "bytes": 11268
+        },
+        {
+          "path": "dist/commonjs/walker.js",
+          "sha256": "01c5ee096dbe9aa7266f6bf859ebabc233dde2160322cee321eed734958e5b6e",
+          "bytes": 13440
+        },
+        {
+          "path": "dist/esm/walker.js",
+          "sha256": "20446f7048e8234e1fc1ac2c754ebd41217168d7b3a1bebf4d8d00f773aa4cbf",
+          "bytes": 13138
+        },
+        {
+          "path": "dist/commonjs/package.json",
+          "sha256": "8005a3491db7d92f36ac66369861589f9c47123d3a7c71e643fc2c06168cd45a",
+          "bytes": 25
+        },
+        {
+          "path": "dist/esm/package.json",
+          "sha256": "3ca9d4afd21425087cf31893b8f9f63c81b0b8408db5e343ca76e5f8aa26ab9a",
+          "bytes": 23
+        },
+        {
+          "path": "package.json",
+          "sha256": "89a2a1a6fe096f20e0a4d3d4817c1c487afd1f0bf80d5f73be9085f8e95f2939",
+          "bytes": 3106
+        },
+        {
+          "path": "dist/commonjs/glob.d.ts.map",
+          "sha256": "6b03bffb4d1fb79b17202a644aebde57fb8b659665ee1a91d45605fdb034a9e1",
+          "bytes": 4278
+        },
+        {
+          "path": "dist/esm/glob.d.ts.map",
+          "sha256": "6b03bffb4d1fb79b17202a644aebde57fb8b659665ee1a91d45605fdb034a9e1",
+          "bytes": 4278
+        },
+        {
+          "path": "dist/commonjs/glob.js.map",
+          "sha256": "5809699ffb9dadff6d5e92e89101af68fb5a926a831a2ce24d514b3d81851402",
+          "bytes": 28850
+        },
+        {
+          "path": "dist/esm/glob.js.map",
+          "sha256": "e0595f11d70b6e37e0e3c95425c4d0c3bd5b1c90d77c53b55489f31c3356b924",
+          "bytes": 29008
+        },
+        {
+          "path": "dist/commonjs/has-magic.d.ts.map",
+          "sha256": "fa3abf9f022b899a90528ab6f2dfe6ac8dedf886a69f0e234de7bcb9fab8e38d",
+          "bytes": 263
+        },
+        {
+          "path": "dist/esm/has-magic.d.ts.map",
+          "sha256": "fa3abf9f022b899a90528ab6f2dfe6ac8dedf886a69f0e234de7bcb9fab8e38d",
+          "bytes": 263
+        },
+        {
+          "path": "dist/commonjs/has-magic.js.map",
+          "sha256": "3ececb913ec7ca54f640f2adcb620786e653c94af18c7295c1c0e1071fe279be",
+          "bytes": 1433
+        },
+        {
+          "path": "dist/esm/has-magic.js.map",
+          "sha256": "aa60100349687d96c8abb830053ce6926f4a44f172084b97fd04e9245362e3e5",
+          "bytes": 1446
+        },
+        {
+          "path": "dist/commonjs/ignore.d.ts.map",
+          "sha256": "845e878321ca8492482a400200bcd2bf0fe57a4c1a05c3330a943cfe20817285",
+          "bytes": 1055
+        },
+        {
+          "path": "dist/esm/ignore.d.ts.map",
+          "sha256": "845e878321ca8492482a400200bcd2bf0fe57a4c1a05c3330a943cfe20817285",
+          "bytes": 1055
+        },
+        {
+          "path": "dist/commonjs/ignore.js.map",
+          "sha256": "e894d31f234666a4bc82cc25aee8a7899b351a455aeb39adcb0587b488145a26",
+          "bytes": 9087
+        },
+        {
+          "path": "dist/esm/ignore.js.map",
+          "sha256": "37a5069298a74801e09d176547d7c4c3ed92f77ee5dbfd5256ad0a5574dcdef4",
+          "bytes": 9133
+        },
+        {
+          "path": "dist/commonjs/index.d.ts.map",
+          "sha256": "080e97535fec5164741769833922cfbf4340c47cb07c50d67c2bdd9fd00a8231",
+          "bytes": 4136
+        },
+        {
+          "path": "dist/esm/index.d.ts.map",
+          "sha256": "080e97535fec5164741769833922cfbf4340c47cb07c50d67c2bdd9fd00a8231",
+          "bytes": 4136
+        },
+        {
+          "path": "dist/commonjs/index.js.map",
+          "sha256": "f27b22a0e095ccd94e64d3ff461655ad28f3bfead11396feedcf2b88fab89069",
+          "bytes": 8419
+        },
+        {
+          "path": "dist/esm/index.js.map",
+          "sha256": "5078f8e89004d7364417bd4bf3f3f9867b0173bdb74fa76ba916c59bce0cc72a",
+          "bytes": 8453
+        },
+        {
+          "path": "dist/commonjs/index.min.js.map",
+          "sha256": "c7d0d38a8e318cc679b5917150a42e01a4c6fed3301883d802611561af240dab",
+          "bytes": 565451
+        },
+        {
+          "path": "dist/esm/index.min.js.map",
+          "sha256": "2b28349c7c9ff001b1b8f7473419f98a43fd64076a9de676731714e7b7f9a772",
+          "bytes": 562628
+        },
+        {
+          "path": "dist/commonjs/pattern.d.ts.map",
+          "sha256": "ffc9463c766faffc93e79931455cebdc05e7838aa320bbb31b57ead3a9ba39e5",
+          "bytes": 1493
+        },
+        {
+          "path": "dist/esm/pattern.d.ts.map",
+          "sha256": "ffc9463c766faffc93e79931455cebdc05e7838aa320bbb31b57ead3a9ba39e5",
+          "bytes": 1493
+        },
+        {
+          "path": "dist/commonjs/pattern.js.map",
+          "sha256": "264d16d24e2389f6c79715739a8fd6f92ed7b659c372353b17680e66d73c1a38",
+          "bytes": 15156
+        },
+        {
+          "path": "dist/esm/pattern.js.map",
+          "sha256": "54e04c340699734313a6b51552e56a3bee6f8a9bbcb74bdfeb58f204cd862b6a",
+          "bytes": 15172
+        },
+        {
+          "path": "dist/commonjs/processor.d.ts.map",
+          "sha256": "6e9493984bc8ef910e4a28f8e0a22b0fffe8bc1d393ce0c02ff0868432059bad",
+          "bytes": 1761
+        },
+        {
+          "path": "dist/esm/processor.d.ts.map",
+          "sha256": "6e9493984bc8ef910e4a28f8e0a22b0fffe8bc1d393ce0c02ff0868432059bad",
+          "bytes": 1761
+        },
+        {
+          "path": "dist/commonjs/processor.js.map",
+          "sha256": "1481cd8b950fdda4241bfd30910fdc0d8bf676b2bbb58b8b36969dfd41c713dc",
+          "bytes": 20062
+        },
+        {
+          "path": "dist/esm/processor.js.map",
+          "sha256": "2304b613dab5f63f08b14fa2cc20213621b1d7aadb5fce08c96bcfb0f1b02836",
+          "bytes": 20055
+        },
+        {
+          "path": "dist/commonjs/walker.d.ts.map",
+          "sha256": "6f90b8d50c60d3ace1a03caf75893831d83410ee75d817c057dd0db0f37c3a62",
+          "bytes": 4302
+        },
+        {
+          "path": "dist/esm/walker.d.ts.map",
+          "sha256": "6f90b8d50c60d3ace1a03caf75893831d83410ee75d817c057dd0db0f37c3a62",
+          "bytes": 4302
+        },
+        {
+          "path": "dist/commonjs/walker.js.map",
+          "sha256": "cf961e6f6c2862d50afad7c425b4a8e4445916704a593ea954c1000280054cd1",
+          "bytes": 29288
+        },
+        {
+          "path": "dist/esm/walker.js.map",
+          "sha256": "87410ff4257c5b08591adcf22e6469bccf9857f40700a6b4e74f5018a74463ac",
+          "bytes": 29351
+        },
+        {
+          "path": "LICENSE.md",
+          "sha256": "a49c9ba464796f65b59fca3f1e6ca40912df1e859f575383223f7ec6c5baae09",
+          "bytes": 1764
+        },
+        {
+          "path": "README.md",
+          "sha256": "de369d19fd9add845c9eddac6fdee54c63e3845190fd4047c6cb690d7ee041e0",
+          "bytes": 51235
+        },
+        {
+          "path": "dist/commonjs/glob.d.ts",
+          "sha256": "fd07d158ab25dbe213f0a5d08b9b451678f50c5b9c4665be58265ff27fea863e",
+          "bytes": 15641
+        },
+        {
+          "path": "dist/esm/glob.d.ts",
+          "sha256": "fd07d158ab25dbe213f0a5d08b9b451678f50c5b9c4665be58265ff27fea863e",
+          "bytes": 15641
+        },
+        {
+          "path": "src/glob.ts",
+          "sha256": "d9b32c0a625821ba456cb89078371981367c447886f69be4434f50276586d2f5",
+          "bytes": 20952
+        },
+        {
+          "path": "dist/commonjs/has-magic.d.ts",
+          "sha256": "33da128c00084dbb9050a98aea9a26cd684399970e2d154d46036cc5bd60134d",
+          "bytes": 765
+        },
+        {
+          "path": "dist/esm/has-magic.d.ts",
+          "sha256": "33da128c00084dbb9050a98aea9a26cd684399970e2d154d46036cc5bd60134d",
+          "bytes": 765
+        },
+        {
+          "path": "src/has-magic.ts",
+          "sha256": "7d17a8405405bae511e48f8d968c0d94587ac8ccb2d653a2e63e177fde985cdf",
+          "bytes": 915
+        },
+        {
+          "path": "dist/commonjs/ignore.d.ts",
+          "sha256": "5db854a1d1f4c73c857cabf11aab73e19a911fa48532244e79604448ef14e645",
+          "bytes": 1355
+        },
+        {
+          "path": "dist/esm/ignore.d.ts",
+          "sha256": "5db854a1d1f4c73c857cabf11aab73e19a911fa48532244e79604448ef14e645",
+          "bytes": 1355
+        },
+        {
+          "path": "src/ignore.ts",
+          "sha256": "d5d9605388cda60ad0d10f3f184d7df1fca99ede9446dc2a86cb133b38b168ab",
+          "bytes": 4954
+        },
+        {
+          "path": "dist/commonjs/index.d.ts",
+          "sha256": "c0d8b91bb9c7c99a0b21d37f6592789b2aaa72ee009e0e34161b7caa31c33c6d",
+          "bytes": 6260
+        },
+        {
+          "path": "dist/esm/index.d.ts",
+          "sha256": "c0d8b91bb9c7c99a0b21d37f6592789b2aaa72ee009e0e34161b7caa31c33c6d",
+          "bytes": 6260
+        },
+        {
+          "path": "src/index.ts",
+          "sha256": "01a48c4c5e56b0f640e5eff85b6faa291be6cfd8761a186e079f9f6c8a6f1396",
+          "bytes": 6352
+        },
+        {
+          "path": "dist/commonjs/pattern.d.ts",
+          "sha256": "c72846a717b10f5fdcc08cef05430e14d7dc739e5a59dd9f9f67665b2253bf17",
+          "bytes": 2532
+        },
+        {
+          "path": "dist/esm/pattern.d.ts",
+          "sha256": "c72846a717b10f5fdcc08cef05430e14d7dc739e5a59dd9f9f67665b2253bf17",
+          "bytes": 2532
+        },
+        {
+          "path": "src/pattern.ts",
+          "sha256": "c3964e5ef73710d4190efb09d5cb3ec2b51003a47ae7f9a3e8d0bdc53ea89e5a",
+          "bytes": 8108
+        },
+        {
+          "path": "dist/commonjs/processor.d.ts",
+          "sha256": "99b119738bf3587bf99fd8c8538f991bcb2e5a12c1aecf4bc42424a95794987a",
+          "bytes": 2788
+        },
+        {
+          "path": "dist/esm/processor.d.ts",
+          "sha256": "99b119738bf3587bf99fd8c8538f991bcb2e5a12c1aecf4bc42424a95794987a",
+          "bytes": 2788
+        },
+        {
+          "path": "src/processor.ts",
+          "sha256": "4dd602f061af7f35dd691d8ea62f8448a92cb8af4394b22f55a51340a6cb00dc",
+          "bytes": 10359
+        },
+        {
+          "path": "dist/commonjs/walker.d.ts",
+          "sha256": "7a928f0850fd99b9dfa11d8f2978bdff726e8d716b160a155e04819b06c9845a",
+          "bytes": 3924
+        },
+        {
+          "path": "dist/esm/walker.d.ts",
+          "sha256": "7a928f0850fd99b9dfa11d8f2978bdff726e8d716b160a155e04819b06c9845a",
+          "bytes": 3924
+        },
+        {
+          "path": "src/walker.ts",
+          "sha256": "22adee340137e4f0636701c99bb5f75fb572d38c91ff5de0b77b80f453c18e4a",
+          "bytes": 14577
+        }
+      ],
+      "original_manifest": {
+        "author": "Isaac Z. Schlueter <i@izs.me> (https://blog.izs.me/)",
+        "name": "glob",
+        "description": "the most correct and second fastest glob implementation in JavaScript",
+        "version": "14.0.3",
+        "type": "module",
+        "tshy": {
+          "selfLink": false,
+          "exports": {
+            "./package.json": "./package.json",
+            "./raw": "./src/index.ts",
+            ".": {
+              "import": {
+                "types": "./dist/esm/index.d.ts",
+                "default": "./dist/esm/index.min.js"
+              },
+              "require": {
+                "types": "./dist/commonjs/index.d.ts",
+                "default": "./dist/commonjs/index.min.js"
+              }
+            }
+          }
+        },
+        "main": "./dist/commonjs/index.min.js",
+        "module": "./dist/esm/index.min.js",
+        "types": "./dist/commonjs/index.d.ts",
+        "exports": {
+          "./package.json": "./package.json",
+          "./raw": {
+            "import": {
+              "types": "./dist/esm/index.d.ts",
+              "default": "./dist/esm/index.js"
+            },
+            "require": {
+              "types": "./dist/commonjs/index.d.ts",
+              "default": "./dist/commonjs/index.js"
+            }
+          },
+          ".": {
+            "import": {
+              "types": "./dist/esm/index.d.ts",
+              "default": "./dist/esm/index.min.js"
+            },
+            "require": {
+              "types": "./dist/commonjs/index.d.ts",
+              "default": "./dist/commonjs/index.min.js"
+            }
+          }
+        },
+        "repository": {
+          "type": "git",
+          "url": "git@github.com:isaacs/node-glob.git"
+        },
+        "files": [
+          "dist",
+          "src"
+        ],
+        "scripts": {
+          "preversion": "npm test",
+          "postversion": "npm publish",
+          "prepublishOnly": "npm run benchclean; git push origin --follow-tags",
+          "prepare": "tshy && bash scripts/build.sh",
+          "pretest": "npm run prepare",
+          "presnap": "npm run prepare",
+          "test": "tap",
+          "snap": "tap",
+          "posttest": "npm run lint",
+          "postsnap": "npm run lint",
+          "format": "prettier --write .",
+          "lint": "oxlint --fix src test",
+          "postlint": "npm run format",
+          "typedoc": "typedoc",
+          "profclean": "rm -f v8.log profile.txt",
+          "test-regen": "npm run profclean && TEST_REGEN=1 node --no-warnings --loader ts-node/esm test/00-setup.ts",
+          "prebench": "npm run prepare",
+          "bench": "bash benchmark.sh",
+          "bench:docker": "bash bench-docker/bench.sh",
+          "preprof": "npm run prepare",
+          "prof": "bash prof.sh",
+          "benchclean": "node benchclean.cjs"
+        },
+        "dependencies": {
+          "minimatch": "^11.0.2",
+          "minipass": "^7.1.3",
+          "path-scurry": "^3.0.0"
+        },
+        "devDependencies": {
+          "@types/node": "^26.6.5",
+          "esbuild": "^0.28.2",
+          "memfs": "^4.80.0",
+          "mkdirp": "^3.0.1",
+          "oxlint": "^1.90.0",
+          "oxlint-tsgolint": "^7.0.2005",
+          "prettier": "^3.9.10",
+          "rimraf": "^6.1.3",
+          "tap": "^21.8.0",
+          "tshy": "^4.1.3",
+          "typedoc": "^0.28.20"
+        },
+        "license": "BlueOak-1.0.0",
+        "funding": {
+          "url": "https://github.com/sponsors/isaacs"
+        },
+        "engines": {
+          "node": "18 || 20 || >=22"
+        },
+        "allowScripts": {
+          "esbuild@0.28.2": true,
+          "file:../../../../developer/isaacs/minimatch": true,
+          "minimatch": true,
+          "file:../../path-scurry": true,
+          "path-scurry": true
+        }
+      },
+      "original_SDK": {
+        "name": "glob",
+        "repository": "isaacs/node-glob",
+        "commit": "fc93fd5dab2bd40ea02681e8a1f027dacca216ce",
+        "archive_sha256": "ae942c04a98570627b0bb86da5c414fd3bfaafe6ac3885e113f603cb77bb0447",
+        "source_payloads": [
+          {
+            "path": ".github/workflows/ci.yml",
+            "mode": "100644",
+            "git_blob": "75b555e65c64452d7c85c0c4ef95b3b62ddf1796",
+            "sha256": "8c542e746fe10893cdc08f6958864eac5a6fdd780b163a90618e4d1e850a8a0c",
+            "bytes": 1338
+          },
+          {
+            "path": ".github/workflows/typedoc.yml",
+            "mode": "100644",
+            "git_blob": "08af735e20f7ba4be351ca4bcefe075d28a9f955",
+            "sha256": "45a51cb5cf72f9a1cc0cab16709b1ae34b2498196e91a5fd8bc7c132d014af87",
+            "bytes": 934
+          },
+          {
+            "path": ".gitignore",
+            "mode": "100644",
+            "git_blob": "304e8d52322a2e970cc1e8ad3f8c0b49a2877c2f",
+            "sha256": "f7bcd433b8989958aa4de082526b3883a488b2f554c40a7c1e4c4292497ddfe9",
+            "bytes": 162
+          },
+          {
+            "path": ".oxlintrc.json",
+            "mode": "100644",
+            "git_blob": "9c5fc08c8ae8d747c83be0b6b56cabcbe540b220",
+            "sha256": "b7e3db8092f9aad73bcab0f0a2ebfca9e7bbdaf574c3d3e4cb7f781174f4a736",
+            "bytes": 5444
+          },
+          {
+            "path": ".prettierignore",
+            "mode": "100644",
+            "git_blob": "cf134510ece8195b0d1c4a0653cfae137ab88611",
+            "sha256": "a19b906ba09812c934c3c831c8d72e4a74e62baccf424955c0f46bda3bc0edfc",
+            "bytes": 201
+          },
+          {
+            "path": ".prettierrc.json",
+            "mode": "100644",
+            "git_blob": "02b40d2aed3930bdaf6602ec0d0a4dbe7b3e5ce2",
+            "sha256": "43ae0d50438fd7e4c4535da4471437e61dbe77d62ae6dc28e91ffe9631e87e5e",
+            "bytes": 234
+          },
+          {
+            "path": ".taprc",
+            "mode": "100644",
+            "git_blob": "c73141c01e19336d009e660f2df7e225a57c081d",
+            "sha256": "4dd3ffed25533ccab8207a6a481aae69204eca69fad7255801fcc43da09958de",
+            "bytes": 27
+          },
+          {
+            "path": ".tshy/build.json",
+            "mode": "100644",
+            "git_blob": "aea1a9e93b5db3468973ebeaad6dac0a77b10c02",
+            "sha256": "67c78efcea9cf62667b0b5d58c3f71524bbaf3b90900c5f6e84f5238c6724382",
+            "bytes": 150
+          },
+          {
+            "path": ".tshy/commonjs.json",
+            "mode": "100644",
+            "git_blob": "7c9db50b6a5c0a35d96484cf9e5032231007060e",
+            "sha256": "5ad5618ec74d4b7bdd38eb66937443b1a28a672e2910dac42047f19f7d341e9a",
+            "bytes": 280
+          },
+          {
+            "path": ".tshy/esm.json",
+            "mode": "100644",
+            "git_blob": "959294a84294938544a6a812f2687508959d1f0f",
+            "sha256": "c4a231bdebef82e5367a7df4d1c03490a4af3ea1144c1d02184816bb483719dc",
+            "bytes": 252
+          },
+          {
+            "path": "AGENTS.md",
+            "mode": "100644",
+            "git_blob": "3051b21e9023aedb78338d15909919cce2c38f9d",
+            "sha256": "4815c3699e00d3f65a629d1827a12a34ad14346a41eb16e0caddf71a5796bdf0",
+            "bytes": 4160
+          },
+          {
+            "path": "CONTRIBUTING.md",
+            "mode": "100644",
+            "git_blob": "559485a6a8ee1bf50bf10b70d9a23cc2da5fb0fd",
+            "sha256": "460dfe4efd9ab5a4cd054e53823be1c525b528eb7345306064115a51ba36f9ac",
+            "bytes": 444
+          },
+          {
+            "path": "LICENSE.md",
+            "mode": "100644",
+            "git_blob": "881248b6d7f0ca2c4f65c41c0af5e02bb0680601",
+            "sha256": "a49c9ba464796f65b59fca3f1e6ca40912df1e859f575383223f7ec6c5baae09",
+            "bytes": 1764
+          },
+          {
+            "path": "README.md",
+            "mode": "100644",
+            "git_blob": "fda27c4e2debe62f499709d5bd59a627fc3cf59f",
+            "sha256": "de369d19fd9add845c9eddac6fdee54c63e3845190fd4047c6cb690d7ee041e0",
+            "bytes": 51235
+          },
+          {
+            "path": "bench-docker/Dockerfile",
+            "mode": "100644",
+            "git_blob": "03b58d40009c65f2c89f24009d24d29b84a49c4f",
+            "sha256": "874d49df18c24cf06fd8e489d2a96b31de2aa533dab2814372f7c706c6952daf",
+            "bytes": 719
+          },
+          {
+            "path": "bench-docker/bench.sh",
+            "mode": "100644",
+            "git_blob": "e18d555535a831e0f033c734b7b720a68a6435ee",
+            "sha256": "89007a609175f821049596fcf0b5ec6e3ca39c142f67c41bc70273b17f8f3cca",
+            "bytes": 1493
+          },
+          {
+            "path": "bench-docker/run.sh",
+            "mode": "100644",
+            "git_blob": "a7ce7bd45b6e6fe872ecee4a425496e9fd41f724",
+            "sha256": "031622d885c649cd128b95be235f5637cbf7c1f47e13d5d521ebe8940ad750f6",
+            "bytes": 427
+          },
+          {
+            "path": "bench-docker/stage.mjs",
+            "mode": "100644",
+            "git_blob": "e080e2ae717581ac13e5faa3eb40a8e9420dcf7c",
+            "sha256": "f0990a6947844749886e3393f7ab398fd2f1efe62dc049fcdef2b8a195a53afc",
+            "bytes": 2568
+          },
+          {
+            "path": "bench-docker/summary.mjs",
+            "mode": "100644",
+            "git_blob": "92c008bb8d559af3499a9d5de482331a75bff70b",
+            "sha256": "085c499f9290eb0ff82e8185833a37add902351fbc487d6ee9283222cf6d458a",
+            "bytes": 2193
+          },
+          {
+            "path": "benchclean.cjs",
+            "mode": "100644",
+            "git_blob": "d768826ac719f6cb24758986e16a11d9afaa38d4",
+            "sha256": "3e0b01ac39c0b0019d5e80a75f39b260efbf124880add258bebbf249deabc1fc",
+            "bytes": 86
+          },
+          {
+            "path": "benchmark.sh",
+            "mode": "100644",
+            "git_blob": "636e213e254557f9f336274565b38ca24dcec04f",
+            "sha256": "5e4a40b810d7dd4ef1e20e4b887b990433072c9c0523ab8e72bd6ca37ee5a737",
+            "bytes": 6216
+          },
+          {
+            "path": "changelog.md",
+            "mode": "100644",
+            "git_blob": "72d85c20bd62088b1a71177fb3b053216b8fb041",
+            "sha256": "b9885b25f5d3e61ddd53bf183e3b9a73c538ed29fcc72e4a7abf6730206768e2",
+            "bytes": 10169
+          },
+          {
+            "path": "examples/g.js",
+            "mode": "100644",
+            "git_blob": "9aeb8b3f3a3ce7a94d4aa364fd453754aae7e6a7",
+            "sha256": "19ba77dca5bada9149c4963142c7c6fef7834cc83c5f2af9997977c52532db10",
+            "bytes": 238
+          },
+          {
+            "path": "examples/usr-local.js",
+            "mode": "100644",
+            "git_blob": "1e99c6d1f2ebfb37068e16be739eb216c2aad45a",
+            "sha256": "97859c9da24014ad04b30c151f8d74438b63a827da1993b4d7152ce9fa2e1b90",
+            "bytes": 220
+          },
+          {
+            "path": "logo/glob-solo.png",
+            "mode": "100644",
+            "git_blob": "22db7f4fb2000cbb282e0129532df7271e0baa44",
+            "sha256": "71e6ca1a2a983cd81a0fae62dffc835f6cff96f0c5e9fad98cc96a84864107a1",
+            "bytes": 197457
+          },
+          {
+            "path": "logo/glob.png",
+            "mode": "100644",
+            "git_blob": "342a5ea6b9c520e162edf975420a4f45c541f51d",
+            "sha256": "be4f80425a9ed7609f84b3afcc5b177f5109b2bb22ce567c1e01ff75dc3c3992",
+            "bytes": 103097
+          },
+          {
+            "path": "logo/glob.svg",
+            "mode": "100644",
+            "git_blob": "70217db507a36d97ff40317ec4f7eb2534669b58",
+            "sha256": "54bfea990cf48bd1d4950a99cdc3457eaf62381a62f013059130da72db4c6516",
+            "bytes": 129190
+          },
+          {
+            "path": "make-benchmark-fixture.sh",
+            "mode": "100644",
+            "git_blob": "d7bb690370e5cf35c4ff81358374d71a955e6127",
+            "sha256": "86c7b8c2ee31a80dcbc24a5e6e6e205b2684ae339a0c4bcd7799dd32be7d3a1b",
+            "bytes": 750
+          },
+          {
+            "path": "oh-my-glob.gif",
+            "mode": "100644",
+            "git_blob": "a1568c13ca695563f97e3910e34f1a47d5657f4e",
+            "sha256": "1d3209576b97aaf28816f95a7b41b7469765a87cbf543a5f6ae70af79bec944a",
+            "bytes": 510360
+          },
+          {
+            "path": "package-lock.json",
+            "mode": "100644",
+            "git_blob": "bccca200112f27fccb03748a5c15805e42dff9e4",
+            "sha256": "8f9395e979530f634156bf417c492d3aa035cbf244fcf4e55a34086d367f57b7",
+            "bytes": 192751
+          },
+          {
+            "path": "package.json",
+            "mode": "100644",
+            "git_blob": "ef42b73f6df4636f09dfc7d4ea38acb595e0c2e6",
+            "sha256": "89a2a1a6fe096f20e0a4d3d4817c1c487afd1f0bf80d5f73be9085f8e95f2939",
+            "bytes": 3106
+          },
+          {
+            "path": "patterns.sh",
+            "mode": "100644",
+            "git_blob": "12f2d9072d5872033189725c978c2b55e224bf59",
+            "sha256": "84562564cb63ce6cb184b7e88851d88db207eabf682e50ebd31923f38bd5caf2",
+            "bytes": 1473
+          },
+          {
+            "path": "prof.sh",
+            "mode": "100644",
+            "git_blob": "5a4ddde20167bc508d671bec5ada65683966bf61",
+            "sha256": "8333f5c6ac4d5c7c275d9bc465ef4b13797915d71c7b15d6a7d3054ba91a8749",
+            "bytes": 630
+          },
+          {
+            "path": "scripts/build.sh",
+            "mode": "100644",
+            "git_blob": "66897ccc6c1e13d2b88251c5ccce83dc496dc018",
+            "sha256": "aaf080c7207083b19890e00840f14077becdb17794dd3c711df16e1dad0a8342",
+            "bytes": 314
+          },
+          {
+            "path": "scripts/make-big-tree.js",
+            "mode": "100644",
+            "git_blob": "a254377143dbeb3d01db3424f86d8dca11e180af",
+            "sha256": "da2cc9d24c380c6ccfe6bd24901d2842738d03b5b030098f46342cab6ba3b82c",
+            "bytes": 1508
+          },
+          {
+            "path": "src/glob.ts",
+            "mode": "100644",
+            "git_blob": "f2201022921a351a6d142cdef5f6b99c74dee04a",
+            "sha256": "d9b32c0a625821ba456cb89078371981367c447886f69be4434f50276586d2f5",
+            "bytes": 20952
+          },
+          {
+            "path": "src/has-magic.ts",
+            "mode": "100644",
+            "git_blob": "8a27b896b496a2bedd5aa3efa77ccdfbcadd51e4",
+            "sha256": "7d17a8405405bae511e48f8d968c0d94587ac8ccb2d653a2e63e177fde985cdf",
+            "bytes": 915
+          },
+          {
+            "path": "src/ignore.ts",
+            "mode": "100644",
+            "git_blob": "ddc8db7edba9defa8149ca3ae0e195c08d4a1674",
+            "sha256": "d5d9605388cda60ad0d10f3f184d7df1fca99ede9446dc2a86cb133b38b168ab",
+            "bytes": 4954
+          },
+          {
+            "path": "src/index.ts",
+            "mode": "100644",
+            "git_blob": "4adb8e373bf785a46c8e92daaafedf9cd1196208",
+            "sha256": "01a48c4c5e56b0f640e5eff85b6faa291be6cfd8761a186e079f9f6c8a6f1396",
+            "bytes": 6352
+          },
+          {
+            "path": "src/pattern.ts",
+            "mode": "100644",
+            "git_blob": "472513df902898767645ab764e7de0973d37157b",
+            "sha256": "c3964e5ef73710d4190efb09d5cb3ec2b51003a47ae7f9a3e8d0bdc53ea89e5a",
+            "bytes": 8108
+          },
+          {
+            "path": "src/processor.ts",
+            "mode": "100644",
+            "git_blob": "d6f491896cb258139cf56d1b25257d42d7012f9c",
+            "sha256": "4dd602f061af7f35dd691d8ea62f8448a92cb8af4394b22f55a51340a6cb00dc",
+            "bytes": 10359
+          },
+          {
+            "path": "src/walker.ts",
+            "mode": "100644",
+            "git_blob": "34f076653684c3c2bc64c2ddc9ceeb8ca340a7a9",
+            "sha256": "22adee340137e4f0636701c99bb5f75fb572d38c91ff5de0b77b80f453c18e4a",
+            "bytes": 14577
+          },
+          {
+            "path": "tap-snapshots/test/bin.ts.test.cjs",
+            "mode": "100644",
+            "git_blob": "d8def9d7388b41dea31d644de27a58fb67508808",
+            "sha256": "6831266c4e4cc8933c1717f7b99105b52b141d2e1078b4b74387adf3d039c28b",
+            "bytes": 10185
+          },
+          {
+            "path": "tap-snapshots/test/pattern.ts.test.cjs",
+            "mode": "100644",
+            "git_blob": "450fccc23cf484a7c4cb44afb21db7ab5ebeca7d",
+            "sha256": "29fc43c3dc08af88182c6c7f43f7c9d7b22db729300a2356e0f6e77084fec536",
+            "bytes": 463
+          },
+          {
+            "path": "tap-snapshots/test/root.ts.test.cjs",
+            "mode": "100644",
+            "git_blob": "f8c79efbf562548a019ec74d56a39fc1094e1047",
+            "sha256": "3f164d9b44dab406c151cb750a2598404adaf0b8e7b3275f42daa5f9625444eb",
+            "bytes": 2845
+          },
+          {
+            "path": "test/00-setup.ts",
+            "mode": "100644",
+            "git_blob": "05cfaf991b3e95122f67ffdd1b9ce80ec9c368db",
+            "sha256": "dd24a1a6ced8b5ed5ff14d318d6797ea7eb6958d957665c6e8259da5ccea6d3f",
+            "bytes": 5250
+          },
+          {
+            "path": "test/absolute-must-be-strings.ts",
+            "mode": "100644",
+            "git_blob": "72ec30d4007bfd314460465fb07a8a2f9b6175d2",
+            "sha256": "e3f5a052a9e28a2a8fa0cf18faa1b7fcea7337ee3d412aa14556505ad7fdd1b6",
+            "bytes": 152
+          },
+          {
+            "path": "test/absolute.ts",
+            "mode": "100644",
+            "git_blob": "baea28fa4c59bae8087787db62203629c047c82a",
+            "sha256": "9ecf27ab257bb2acdc8d82d3e43eca45fb6f9cbd0d2670f6bd9c194bb5b8ca67",
+            "bytes": 1275
+          },
+          {
+            "path": "test/bash-comparison.ts",
+            "mode": "100644",
+            "git_blob": "10fcb74d130c114c94ad5fc79be2c4877c58e213",
+            "sha256": "ed74fffc8b778fcc4bdc00cd353de425f1a5fec0c08b27a1035aef5f975216fd",
+            "bytes": 1733
+          },
+          {
+            "path": "test/bash-results.ts",
+            "mode": "100644",
+            "git_blob": "a1753a3d3cea9d644f9a77c820b943563dc0e253",
+            "sha256": "3b98791547060860238e88444631001f5a8822fe04bf68441737ec22f0c12c7a",
+            "bytes": 4773
+          },
+          {
+            "path": "test/broken-symlink.ts",
+            "mode": "100644",
+            "git_blob": "0e2a5464283bb725e683f8bee3e89efa0e0d45ac",
+            "sha256": "6521c2c9e94dab27cfec038a451947cf7bb3c809d0821bbcab20ee6630735cc9",
+            "bytes": 1529
+          },
+          {
+            "path": "test/custom-fs.ts",
+            "mode": "100644",
+            "git_blob": "fcf812af3e2015eb585e8b5d049831299935d127",
+            "sha256": "3fa39679ec83b07f108f84a2c085cbc522875523d63cb4be03a0b479b97bd0a9",
+            "bytes": 561
+          },
+          {
+            "path": "test/custom-ignore.ts",
+            "mode": "100644",
+            "git_blob": "eea3f686fc5226042b78eb91bcbf61855d23c958",
+            "sha256": "ab323b40945769f96696976cba17bb0e2325cef0ad8dfd3ca96b40d882575ddb",
+            "bytes": 1537
+          },
+          {
+            "path": "test/cwd-noent.ts",
+            "mode": "100644",
+            "git_blob": "dfb7d4324304b81f197610a30d8f1122a71af0db",
+            "sha256": "a7b58bc1233291ed636f28dd267f4b9f228a4d147062a54270559d985a777853",
+            "bytes": 1675
+          },
+          {
+            "path": "test/cwd-test.ts",
+            "mode": "100644",
+            "git_blob": "404324f0f6453931de02ecfa3460a22e6fa3ef1f",
+            "sha256": "ad6ec5da26fdd8256b7959374346f24c64c41ae99a0e4ac437892b0f35ec5f1d",
+            "bytes": 1520
+          },
+          {
+            "path": "test/dot-relative.ts",
+            "mode": "100644",
+            "git_blob": "7eb1b289e945622079350d28e7bcf5f1161faeff",
+            "sha256": "67feee17bf49706c8ce14f26dd0576869790fcb600beb1d03d0f14c2a48a0262",
+            "bytes": 2124
+          },
+          {
+            "path": "test/empty-set.ts",
+            "mode": "100644",
+            "git_blob": "f940680f841214e0bc18bb298689aad68a689efe",
+            "sha256": "3486ba076691c93aa83120b73c2718ac42c8a17df9613841b9c5a04e76103045",
+            "bytes": 387
+          },
+          {
+            "path": "test/escape.ts",
+            "mode": "100644",
+            "git_blob": "53e0bc8a4d5861ede6d0f6806c6ce6299e9afe81",
+            "sha256": "22d154b5ab9865d62126d7495422073aaa3a0c23fdef5b1d0bebe2fc576054b8",
+            "bytes": 759
+          },
+          {
+            "path": "test/follow.ts",
+            "mode": "100644",
+            "git_blob": "8b6f57b44a50080d32ab19a15bab84cf79bf606f",
+            "sha256": "9f137409ca7b2806f5c860afa7d9658658e7c02becef280ce22b15469e33337b",
+            "bytes": 1698
+          },
+          {
+            "path": "test/has-magic.ts",
+            "mode": "100644",
+            "git_blob": "670a5ba938dc7f2f6f6d248647f56d4e8a3ee782",
+            "sha256": "c119d7870f9249209f257bb197307afc11464a2f495e3c03d77daaf94d6f9732",
+            "bytes": 1229
+          },
+          {
+            "path": "test/ignore-root.ts",
+            "mode": "100644",
+            "git_blob": "95776e4f62ab68e7d1714d9b982a350155f1f457",
+            "sha256": "aa63d6dec755bca26b93f21db1dc05524a4d9994190b0e708724d9423861c58e",
+            "bytes": 3447
+          },
+          {
+            "path": "test/ignore.ts",
+            "mode": "100644",
+            "git_blob": "460117b0bcc770ac824180fee753b5f29a2b1d51",
+            "sha256": "e0e3d515e4ed8595f6c314f33c8f361f557d725f2c91069585d84724d6b5a467",
+            "bytes": 7334
+          },
+          {
+            "path": "test/include-child-matches.ts",
+            "mode": "100644",
+            "git_blob": "0e461a5e8387ef74ea71be301b83587ee38b4cc6",
+            "sha256": "cf21fb9f5571fbe607b4d91bcb81f9f1fce3fddccce369437dff48a2ca0ad3d4",
+            "bytes": 1208
+          },
+          {
+            "path": "test/long-unc.ts",
+            "mode": "100644",
+            "git_blob": "92628b2e345f7212d1bc9336409488d867a4130e",
+            "sha256": "d1000216a21ddcb10775c359e46cda9ab0447cf40ddd6c4bb51636de5cced92e",
+            "bytes": 1983
+          },
+          {
+            "path": "test/mark.ts",
+            "mode": "100644",
+            "git_blob": "0f9e26174140b300729bc2917248cba1f8580f71",
+            "sha256": "e8b75389d8ccedf086473b7a7f7e701887f52690f6c309496b19f16489ca9b46",
+            "bytes": 4358
+          },
+          {
+            "path": "test/match-base.ts",
+            "mode": "100644",
+            "git_blob": "32cb2efd74d7f90271f5ee61257df789ed6fd2f4",
+            "sha256": "3a8bb18eb3d96c144da86aaffd813918123272633f543287048f09fb0c333645",
+            "bytes": 2429
+          },
+          {
+            "path": "test/match-parent.ts",
+            "mode": "100644",
+            "git_blob": "3ba39c0a3da3cd733aa022118aa848a8031b754a",
+            "sha256": "5d52a3807e41331578901a1d0ac5574c254472403e3ffcbbbf3be8ce45becdb8",
+            "bytes": 712
+          },
+          {
+            "path": "test/match-root.ts",
+            "mode": "100644",
+            "git_blob": "15f3d1e8fc862a3bf40a9fad24fe14ff5d83aa81",
+            "sha256": "c7f51a21596bebf1b2029185fdf37414a42d894129d9fba667a8bd55bccfefac",
+            "bytes": 278
+          },
+          {
+            "path": "test/max-depth.ts",
+            "mode": "100644",
+            "git_blob": "ec183e864847fe1848e361765d6e87ddf830a5de",
+            "sha256": "e8f331dfc09b6edaa99f648aed038b0c5f2de6e4cdee90ed2c20884995e780c7",
+            "bytes": 2757
+          },
+          {
+            "path": "test/memfs.ts",
+            "mode": "100644",
+            "git_blob": "40bce90c43d4b28c26d8d57a856a8e0ab7d7f9ab",
+            "sha256": "45c69ab1119bbf4187337df2b9a0cf5f52a4ca09da49af5ce588967d416f99d7",
+            "bytes": 1062
+          },
+          {
+            "path": "test/native-fs-glob.ts",
+            "mode": "100644",
+            "git_blob": "605fcd540e6f819d6042845c5b2323145a2cefb1",
+            "sha256": "03b4c93c4ba4be7c377aafc3004b64beae1e8fbab6fa992133fa00e409b7fa70",
+            "bytes": 2821
+          },
+          {
+            "path": "test/nocase-magic-only.ts",
+            "mode": "100644",
+            "git_blob": "699f5ce826a125310773b1d64a731ae4b60faf7a",
+            "sha256": "234fb3aefa369d57eedabf3587f588da0e8f6fe63d15608483b3693142eaa975",
+            "bytes": 376
+          },
+          {
+            "path": "test/nodir.ts",
+            "mode": "100644",
+            "git_blob": "c12c203cb2b3c4fb43915addd77ae2353115460f",
+            "sha256": "179b431c76d6eb262facc26520f85115b0a728689845b44c2d20faef626738bc",
+            "bytes": 1372
+          },
+          {
+            "path": "test/normalize.ts",
+            "mode": "100644",
+            "git_blob": "2e0143d5f788b502a980a0bf5eed09b9cb7f4185",
+            "sha256": "e46c9f3c3c4afa35bac28f1a1e2bcebeeaf0614fc24c29da7b5a6e98fed04e17",
+            "bytes": 1096
+          },
+          {
+            "path": "test/oom.ts",
+            "mode": "100644",
+            "git_blob": "72edd71c216b268c3cef42204e6467c04a6f2f9c",
+            "sha256": "f4c3cbd0d7a0303f3ea8fe427f138e6a9a226a410070b9d780ecc193dc327e06",
+            "bytes": 543
+          },
+          {
+            "path": "test/pattern.ts",
+            "mode": "100644",
+            "git_blob": "f147dcacb375b48b188edc13e8a9291a07254383",
+            "sha256": "f97bf789812cdedb6c9fbb656c73f918cf090e0bd58c26da2b49313338251e07",
+            "bytes": 2222
+          },
+          {
+            "path": "test/platform.ts",
+            "mode": "100644",
+            "git_blob": "7e9bb124b74036c8e2c91c5582a7c96f99ba2a6c",
+            "sha256": "101cb2027614117ada207fb805a85f9c104942a010e70d7dc975bae53b8a84a4",
+            "bytes": 2167
+          },
+          {
+            "path": "test/progra-tilde.ts",
+            "mode": "100644",
+            "git_blob": "91f1025a7303c76c95de9a04dc592d7de1dbf43d",
+            "sha256": "06e425ad47a994e82051decec5a601c264b16c7f9e4b8ef7061fc83e2d7894d9",
+            "bytes": 987
+          },
+          {
+            "path": "test/readme-issue.ts",
+            "mode": "100644",
+            "git_blob": "832c2201d365e7726911a914faa2344b808667a4",
+            "sha256": "769714b4ef0030b78179c6cfc2d149c46413490bf0e069cc010e70e185d38ea8",
+            "bytes": 283
+          },
+          {
+            "path": "test/realpath.ts",
+            "mode": "100644",
+            "git_blob": "c858e3ca9f5090f3bf94a1dddc80f9cb7a7f25c3",
+            "sha256": "f41ebc0fbe2b5dfd078cca639371a565a3d673355cc1becb389450bcc5ff6d69",
+            "bytes": 2925
+          },
+          {
+            "path": "test/root.ts",
+            "mode": "100644",
+            "git_blob": "1f4fab4c698afa56d91d93732c281b90ab27c32c",
+            "sha256": "0f1eb95cc44aacc83517f17ee0b508fab007f3ccfb3526670de5322a18428250",
+            "bytes": 984
+          },
+          {
+            "path": "test/signal.ts",
+            "mode": "100644",
+            "git_blob": "2e7d0b6fb4b71865d49e2d2bd5e5749b25948155",
+            "sha256": "f9265d06667d12c874a62d7d77734b448ef724a7340c926ee709cdd737e471bc",
+            "bytes": 3402
+          },
+          {
+            "path": "test/slash-cwd.ts",
+            "mode": "100644",
+            "git_blob": "1fae9567eb66bf398edd7de6610d639c639e41d6",
+            "sha256": "a406f4df1169edec8920372f1fcf83f0e65bd3c7a6fc272e714faac7eaf86446",
+            "bytes": 644
+          },
+          {
+            "path": "test/stat.ts",
+            "mode": "100644",
+            "git_blob": "1d993ba752379489b721f817cb12c8158b863c8c",
+            "sha256": "a14123731ff3915272a048e5d52097e5d606bc34cf6dbff02fa5f869f4c35d0d",
+            "bytes": 680
+          },
+          {
+            "path": "test/stream.ts",
+            "mode": "100644",
+            "git_blob": "75583c508a99adf52fed3dbf00b6d63b84b1777a",
+            "sha256": "2c43295fb7b7b0002bb74cfa276da2bbbf01e8579ffd366195f0f7aced9b81b4",
+            "bytes": 6499
+          },
+          {
+            "path": "test/url-cwd.ts",
+            "mode": "100644",
+            "git_blob": "211a09998df4b43e0d86976633c919e67862ef58",
+            "sha256": "e2daec2be29485a6a30131a8f3e3733aefdc62e90e1d192b6a00831f6ae3067c",
+            "bytes": 497
+          },
+          {
+            "path": "test/windows-paths-fs.ts",
+            "mode": "100644",
+            "git_blob": "a90adc259ca7ad2465c4b14066390ac56445a071",
+            "sha256": "e5247e11e1058d33b80a765f4ee6bcc7404d9bf4b231807834881fc1121f8fb2",
+            "bytes": 1743
+          },
+          {
+            "path": "test/windows-paths-no-escape.ts",
+            "mode": "100644",
+            "git_blob": "ac2c266fd3ed09e6fa807f34d08faafe0cbe2561",
+            "sha256": "daf10ca02812feb5f2c6ae0571d71d65b9dca01b2cf1ad175ebe1e70a90ac91d",
+            "bytes": 1267
+          },
+          {
+            "path": "tsconfig.json",
+            "mode": "100644",
+            "git_blob": "8155e22e7d413ca54bee93b86e453b51409c8646",
+            "sha256": "a28bd489ed866d35bcbff6369440de3cbf9c16ae136d81989cdcff84fa844a95",
+            "bytes": 485
+          },
+          {
+            "path": "typedoc.json",
+            "mode": "100644",
+            "git_blob": "4e7bace04ed9783b6177c698aecaea0c00309af5",
+            "sha256": "17a7a710aaa2ba8921889ff2e5a12cf4ee30d96cd700579f29312127e8ad3979",
+            "bytes": 220
+          }
+        ],
+        "original_case_helper_fixture_snapshot_paths": [
+          "tap-snapshots/test/bin.ts.test.cjs",
+          "tap-snapshots/test/pattern.ts.test.cjs",
+          "tap-snapshots/test/root.ts.test.cjs",
+          "test/00-setup.ts",
+          "test/absolute-must-be-strings.ts",
+          "test/absolute.ts",
+          "test/bash-comparison.ts",
+          "test/bash-results.ts",
+          "test/broken-symlink.ts",
+          "test/custom-fs.ts",
+          "test/custom-ignore.ts",
+          "test/cwd-noent.ts",
+          "test/cwd-test.ts",
+          "test/dot-relative.ts",
+          "test/empty-set.ts",
+          "test/escape.ts",
+          "test/follow.ts",
+          "test/has-magic.ts",
+          "test/ignore-root.ts",
+          "test/ignore.ts",
+          "test/include-child-matches.ts",
+          "test/long-unc.ts",
+          "test/mark.ts",
+          "test/match-base.ts",
+          "test/match-parent.ts",
+          "test/match-root.ts",
+          "test/max-depth.ts",
+          "test/memfs.ts",
+          "test/native-fs-glob.ts",
+          "test/nocase-magic-only.ts",
+          "test/nodir.ts",
+          "test/normalize.ts",
+          "test/oom.ts",
+          "test/pattern.ts",
+          "test/platform.ts",
+          "test/progra-tilde.ts",
+          "test/readme-issue.ts",
+          "test/realpath.ts",
+          "test/root.ts",
+          "test/signal.ts",
+          "test/slash-cwd.ts",
+          "test/stat.ts",
+          "test/stream.ts",
+          "test/url-cwd.ts",
+          "test/windows-paths-fs.ts",
+          "test/windows-paths-no-escape.ts"
+        ],
+        "original_manifest": {
+          "author": "Isaac Z. Schlueter <i@izs.me> (https://blog.izs.me/)",
+          "name": "glob",
+          "description": "the most correct and second fastest glob implementation in JavaScript",
+          "version": "14.0.3",
+          "type": "module",
+          "tshy": {
+            "selfLink": false,
+            "exports": {
+              "./package.json": "./package.json",
+              "./raw": "./src/index.ts",
+              ".": {
+                "import": {
+                  "types": "./dist/esm/index.d.ts",
+                  "default": "./dist/esm/index.min.js"
+                },
+                "require": {
+                  "types": "./dist/commonjs/index.d.ts",
+                  "default": "./dist/commonjs/index.min.js"
+                }
+              }
+            }
+          },
+          "main": "./dist/commonjs/index.min.js",
+          "module": "./dist/esm/index.min.js",
+          "types": "./dist/commonjs/index.d.ts",
+          "exports": {
+            "./package.json": "./package.json",
+            "./raw": {
+              "import": {
+                "types": "./dist/esm/index.d.ts",
+                "default": "./dist/esm/index.js"
+              },
+              "require": {
+                "types": "./dist/commonjs/index.d.ts",
+                "default": "./dist/commonjs/index.js"
+              }
+            },
+            ".": {
+              "import": {
+                "types": "./dist/esm/index.d.ts",
+                "default": "./dist/esm/index.min.js"
+              },
+              "require": {
+                "types": "./dist/commonjs/index.d.ts",
+                "default": "./dist/commonjs/index.min.js"
+              }
+            }
+          },
+          "repository": {
+            "type": "git",
+            "url": "git@github.com:isaacs/node-glob.git"
+          },
+          "files": [
+            "dist",
+            "src"
+          ],
+          "scripts": {
+            "preversion": "npm test",
+            "postversion": "npm publish",
+            "prepublishOnly": "npm run benchclean; git push origin --follow-tags",
+            "prepare": "tshy && bash scripts/build.sh",
+            "pretest": "npm run prepare",
+            "presnap": "npm run prepare",
+            "test": "tap",
+            "snap": "tap",
+            "posttest": "npm run lint",
+            "postsnap": "npm run lint",
+            "format": "prettier --write .",
+            "lint": "oxlint --fix src test",
+            "postlint": "npm run format",
+            "typedoc": "typedoc",
+            "profclean": "rm -f v8.log profile.txt",
+            "test-regen": "npm run profclean && TEST_REGEN=1 node --no-warnings --loader ts-node/esm test/00-setup.ts",
+            "prebench": "npm run prepare",
+            "bench": "bash benchmark.sh",
+            "bench:docker": "bash bench-docker/bench.sh",
+            "preprof": "npm run prepare",
+            "prof": "bash prof.sh",
+            "benchclean": "node benchclean.cjs"
+          },
+          "dependencies": {
+            "minimatch": "^11.0.2",
+            "minipass": "^7.1.3",
+            "path-scurry": "^3.0.0"
+          },
+          "devDependencies": {
+            "@types/node": "^26.6.5",
+            "esbuild": "^0.28.2",
+            "memfs": "^4.80.0",
+            "mkdirp": "^3.0.1",
+            "oxlint": "^1.90.0",
+            "oxlint-tsgolint": "^7.0.2005",
+            "prettier": "^3.9.10",
+            "rimraf": "^6.1.3",
+            "tap": "^21.8.0",
+            "tshy": "^4.1.3",
+            "typedoc": "^0.28.20"
+          },
+          "license": "BlueOak-1.0.0",
+          "funding": {
+            "url": "https://github.com/sponsors/isaacs"
+          },
+          "engines": {
+            "node": "18 || 20 || >=22"
+          },
+          "allowScripts": {
+            "esbuild@0.28.2": true,
+            "file:../../../../developer/isaacs/minimatch": true,
+            "minimatch": true,
+            "file:../../path-scurry": true,
+            "path-scurry": true
+          }
+        },
+        "original_SDK_cases_executed": false
+      },
+      "vendor_path": "vendor/owned-glob",
+      "consumer_dependency_links": {
+        "minimatch": "minimatch"
+      },
+      "candidate_manifest": {
+        "author": "Isaac Z. Schlueter <i@izs.me> (https://blog.izs.me/)",
+        "name": "glob",
+        "description": "the most correct and second fastest glob implementation in JavaScript",
+        "version": "14.0.3+owned.currentgraph.2",
+        "type": "module",
+        "tshy": {
+          "selfLink": false,
+          "exports": {
+            "./package.json": "./package.json",
+            "./raw": "./src/index.ts",
+            ".": {
+              "import": {
+                "types": "./dist/esm/index.d.ts",
+                "default": "./dist/esm/index.min.js"
+              },
+              "require": {
+                "types": "./dist/commonjs/index.d.ts",
+                "default": "./dist/commonjs/index.min.js"
+              }
+            }
+          }
+        },
+        "main": "./dist/commonjs/index.min.js",
+        "module": "./dist/esm/index.min.js",
+        "types": "./dist/commonjs/index.d.ts",
+        "exports": {
+          "./package.json": "./package.json",
+          "./raw": {
+            "import": {
+              "types": "./dist/esm/index.d.ts",
+              "default": "./dist/esm/index.js"
+            },
+            "require": {
+              "types": "./dist/commonjs/index.d.ts",
+              "default": "./dist/commonjs/index.js"
+            }
+          },
+          ".": {
+            "import": {
+              "types": "./dist/esm/index.d.ts",
+              "default": "./dist/esm/index.min.js"
+            },
+            "require": {
+              "types": "./dist/commonjs/index.d.ts",
+              "default": "./dist/commonjs/index.min.js"
+            }
+          }
+        },
+        "repository": {
+          "type": "git",
+          "url": "git@github.com:isaacs/node-glob.git"
+        },
+        "files": [
+          "dist",
+          "src"
+        ],
+        "scripts": {
+          "preversion": "npm test",
+          "postversion": "npm publish",
+          "prepublishOnly": "npm run benchclean; git push origin --follow-tags",
+          "prepare": "tshy && bash scripts/build.sh",
+          "pretest": "npm run prepare",
+          "presnap": "npm run prepare",
+          "test": "tap",
+          "snap": "tap",
+          "posttest": "npm run lint",
+          "postsnap": "npm run lint",
+          "format": "prettier --write .",
+          "lint": "oxlint --fix src test",
+          "postlint": "npm run format",
+          "typedoc": "typedoc",
+          "profclean": "rm -f v8.log profile.txt",
+          "test-regen": "npm run profclean && TEST_REGEN=1 node --no-warnings --loader ts-node/esm test/00-setup.ts",
+          "prebench": "npm run prepare",
+          "bench": "bash benchmark.sh",
+          "bench:docker": "bash bench-docker/bench.sh",
+          "preprof": "npm run prepare",
+          "prof": "bash prof.sh",
+          "benchclean": "node benchclean.cjs"
+        },
+        "dependencies": {
+          "minimatch": "file:../owned-minimatch",
+          "minipass": "^7.1.3",
+          "path-scurry": "^3.0.0"
+        },
+        "devDependencies": {
+          "@types/node": "^26.6.5",
+          "esbuild": "^0.28.2",
+          "memfs": "^4.80.0",
+          "mkdirp": "^3.0.1",
+          "oxlint": "^1.90.0",
+          "oxlint-tsgolint": "^7.0.2005",
+          "prettier": "^3.9.10",
+          "rimraf": "^6.1.3",
+          "tap": "^21.8.0",
+          "tshy": "^4.1.3",
+          "typedoc": "^0.28.20"
+        },
+        "license": "BlueOak-1.0.0",
+        "funding": {
+          "url": "https://github.com/sponsors/isaacs"
+        },
+        "engines": {
+          "node": "18 || 20 || >=22"
+        },
+        "allowScripts": {
+          "esbuild@0.28.2": true,
+          "file:../../../../developer/isaacs/minimatch": true,
+          "minimatch": true,
+          "file:../../path-scurry": true,
+          "path-scurry": true
+        },
+        "private": true
       }
     }
   ],
   "current_glob": "14.0.3",
   "current_path_scurry": "3.0.0",
-  "original_case_helper_fixture_snapshot_paths": 212,
-  "original_SDK_payloads": 319,
-  "publisher_payloads": 411,
+  "original_case_helper_fixture_snapshot_paths": 300,
+  "original_SDK_payloads": 508,
+  "publisher_payloads": 533,
   "full_original_parent_SDK_cases_executed": false,
   "SDK_original_case_or_command_changes": false,
-  "override_alias_force_or_application_adoption": false
+  "override_alias_force_or_application_adoption": false,
+  "current_balanced_match": "5.0.0"
 }
