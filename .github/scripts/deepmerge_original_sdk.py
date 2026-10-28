@@ -41,6 +41,8 @@ assert original_manifest['scripts']==descriptor['original_scripts']==descriptor[
 if variant=='candidate':
     candidate=descriptor['candidate_index'].encode();assert hashlib.sha256(candidate).hexdigest()==descriptor['candidate_index_sha256']
     (sdk/'index.js').write_bytes(candidate)
+    declaration=descriptor['candidate_declaration'].encode();assert hashlib.sha256((sdk/'index.d.ts').read_bytes()).hexdigest()==descriptor['original_declaration_sha256'] and hashlib.sha256(declaration).hexdigest()==descriptor['candidate_declaration_sha256']
+    (sdk/'index.d.ts').write_bytes(declaration)
 else:assert hashlib.sha256((sdk/'index.js').read_bytes()).hexdigest()==descriptor['original_index_sha256']
 sdk_before={name:hashlib.sha256((sdk/name).read_bytes()).hexdigest() for name in expected if name!='package-lock.json'}
 save('SDK-source-before.json',sdk_before)
@@ -116,6 +118,8 @@ if install==0:
 unchanged={}
 for name,row in expected.items():
     if name in ['index.js','package.json','rollup.config.js','package-lock.json']:continue
+    if variant=='candidate' and name=='index.d.ts':
+        assert hashlib.sha256((sdk/name).read_bytes()).hexdigest()==descriptor['candidate_declaration_sha256'];continue
     assert hashlib.sha256((sdk/name).read_bytes()).hexdigest()==row['sha256'],name
     unchanged[name]=row
 save('original-protected-source-after.json',unchanged)

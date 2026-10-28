@@ -304,9 +304,10 @@
   "node": "26.12.1",
   "npm": "12.2.1",
   "production_changes": [
+    "index.d.ts",
     "index.js",
-    "rollup.config.js",
-    "package.json"
+    "package.json",
+    "rollup.config.js"
   ],
   "original_case_helper_assertion_fixture_selector_timeout_command_changes": [],
   "complete_SDK_or_parent_adoption_qualified": false,
@@ -755,5 +756,8 @@
       ],
       "other_runtime_cases_helpers_commands_unchanged": true
     }
-  ]
+  ],
+  "candidate_declaration": "declare function deepmerge<T>(x: Partial<T>, y: Partial<T>, options?: deepmerge.Options): T;\ndeclare function deepmerge<T1, T2>(x: Partial<T1>, y: Partial<T2>, options?: deepmerge.Options): T1 & T2;\n\ndeclare namespace deepmerge {\n\texport interface Options {\n\t\tarrayMerge?(target: any[], source: any[], options: ArrayMergeOptions): any[];\n\t\tclone?: boolean;\n\t\tcustomMerge?: (key: string, options?: Options) => ((x: any, y: any) => any) | undefined;\n\t\tisMergeableObject?(value: object): boolean;\n\t}\n\texport interface ArrayMergeOptions {\n\t\tisMergeableObject(value: object): boolean;\n\t\tcloneUnlessOtherwiseSpecified(value: object, options?: Options): object;\n\t}\n\n\texport function all (objects: object[], options?: Options): object;\n\texport function all<T> (objects: Partial<T>[], options?: Options): T;\n}\n\nexport = deepmerge;\n",
+  "original_declaration_sha256": "146ba4b99c5feb82663e17a671bf9f53bb39c704cd76345d6c5a801c26372f44",
+  "candidate_declaration_sha256": "829e945f1e195267f4fe7aa707e06feb76f66d8fa4a30c95c2c05008db6ecc5b"
 }
