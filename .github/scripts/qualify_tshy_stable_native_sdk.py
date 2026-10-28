@@ -70,8 +70,21 @@ if installed:
         tool=sdk/'dist/esm/bin-min.mjs';assert tool.is_file()
         for selector in ['tsc','tsgo']:
             project=temporary/('owned-'+selector);(project/'src').mkdir(parents=True)
-            package={'name':'owned-native-client','version':'1.0.0','private':True,'type':'module','tshy':{'compiler':selector,'exports':{'.':'./src/index.ts'}}}
+            package={'name':'owned-native-client','version':'1.0.0','private':True,'type':'module','devDependencies':{'@types/node':manifest['devDependencies']['@types/node'],'typescript':'7.0.2'},'tshy':{'compiler':selector,'exports':{'.':'./src/index.ts'}}}
             (project/'package.json').write_bytes((json.dumps(package,indent=2)+'\n').encode());(project/'src/index.ts').write_bytes(b'export const twice = (value: number): number => value * 2\n')
+            client_metadata=run('owned-'+selector+'-normal-client-metadata',['npm','install','--package-lock-only','--ignore-scripts','--strict-peer-deps'],cwd=project)
+            if client_metadata==0 and (project/'package-lock.json').is_file():
+                client_lock=json.loads((project/'package-lock.json').read_bytes());client_rows=[]
+                for name,r in client_lock['packages'].items():
+                    if not name:continue
+                    assert 'node_modules/' in name and not r.get('link') and r.get('version')
+                    client_rows.append({'path':selector+'-client/'+name,'name':name.rsplit('node_modules/',1)[1],'version':r['version']})
+                client_prereleases=[r for r in client_rows if re.search(r'^\d+\.\d+\.\d+-',r['version'])];save('owned-'+selector+'-client-prereleases.json',client_prereleases)
+                rows.extend(client_rows);prereleases.extend(client_prereleases);(out/('owned-'+selector+'-client-package-lock.json')).write_bytes((project/'package-lock.json').read_bytes())
+                if not client_prereleases:
+                    run('owned-'+selector+'-normal-client-frozen-install',['npm','ci','--strict-peer-deps'],cwd=project)
+                    run('owned-'+selector+'-complete-client-audit',['npm','audit','--json'],cwd=project)
+                    run('owned-'+selector+'-complete-client-installed-graph',['npm','ls','--all','--json'],cwd=project)
             built=run('owned-real-'+selector+'-dual-module-build',['node',str(tool)],cwd=project)==0
             evaluated=False
             if built:
