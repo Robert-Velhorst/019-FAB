@@ -142,7 +142,7 @@
       "@types/node": "26.6.5",
       "is-mergeable-object": "1.1.1",
       "is-plain-object": "5.1.0",
-      "jsmd": "2.0.0",
+      "jsmd": "file:vendor/jsmd",
       "rollup": "4.65.1",
       "@rollup/plugin-commonjs": "29.0.3",
       "@rollup/plugin-node-resolve": "16.0.3",
@@ -308,5 +308,451 @@
     "package.json"
   ],
   "original_case_helper_assertion_fixture_selector_timeout_command_changes": [],
-  "complete_SDK_or_parent_adoption_qualified": false
+  "complete_SDK_or_parent_adoption_qualified": false,
+  "verified_source_parents": [
+    {
+      "name": "jsmd",
+      "repository": "vesln/jsmd",
+      "commit": "8aad62e41d8aecf56a684a7322e46813c336d45d",
+      "source_payloads": [
+        {
+          "path": ".circleci/config.yml",
+          "git_blob": "3cf612f978bc8b90d40b6ad4bbd901fff429a17a",
+          "bytes": 814,
+          "mode": "100644"
+        },
+        {
+          "path": ".gitignore",
+          "git_blob": "5f9c2392d29ebe23393bd602325ba8263ea999c3",
+          "bytes": 47,
+          "mode": "100644"
+        },
+        {
+          "path": ".jshintignore",
+          "git_blob": "de4155e6a965e72ca81e401e167372cbb4448ced",
+          "bytes": 42,
+          "mode": "100644"
+        },
+        {
+          "path": ".jshintrc",
+          "git_blob": "0cf0d14fca219e5073869262dc59156513bff34b",
+          "bytes": 74,
+          "mode": "100644"
+        },
+        {
+          "path": ".npmignore",
+          "git_blob": "2ff24ec532241ec134b7a0654e5c55c82919d89d",
+          "bytes": 30,
+          "mode": "100644"
+        },
+        {
+          "path": "CHANGELOG.md",
+          "git_blob": "11f616f028319893ceb63f960b9fed826e60205c",
+          "bytes": 830,
+          "mode": "100644"
+        },
+        {
+          "path": "LICENSE",
+          "git_blob": "bf48e2cfbec73f502de2df6d5ee043903484cf80",
+          "bytes": 1087,
+          "mode": "100644"
+        },
+        {
+          "path": "README.md",
+          "git_blob": "5952bda91e8313b9901dca01b3c7918cdd800beb",
+          "bytes": 3772,
+          "mode": "100644"
+        },
+        {
+          "path": "bin/jsmd",
+          "git_blob": "1b1df9a8763cec987dd0119a8b264650c8018f70",
+          "bytes": 1782,
+          "mode": "100755"
+        },
+        {
+          "path": "examples/error.md",
+          "git_blob": "df5ca17e9df1a7982aa07202f22bd0a175466072",
+          "bytes": 46,
+          "mode": "100644"
+        },
+        {
+          "path": "examples/fs.md",
+          "git_blob": "5d7ccf8de5349f0e272c84299802755356d034df",
+          "bytes": 790,
+          "mode": "100644"
+        },
+        {
+          "path": "examples/harmony.md",
+          "git_blob": "80d618f441eb08f99866935ed9622d79acfd2cee",
+          "bytes": 80,
+          "mode": "100644"
+        },
+        {
+          "path": "examples/math.md",
+          "git_blob": "b716da78a8f49e4c9b4fc0c9fbed95a1103b4c94",
+          "bytes": 806,
+          "mode": "100644"
+        },
+        {
+          "path": "hydro.conf.js",
+          "git_blob": "82fb1f1406260018e12f1d5264fa153199c861da",
+          "bytes": 637,
+          "mode": "100644"
+        },
+        {
+          "path": "lib/jsmd.js",
+          "git_blob": "0e8e76dfc0b6d99c52f305fa1d39104c1c64dc22",
+          "bytes": 1030,
+          "mode": "100644"
+        },
+        {
+          "path": "lib/jsmd/rewriter.js",
+          "git_blob": "46e5a5aa5a5b86aff56eabe142b9c92fd15baa65",
+          "bytes": 3775,
+          "mode": "100644"
+        },
+        {
+          "path": "package-lock.json",
+          "git_blob": "056efab44321c50a20e00fa64de03acd8e11532a",
+          "bytes": 73273,
+          "mode": "100644"
+        },
+        {
+          "path": "package.json",
+          "git_blob": "21518ac9722b66de3a880495b11c5218ed7a02d5",
+          "bytes": 1273,
+          "mode": "100644"
+        },
+        {
+          "path": "test/cli.test.js",
+          "git_blob": "c4d73cb3b3ae46cbf158654c041f6d1eb3dcb0c0",
+          "bytes": 1146,
+          "mode": "100644"
+        },
+        {
+          "path": "test/compile.test.js",
+          "git_blob": "17e8010a41d10568f00f03b7a0cbbfcc883c11d6",
+          "bytes": 488,
+          "mode": "100644"
+        },
+        {
+          "path": "test/compile/ASI.js",
+          "git_blob": "623ab8881c087ce9e1461c4b246bcc9c22cd9a48",
+          "bytes": 129,
+          "mode": "100644"
+        },
+        {
+          "path": "test/compile/ASI.md",
+          "git_blob": "f14c98c836708df6dd7c3b7c3224413ed85a5a66",
+          "bytes": 78,
+          "mode": "100644"
+        },
+        {
+          "path": "test/compile/multi-line.js",
+          "git_blob": "e25bf8e2b78042ce5b6a5b23b1a7a214800662be",
+          "bytes": 102,
+          "mode": "100644"
+        },
+        {
+          "path": "test/compile/multi-line.md",
+          "git_blob": "7cfbd5ee75e9ab41a499b9bd8ea3a62940c6af5e",
+          "bytes": 64,
+          "mode": "100644"
+        },
+        {
+          "path": "test/compile/simple.js",
+          "git_blob": "bc94953aadb651e1cf847e508d35568584d8b60e",
+          "bytes": 131,
+          "mode": "100644"
+        },
+        {
+          "path": "test/compile/simple.md",
+          "git_blob": "1c818489fa589a7ba62c31f407f0462f051eb97f",
+          "bytes": 85,
+          "mode": "100644"
+        },
+        {
+          "path": "test/compile/templates.js",
+          "git_blob": "21148fb04e61ae51da5b48345e33668c83b2bb33",
+          "bytes": 125,
+          "mode": "100644"
+        },
+        {
+          "path": "test/compile/templates.md",
+          "git_blob": "0d23e636cc5157c135ddfdcc45628f2a352490bc",
+          "bytes": 110,
+          "mode": "100644"
+        },
+        {
+          "path": "test/compile/two-statements-on-one-line.js",
+          "git_blob": "6cc00dcf134e484017b2369c1ede7a0e824533c1",
+          "bytes": 159,
+          "mode": "100644"
+        },
+        {
+          "path": "test/compile/two-statements-on-one-line.md",
+          "git_blob": "19290d0850c8e355d205814b01ebe87552993c7c",
+          "bytes": 121,
+          "mode": "100644"
+        },
+        {
+          "path": "test/fixtures/assertions.md",
+          "git_blob": "c2411f09935e735f75bda897ca8097efc3c59b57",
+          "bytes": 276,
+          "mode": "100644"
+        },
+        {
+          "path": "test/fixtures/bad.md",
+          "git_blob": "36d706b32fba1a6980d1e31c3608e3b613c0b96d",
+          "bytes": 35,
+          "mode": "100644"
+        },
+        {
+          "path": "test/fixtures/empty.md",
+          "git_blob": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+          "bytes": 0,
+          "mode": "100644"
+        },
+        {
+          "path": "test/fixtures/es2018.md",
+          "git_blob": "943116aef083eb28ed23df3ebb4b35eec1ec1db3",
+          "bytes": 124,
+          "mode": "100644"
+        },
+        {
+          "path": "test/fixtures/es6.md",
+          "git_blob": "03612dc0af2c0600e948a5a20f436df83a572af4",
+          "bytes": 80,
+          "mode": "100644"
+        },
+        {
+          "path": "test/fixtures/gfm-node-block.md",
+          "git_blob": "e3d9a127e6883c2de86fbf17ac46d6f8ffc43c54",
+          "bytes": 33,
+          "mode": "100644"
+        },
+        {
+          "path": "test/fixtures/iife.md",
+          "git_blob": "c6e0d3cf8467221fa10b1715eaf9e60f6fe4daa1",
+          "bytes": 38,
+          "mode": "100644"
+        },
+        {
+          "path": "test/fixtures/line-comments.md",
+          "git_blob": "4bb61c6b1f423f91f5f6921031aca9e37f959852",
+          "bytes": 60,
+          "mode": "100644"
+        },
+        {
+          "path": "test/fixtures/require.md",
+          "git_blob": "efcc4f4d7362433515cb7bf1f1ea474ffdd117fa",
+          "bytes": 96,
+          "mode": "100644"
+        },
+        {
+          "path": "test/fixtures/ruby.md",
+          "git_blob": "2741b66dd06e85b0b0fe3d22394b8553ff561acc",
+          "bytes": 25,
+          "mode": "100644"
+        },
+        {
+          "path": "test/jsmd.test.js",
+          "git_blob": "812a64e2d185429ec55a15bb096a4d8d54a446a8",
+          "bytes": 1033,
+          "mode": "100644"
+        }
+      ],
+      "original_manifest": {
+        "name": "jsmd",
+        "preferGlobal": true,
+        "version": "2.0.0",
+        "description": "jsmd ensures that you will never have outdated and non-working JavaScript code in your README files.",
+        "main": "./lib/jsmd.js",
+        "homepage": "https://github.com/vesln/jsmd",
+        "scripts": {
+          "test": "_hydro",
+          "pretest": "jshint .",
+          "coverage": "istanbul cover ./node_modules/hydro/bin/_hydro -- --formatter hydro-silent",
+          "coveralls": "istanbul cover ./node_modules/hydro/bin/_hydro --report lcovonly && cat ./coverage/lcov.info | ./node_modules/coveralls/bin/coveralls.js"
+        },
+        "repository": "https://github.com/vesln/jsmd",
+        "bin": {
+          "jsmd": "./bin/jsmd"
+        },
+        "engines": {
+          "node": ">=4.0.0"
+        },
+        "devDependencies": {
+          "chai": "^1.9.1",
+          "coveralls": "~2.3.0",
+          "hydro": "*",
+          "hydro-chai": "*",
+          "hydro-dot": "*",
+          "hydro-silent": "*",
+          "istanbul": "~0.1.44",
+          "jshint": "2.10.2",
+          "nixt": "*"
+        },
+        "author": "Veselin Todorov <hi@vesln.com>",
+        "contributors": [
+          "Kyle E. Mitchell <kyle@kemitchell.com> (https://kemitchell.com/)"
+        ],
+        "license": "MIT",
+        "dependencies": {
+          "escodegen": "^1.9.1",
+          "espree": "^7.0.0",
+          "estraverse": "^4.2.0",
+          "marked": "^0.7.0",
+          "v8-argv": "jkroso/v8-argv#1.1.1"
+        }
+      },
+      "ported_manifest": {
+        "name": "jsmd",
+        "preferGlobal": true,
+        "version": "2.0.0+fab.verified-source.1",
+        "description": "jsmd ensures that you will never have outdated and non-working JavaScript code in your README files.",
+        "main": "./lib/jsmd.js",
+        "homepage": "https://github.com/vesln/jsmd",
+        "scripts": {
+          "test": "_hydro",
+          "pretest": "jshint .",
+          "coverage": "istanbul cover ./node_modules/hydro/bin/_hydro -- --formatter hydro-silent",
+          "coveralls": "istanbul cover ./node_modules/hydro/bin/_hydro --report lcovonly && cat ./coverage/lcov.info | ./node_modules/coveralls/bin/coveralls.js"
+        },
+        "repository": "https://github.com/vesln/jsmd",
+        "bin": {
+          "jsmd": "./bin/jsmd"
+        },
+        "engines": {
+          "node": ">=4.0.0"
+        },
+        "devDependencies": {
+          "chai": "^1.9.1",
+          "coveralls": "~2.3.0",
+          "hydro": "*",
+          "hydro-chai": "*",
+          "hydro-dot": "*",
+          "hydro-silent": "*",
+          "istanbul": "~0.1.44",
+          "jshint": "2.10.2",
+          "nixt": "*"
+        },
+        "author": "Veselin Todorov <hi@vesln.com>",
+        "contributors": [
+          "Kyle E. Mitchell <kyle@kemitchell.com> (https://kemitchell.com/)"
+        ],
+        "license": "MIT",
+        "dependencies": {
+          "escodegen": "2.1.0",
+          "espree": "11.2.0",
+          "estraverse": "5.3.0",
+          "marked": "18.1.2",
+          "v8-argv": "file:../v8-argv"
+        },
+        "private": true
+      },
+      "production_paths_changed": [
+        "package.json"
+      ],
+      "other_runtime_cases_helpers_commands_unchanged": true
+    },
+    {
+      "name": "v8-argv",
+      "repository": "jkroso/v8-argv",
+      "commit": "284f84379e292eb956a5e7b66fb953ec4974385e",
+      "source_payloads": [
+        {
+          "path": ".gitignore",
+          "git_blob": "7cdb628403761385d7ebc939fb2d74507b11ea84",
+          "bytes": 112,
+          "mode": "100644"
+        },
+        {
+          "path": ".npmignore",
+          "git_blob": "8f623183d344a7c2ebb0bd9a501a7d7ca52e767a",
+          "bytes": 61,
+          "mode": "100644"
+        },
+        {
+          "path": ".travis.yml",
+          "git_blob": "b6ca101758fff6342dcee23d3248d0111c007942",
+          "bytes": 76,
+          "mode": "100644"
+        },
+        {
+          "path": "History.md",
+          "git_blob": "94a29ce15afd9cf993f44a301f94aadf626ebb72",
+          "bytes": 479,
+          "mode": "100644"
+        },
+        {
+          "path": "README.md",
+          "git_blob": "ccb4b2a1f27ebf59dabc4b073345da806dfc2615",
+          "bytes": 838,
+          "mode": "100644"
+        },
+        {
+          "path": "index.js",
+          "git_blob": "80dc9575101e4df7e76038dd224bb0020d920bda",
+          "bytes": 1258,
+          "mode": "100644"
+        },
+        {
+          "path": "package.json",
+          "git_blob": "a7055a645c0c0e4cc9ea10d38e43938ab251a2d8",
+          "bytes": 436,
+          "mode": "100644"
+        },
+        {
+          "path": "test.js",
+          "git_blob": "f1c3440aa142e5569feac42f6e50d72e6579d100",
+          "bytes": 784,
+          "mode": "100644"
+        },
+        {
+          "path": "test/bin",
+          "git_blob": "a30801aa6b1a8722ac6e579fbae15fbe7496f12f",
+          "bytes": 217,
+          "mode": "100755"
+        }
+      ],
+      "original_manifest": {
+        "name": "v8-argv",
+        "version": "1.1.1",
+        "description": "Proxy v8 argv (including harmony) to v8/node while forwarding the remaining arguments to a custom script.",
+        "author": "Jake Luer <jake@alogicalparadox.com> (http://alogicalparadox.com)",
+        "license": "WTFPL",
+        "keywords": [
+          "v8",
+          "argv"
+        ],
+        "repository": "git@github.com:logicalparadox/v8-argv.git",
+        "dependencies": {},
+        "devDependencies": {
+          "nixt": "0.4.1"
+        }
+      },
+      "ported_manifest": {
+        "name": "v8-argv",
+        "version": "1.1.1+fab.verified-source.1",
+        "description": "Proxy v8 argv (including harmony) to v8/node while forwarding the remaining arguments to a custom script.",
+        "author": "Jake Luer <jake@alogicalparadox.com> (http://alogicalparadox.com)",
+        "license": "WTFPL",
+        "keywords": [
+          "v8",
+          "argv"
+        ],
+        "repository": "git@github.com:logicalparadox/v8-argv.git",
+        "dependencies": {},
+        "devDependencies": {
+          "nixt": "0.4.1"
+        },
+        "private": true
+      },
+      "production_paths_changed": [
+        "package.json"
+      ],
+      "other_runtime_cases_helpers_commands_unchanged": true
+    }
+  ]
 }

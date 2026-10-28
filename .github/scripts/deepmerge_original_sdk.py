@@ -44,6 +44,28 @@ if variant=='candidate':
 else:assert hashlib.sha256((sdk/'index.js').read_bytes()).hexdigest()==descriptor['original_index_sha256']
 sdk_before={name:hashlib.sha256((sdk/name).read_bytes()).hexdigest() for name in expected if name!='package-lock.json'}
 save('SDK-source-before.json',sdk_before)
+parent_sources={}
+for parent in descriptor.get('verified_source_parents',[]):
+    parent_root=sdk/'vendor'/parent['name'];parent_root.mkdir(parents=True,exist_ok=True)
+    parent_expected={r['path']:r for r in parent['source_payloads']};parent_actual={}
+    parent_url=f'https://codeload.github.com/{parent["repository"]}/tar.gz/{parent["commit"]}'
+    parent_archive=fetch(parent_url,8*1024*1024)
+    with tarfile.open(fileobj=io.BytesIO(parent_archive),mode='r:gz') as stream:
+        for member in stream.getmembers():
+            assert member.isfile() or member.isdir()
+            if not member.isfile():continue
+            parts=pathlib.PurePosixPath(member.name).parts;assert len(parts)>1 and '..' not in parts
+            name='/'.join(parts[1:]);assert name in parent_expected and name not in parent_actual
+            payload=stream.extractfile(member).read();row=parent_expected[name]
+            assert len(payload)==row['bytes'] and hashlib.sha1(b'blob '+str(len(payload)).encode()+b'\0'+payload).hexdigest()==row['git_blob']
+            target=parent_root/name;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(payload)
+            target.chmod(0o755 if row['mode']=='100755' else 0o644)
+            parent_actual[name]={'git_blob':row['git_blob'],'sha256':hashlib.sha256(payload).hexdigest(),'bytes':len(payload)}
+    assert set(parent_actual)==set(parent_expected)
+    assert json.loads((parent_root/'package.json').read_bytes())==parent['original_manifest']
+    (parent_root/'package.json').write_bytes((json.dumps(parent['ported_manifest'],indent=2)+'\n').encode())
+    parent_sources[parent['name']]={'repository':parent['repository'],'commit':parent['commit'],'source_archive_sha256':hashlib.sha256(parent_archive).hexdigest(),'original_payloads':parent_actual,'ported_manifest':parent['ported_manifest'],'source_payload_hashes':{n:hashlib.sha256((parent_root/n).read_bytes()).hexdigest() for n in parent_expected}}
+save('verified-source-parents-before.json',parent_sources)
 save('input.json',{'variant':variant,'source_archive_url':url,'source_archive_sha256':hashlib.sha256(archive).hexdigest(),'publisher_payloads_verified':actual,'original_scripts':original_manifest['scripts'],'node':subprocess.check_output(['node','--version'],text=True).strip(),'npm':subprocess.check_output(['npm','--version'],text=True).strip(),'ported_manifest':descriptor['manifest'],'production_paths_changed':descriptor['production_changes']})
 commands=[]
 def run(label,argv):
@@ -57,6 +79,7 @@ assert subprocess.check_output(['npm','config','get','strict-peer-deps'],text=Tr
 install=run('normal-install',['npm','install'])
 if install==0:
     run('owned-regressions',['node',str(owner/'.github/scripts/deepmerge_owned_regressions.cjs')])
+    (output/'owned-regression-results.json').write_bytes((sdk/'owned-regression-results.json').read_bytes())
     run('original-complete-test-command',['npm','test'])
     run('original-declaration-command',['npm','run','test:typescript'])
     run('original-build-command',['npm','run','build'])
@@ -67,8 +90,14 @@ if install==0:
     save('installed-prerelease-lock-rows.json',prereleases)
     run('actual-installed-graph',['npm','ls','--all','--json'])
     selected=collections.defaultdict(set)
+    source_graph=[]
     for name,row in lock['packages'].items():
         if not name:continue
+        if row.get('link'):
+            assert row['resolved'] in ['vendor/jsmd','vendor/v8-argv'];source_graph.append({'path':name,**row});continue
+        if name in ['vendor/jsmd','vendor/v8-argv']:
+            parent=next(p for p in descriptor['verified_source_parents'] if name=='vendor/'+p['name'])
+            assert row['version']==parent['ported_manifest']['version'];source_graph.append({'path':name,**row});continue
         assert 'node_modules/' in name and row.get('version'),name
         selected[name.rsplit('node_modules/',1)[1]].add(row['version'])
     def public(name):
@@ -80,6 +109,7 @@ if install==0:
             return {'name':name,'source':url,'selected':sorted(selected[name]),'highest_public_non_deprecated_stable':highest,'highest_stable_met':highest is not None and selected[name]=={highest},'response_sha256':hashlib.sha256(raw).hexdigest(),'query':'ok'}
         except Exception as error:return {'name':name,'selected':sorted(selected[name]),'query':'error','error':str(error),'highest_stable_met':False}
     with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:public_rows=list(pool.map(public,sorted(selected)))
+    save('verified-source-parent-installed-lock-records.json',source_graph)
     save('complete-public-graph-comparison.json',{'captured_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'namespace_count':len(public_rows),'query_errors':sum(r['query']!='ok' for r in public_rows),'gap_count':sum(not r['highest_stable_met'] for r in public_rows),'packages':public_rows})
     (output/'generated-package-lock.json').write_bytes((sdk/'package-lock.json').read_bytes())
     save('normal-install-manifest.json',json.loads((sdk/'package.json').read_bytes()))
@@ -92,6 +122,12 @@ save('original-protected-source-after.json',unchanged)
 assert json.loads((sdk/'package.json').read_bytes())['scripts']==descriptor['original_scripts']
 sdk_after={name:hashlib.sha256((sdk/name).read_bytes()).hexdigest() for name in expected if name!='package-lock.json'}
 save('SDK-source-after.json',sdk_after);assert sdk_before==sdk_after
+parent_after={}
+for parent in descriptor.get('verified_source_parents',[]):
+    parent_root=sdk/'vendor'/parent['name']
+    parent_after[parent['name']]={r['path']:hashlib.sha256((parent_root/r['path']).read_bytes()).hexdigest() for r in parent['source_payloads']}
+    assert parent_after[parent['name']]==parent_sources[parent['name']]['source_payload_hashes']
+save('verified-source-parents-after.json',parent_after)
 after=source_snapshot();save('owner-source-after.json',after);assert before==after
 save('terminal.json',{'variant':variant,'commands':commands,'all_original_case_helper_assertion_fixture_selector_timeout_command_bytes_unchanged':True,'all_owner_source_unchanged':True,'no_application_parent_adoption':True,'complete_qualification':install==0 and all(r['exit_code']==0 for r in commands) and not prereleases and all(r['highest_stable_met'] for r in public_rows)})
 assert install==0 and all(r['exit_code']==0 for r in commands),'Original complete commands, owned security regressions, or raw audit failed; all failures retained.'
