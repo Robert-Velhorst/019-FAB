@@ -30,6 +30,19 @@ def tracked():
             for n in names if n and (SDK / n.decode()).is_file()}
 
 
+def effective_policy(stage):
+    values = {}
+    for key in ["minimumReleaseAge", "minimumReleaseAgeStrict", "minimumReleaseAgeExclude",
+                "minimumReleaseAgeIgnoreMissingTime", "strictPeerDependencies", "trustLockfile", "verifyStoreIntegrity"]:
+        raw = subprocess.check_output(["pnpm", "config", "get", key, "--json"], cwd=SDK, text=True).strip()
+        values[key] = None if raw in {"", "undefined"} else json.loads(raw)
+    save("effective-policy-" + stage + ".json", values)
+    assert values["minimumReleaseAge"] == 1440 and values["minimumReleaseAgeStrict"] is True
+    assert values["minimumReleaseAgeIgnoreMissingTime"] is False and not values["minimumReleaseAgeExclude"]
+    assert values["strictPeerDependencies"] is True and values["trustLockfile"] is False
+    assert values["verifyStoreIntegrity"] is True
+
+
 def prepare(profile):
     assert subprocess.check_output(["git", "-C", str(SDK), "rev-parse", "HEAD"], text=True).strip() == COMMIT
     original = tracked()
@@ -76,9 +89,20 @@ def prepare(profile):
     assert root["packageManager"] == "pnpm@10.6.3"
     root_path.write_text(raw.replace('"pnpm@10.6.3"', '"pnpm@12.16.1"'))
     assert json.loads((SDK / "drizzle-kit/package.json").read_bytes())["scripts"] == kit["scripts"]
+    workspace = SDK / "pnpm-workspace.yaml"
+    original_workspace = workspace.read_text()
+    strict_policy = {
+        "minimumReleaseAge": 1440, "minimumReleaseAgeStrict": True,
+        "minimumReleaseAgeIgnoreMissingTime": False, "minimumReleaseAgeExclude": [],
+        "strictPeerDependencies": True, "trustLockfile": False, "verifyStoreIntegrity": True,
+    }
+    assert not any(re.search(r"(?m)^" + key + r":", original_workspace) for key in strict_policy)
+    workspace.write_text(original_workspace.rstrip() + "\n\n# Owned isolated qualification policy; no exclusions or trust bypass.\n" +
+                         "".join(key + ": " + json.dumps(value) + "\n" for key, value in strict_policy.items()))
+    (OUT / "prepared-pnpm-workspace.yaml").write_bytes(workspace.read_bytes())
     save("original-source-hashes.json", original)
     save("prepared-manifest-hashes.json", {name: hashlib.sha256((SDK / name).read_bytes()).hexdigest()
-         for name in current_profile["manifests"]})
+         for name in [*current_profile["manifests"], "pnpm-workspace.yaml"]})
     save("candidate-declaration-changes.json", changed_declarations)
     node = subprocess.check_output(["node", "--version"], text=True).strip()
     pnpm = subprocess.check_output(["pnpm", "--version"], cwd=SDK, text=True).strip()
@@ -90,7 +114,9 @@ def prepare(profile):
          "candidate_changes": "Current stable direct declarations across all ten workspace manifests; every dependency, original peer, historical alias and workspace binding retained",
          "changed_declarations": len(changed_declarations),
          "public_release_names_reviewed": len(current_profile["releases"]),
+         "owned_isolated_workspace_policy": strict_policy,
          "original_SDK_files": 169, "original_test_directory_files": 75, "full_acceptance": False})
+    effective_policy("before")
 
 
 def run(label):
@@ -118,6 +144,8 @@ def run(label):
         (OUT / "resolved-pnpm-lock.yaml").write_bytes(lock)
         record["resolved_lock_sha256"] = hashlib.sha256(lock).hexdigest()
     save(label + "-result.json", record)
+    if label == "resolve":
+        effective_policy("after-resolution")
     assert result.returncode == 0, label + " failed; unmodified output retained"
 
 
@@ -153,6 +181,12 @@ def audit():
          "prepared_manifests_unchanged_after_resolution_or_original_commands": manifest_preservation,
          "all_original_cases_helpers_fixtures_and_commands_unchanged": set(changed) <= allowed and manifest_preservation,
          "full_SDK_or_application_adoption": False})
+    for name in changed:
+        data = (SDK / name).read_bytes()
+        if len(data) <= 4 * 1024 * 1024:
+            destination = OUT / "tracked-changes" / name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(data)
     assert original.keys() == current.keys() and set(changed) <= allowed and manifest_preservation
 
 
