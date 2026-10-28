@@ -8,6 +8,9 @@ on:
       - .github/scripts/tshy-glob-parent-contract.test.mjs
       - .github/scripts/qualify_tshy_stable_native_sdk.py
       - .github/workflows/tshy-stable-native-original-sdk.yml
+      - .github/qualification/typedoc-native-api-experiment.json
+      - .github/scripts/typedoc-native-api-contract.test.mjs
+      - .github/scripts/qualify_typedoc_native_api_probe.py
 permissions:
   contents: read
 jobs:
@@ -40,5 +43,33 @@ jobs:
         with:
           name: tshy-${{ matrix.profile }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: tshy-stable-native-evidence/
+          if-no-files-found: error
+          retention-days: 14
+
+  native-api-experiment:
+    name: Isolated current native compiler API experiment
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      npm_config_engine_strict: 'true'
+      npm_config_strict_peer_deps: 'true'
+      npm_config_legacy_peer_deps: 'false'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26.12.1'
+      - name: Set current stable npm
+        run: npm install --global npm@12.2.1
+      - name: Exercise actual native APIs on isolated synthetic projects
+        run: python .github/scripts/qualify_typedoc_native_api_probe.py
+      - name: Retain complete source, normal commands and unsuppressed results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-api-experiment-${{ github.run_id }}-${{ github.run_attempt }}
+          path: native-api-experiment-evidence/
           if-no-files-found: error
           retention-days: 14
