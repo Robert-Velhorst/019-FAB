@@ -4,6 +4,8 @@ on:
     paths:
       - .github/qualification/tshy-stable-native-original-sdk.json
       - .github/qualification/node-types-current-undici-parent.json
+      - .github/qualification/tshy-current-glob-parent-ports.json
+      - .github/scripts/tshy-glob-parent-contract.test.mjs
       - .github/scripts/qualify_tshy_stable_native_sdk.py
       - .github/workflows/tshy-stable-native-original-sdk.yml
 permissions:
