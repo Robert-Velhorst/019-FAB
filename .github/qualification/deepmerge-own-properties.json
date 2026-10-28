@@ -627,15 +627,15 @@
           "node": ">=4.0.0"
         },
         "devDependencies": {
-          "chai": "^1.9.1",
-          "coveralls": "~2.3.0",
-          "hydro": "*",
-          "hydro-chai": "*",
-          "hydro-dot": "*",
-          "hydro-silent": "*",
-          "istanbul": "~0.1.44",
-          "jshint": "2.10.2",
-          "nixt": "*"
+          "chai": "6.3.0",
+          "coveralls": "3.1.1",
+          "hydro": "0.10.1",
+          "hydro-chai": "0.3.1",
+          "hydro-dot": "2.0.1",
+          "hydro-silent": "1.0.1",
+          "istanbul": "0.4.5",
+          "jshint": "2.13.6",
+          "nixt": "0.5.1"
         },
         "author": "Veselin Todorov <hi@vesln.com>",
         "contributors": [
@@ -745,7 +745,7 @@
         "repository": "git@github.com:logicalparadox/v8-argv.git",
         "dependencies": {},
         "devDependencies": {
-          "nixt": "0.4.1"
+          "nixt": "0.5.1"
         },
         "private": true
       },
