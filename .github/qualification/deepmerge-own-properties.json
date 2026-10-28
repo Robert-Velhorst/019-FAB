@@ -1,0 +1,312 @@
+{
+  "publisher_repository": "TehShrike/deepmerge",
+  "publisher_commit": "5b87756a5671635679001cbac72aa42f23472c81",
+  "publisher_payloads": [
+    {
+      "path": ".editorconfig",
+      "git_blob": "6244e1b7bf4ec9d050cb53b600c9b7f9c376a7bf",
+      "sha256": "73cc38e40b41f1eea6fd2d98d0ade5324f1ad564c3f111ebd0040b4286d2c25c",
+      "bytes": 113
+    },
+    {
+      "path": ".gitignore",
+      "git_blob": "b0fb09f50ffeccb4b2857f9733be4b200942d830",
+      "sha256": "b73e4c5533762dc5957382138b01b7ed4d5696822bbdf61f419ff7c93b18ff8f",
+      "bytes": 20
+    },
+    {
+      "path": ".npmignore",
+      "git_blob": "8dfabbd09477e75dd2cd3eb451f91aee611a4800",
+      "sha256": "5e6027846a113de7463100137a26f93ccc319875f63f796a782fc8c004b7ff71",
+      "bytes": 29
+    },
+    {
+      "path": ".travis.yml",
+      "git_blob": "15fbdae544e0d87ad77c1ab9f0930ca16d7ade1e",
+      "sha256": "305e441540e591df10b5110cbad6316b2ae3f41c540946a71c283767a86574b7",
+      "bytes": 80
+    },
+    {
+      "path": "changelog.md",
+      "git_blob": "082e0dd393f4dcee8668050a850c7e327762f976",
+      "sha256": "360f6a3465a3e82f7bc1428cf1dc0cf5e6935a83b97345d172d27a4d8703321e",
+      "bytes": 9785
+    },
+    {
+      "path": "index.d.ts",
+      "git_blob": "46784de5625a962c3c4c68c8fe16078815cce018",
+      "sha256": "146ba4b99c5feb82663e17a671bf9f53bb39c704cd76345d6c5a801c26372f44",
+      "bytes": 823
+    },
+    {
+      "path": "index.js",
+      "git_blob": "77968aed5d456cccc294f60912ef381fa1e52a7b",
+      "sha256": "12440c84957c1990ea2d5e33dc0091722dc1dc1585c6d20e0c780e568ffa9d30",
+      "bytes": 3293
+    },
+    {
+      "path": "license.txt",
+      "git_blob": "5003078718343fc207823c9f543ef906ac59dcbe",
+      "sha256": "6cfc4687cb2f2d86f4a77e6b526290d3878e5e512f3fec2f4cb36a9cb36f798b",
+      "bytes": 1116
+    },
+    {
+      "path": "package-lock.json",
+      "git_blob": "ca5b240a9d3ef37656524533bd8afc3f47a4fcda",
+      "sha256": "e251e05cef833cde1e306cec8a1f87eaf447a269b9750218c53aa488660501e2",
+      "bytes": 54827
+    },
+    {
+      "path": "package.json",
+      "git_blob": "2b7b1be8c3ad6253396713c5a915eda3fef74462",
+      "sha256": "f56978e7a6da1a3c6edee41abb54f98584a2fa2680458c48db820ae772fef0c9",
+      "bytes": 1152
+    },
+    {
+      "path": "readme.md",
+      "git_blob": "79e4e303b0148748b5ef107e6d7f0afa2d665aa6",
+      "sha256": "202430923abee498512b2f9cbab686a1e7d64759314a503ca0d5aaa29007fc0f",
+      "bytes": 5682
+    },
+    {
+      "path": "rollup.config.js",
+      "git_blob": "8323ab27e53825fc55e052c54a8869de99d8b874",
+      "sha256": "abba48beb11daa282e69134e4928ec32737ae6f6d192dd5f00a6e660e032bb25",
+      "bytes": 343
+    },
+    {
+      "path": "test/custom-array-merge.js",
+      "git_blob": "0a81100eba564b9ae8bb06d64e1b2b89aa00e196",
+      "sha256": "437d8b2f5f6451dc4aab059f9023ed2df78f5e04520aa46d545e9bd45cef9121",
+      "bytes": 1660
+    },
+    {
+      "path": "test/custom-is-mergeable-object.js",
+      "git_blob": "f58bbb80f83f63ae76444e9ae2e8f2ee9202ca28",
+      "sha256": "d04f991a0e88c2cf54d1207641fc93fbf1cb4962cad82c123b21c08015eac1f6",
+      "bytes": 1990
+    },
+    {
+      "path": "test/merge-all.js",
+      "git_blob": "4627e774e35da4b2f51ee455d8b9b31d1cbd27a1",
+      "sha256": "9fe9381aa7dd300b88ed0fd4d1ada6f805cb91c500e87cf6b4fd088423704ab6",
+      "bytes": 2866
+    },
+    {
+      "path": "test/merge.js",
+      "git_blob": "fa2ac5b7901335b3af3b18eb045b5f92c2c708a4",
+      "sha256": "3a22b34fd8724d0d88cfb2dcc8326b96f1ed2f37cf1f64d203b6b97bc3dee13a",
+      "bytes": 13244
+    },
+    {
+      "path": "test/prototype-poisoning.js",
+      "git_blob": "fc79cf35ae9bab7dddc7cbbe6bfd3d53378af746",
+      "sha256": "92bf1738a2405b470f21d2e83fb5701d3a4cd101901ba3a4fc752e5942275b52",
+      "bytes": 2435
+    },
+    {
+      "path": "test/typescript.ts",
+      "git_blob": "23d2c5c3e79374b9bd529d1b277441a42077d4b0",
+      "sha256": "45909c9f6fd0166dc454c721d756ea66859fd37ba895b037705d60ee420a938a",
+      "bytes": 1014
+    }
+  ],
+  "manifest": {
+    "name": "deepmerge",
+    "description": "A library for deep (recursive) merging of Javascript objects",
+    "keywords": [
+      "merge",
+      "deep",
+      "extend",
+      "copy",
+      "clone",
+      "recursive"
+    ],
+    "version": "4.3.1+fab.own-properties.1",
+    "homepage": "https://github.com/TehShrike/deepmerge",
+    "repository": {
+      "type": "git",
+      "url": "git://github.com/TehShrike/deepmerge.git"
+    },
+    "main": "dist/cjs.js",
+    "engines": {
+      "node": ">=26.12.1"
+    },
+    "scripts": {
+      "build": "rollup -c",
+      "test": "npm run build && tape test/*.js && jsmd readme.md && npm run test:typescript",
+      "test:typescript": "tsc --noEmit test/typescript.ts && ts-node test/typescript.ts",
+      "size": "npm run build && uglifyjs --compress --mangle -- ./dist/umd.js | gzip -c | wc -c"
+    },
+    "devDependencies": {
+      "@types/node": "26.6.5",
+      "is-mergeable-object": "1.1.1",
+      "is-plain-object": "5.1.0",
+      "jsmd": "2.0.0",
+      "rollup": "4.65.1",
+      "@rollup/plugin-commonjs": "29.0.3",
+      "@rollup/plugin-node-resolve": "16.0.3",
+      "tape": "5.10.3",
+      "ts-node": "10.9.2",
+      "typescript": "7.0.2",
+      "uglify-js": "3.19.3"
+    },
+    "license": "MIT",
+    "private": true
+  },
+  "rollup_config": "const { nodeResolve } = require('@rollup/plugin-node-resolve')\nconst commonjs = require('@rollup/plugin-commonjs')\nconst pkg = require('./package.json')\n\nmodule.exports = {\n  input: 'index.js',\n  plugins: [commonjs(), nodeResolve()],\n  output: [\n    { file: pkg.main, format: 'cjs' },\n    { name: 'deepmerge', file: 'dist/umd.js', format: 'umd' },\n  ],\n}\n",
+  "original_index_sha256": "12440c84957c1990ea2d5e33dc0091722dc1dc1585c6d20e0c780e568ffa9d30",
+  "candidate_index": "var defaultIsMergeableObject = require('is-mergeable-object')\n\nfunction emptyTarget(val) {\n\treturn Array.isArray(val) ? [] : {}\n}\n\nfunction cloneUnlessOtherwiseSpecified(value, options) {\n\treturn (options.clone !== false && options.isMergeableObject(value))\n\t\t? deepmerge(emptyTarget(value), value, options)\n\t\t: value\n}\n\nfunction defaultArrayMerge(target, source, options) {\n\treturn target.concat(source).map(function(element) {\n\t\treturn cloneUnlessOtherwiseSpecified(element, options)\n\t})\n}\n\nfunction getMergeFunction(key, options) {\n\tif (!options.customMerge) {\n\t\treturn deepmerge\n\t}\n\tvar customMerge = options.customMerge(key)\n\treturn typeof customMerge === 'function' ? customMerge : deepmerge\n}\n\nfunction getEnumerableOwnPropertySymbols(target) {\n\treturn Object.getOwnPropertySymbols\n\t\t? Object.getOwnPropertySymbols(target).filter(function(symbol) {\n\t\t\treturn Object.propertyIsEnumerable.call(target, symbol)\n\t\t})\n\t\t: []\n}\n\nfunction getKeys(target) {\n\treturn Object.keys(target).concat(getEnumerableOwnPropertySymbols(target))\n}\n\nfunction propertyIsOnObject(object, property) {\n\ttry {\n\t\treturn property in object\n\t} catch(_) {\n\t\treturn false\n\t}\n}\n\n// Protects from prototype poisoning and unexpected merging up the prototype chain.\nfunction propertyIsUnsafe(target, key) {\n\treturn propertyIsOnObject(target, key) // Properties are safe to merge if they don't exist in the target yet,\n\t\t&& !(Object.hasOwnProperty.call(target, key) // unsafe if they exist up the prototype chain,\n\t\t\t&& Object.propertyIsEnumerable.call(target, key)) // and also unsafe if they're nonenumerable.\n}\n\n// Define an own data property without invoking an inherited setter.\nfunction defineMergedProperty(destination, key, value) {\n\tObject.defineProperty(destination, key, {\n\t\tvalue: value,\n\t\twritable: true,\n\t\tenumerable: true,\n\t\tconfigurable: true\n\t})\n}\n\nfunction mergeObject(target, source, options) {\n\tvar destination = {}\n\tif (options.isMergeableObject(target)) {\n\t\tgetKeys(target).forEach(function(key) {\n\t\t\tdefineMergedProperty(destination, key, cloneUnlessOtherwiseSpecified(target[key], options))\n\t\t})\n\t}\n\tgetKeys(source).forEach(function(key) {\n\t\tif (propertyIsUnsafe(target, key)) {\n\t\t\treturn\n\t\t}\n\n\t\tif (propertyIsOnObject(target, key) && options.isMergeableObject(source[key])) {\n\t\t\tdefineMergedProperty(destination, key, getMergeFunction(key, options)(target[key], source[key], options))\n\t\t} else {\n\t\t\tdefineMergedProperty(destination, key, cloneUnlessOtherwiseSpecified(source[key], options))\n\t\t}\n\t})\n\treturn destination\n}\n\nfunction deepmerge(target, source, options) {\n\toptions = options || {}\n\toptions.arrayMerge = options.arrayMerge || defaultArrayMerge\n\toptions.isMergeableObject = options.isMergeableObject || defaultIsMergeableObject\n\t// cloneUnlessOtherwiseSpecified is added to `options` so that custom arrayMerge()\n\t// implementations can use it. The caller may not replace it.\n\toptions.cloneUnlessOtherwiseSpecified = cloneUnlessOtherwiseSpecified\n\n\tvar sourceIsArray = Array.isArray(source)\n\tvar targetIsArray = Array.isArray(target)\n\tvar sourceAndTargetTypesMatch = sourceIsArray === targetIsArray\n\n\tif (!sourceAndTargetTypesMatch) {\n\t\treturn cloneUnlessOtherwiseSpecified(source, options)\n\t} else if (sourceIsArray) {\n\t\treturn options.arrayMerge(target, source, options)\n\t} else {\n\t\treturn mergeObject(target, source, options)\n\t}\n}\n\ndeepmerge.all = function deepmergeAll(array, options) {\n\tif (!Array.isArray(array)) {\n\t\tthrow new Error('first argument should be an array')\n\t}\n\n\treturn array.reduce(function(prev, next) {\n\t\treturn deepmerge(prev, next, options)\n\t}, {})\n}\n\nmodule.exports = deepmerge\n",
+  "candidate_index_sha256": "92ac79f5d6f71c99a8a59d23f4007a81d7cc6dd82f6ec881fd049541658a9728",
+  "original_scripts": {
+    "build": "rollup -c",
+    "test": "npm run build && tape test/*.js && jsmd readme.md && npm run test:typescript",
+    "test:typescript": "tsc --noEmit test/typescript.ts && ts-node test/typescript.ts",
+    "size": "npm run build && uglifyjs --compress --mangle -- ./dist/umd.js | gzip -c | wc -c"
+  },
+  "tool_metadata": [
+    {
+      "name": "@types/node",
+      "version": "26.6.5",
+      "published": "2026-10-09T18:46:47.657Z",
+      "engines": null,
+      "peers": {},
+      "metadata_sha256": "ca6bd5e530819935a1ada29877fc227e3869367e433dd33460fa00d9355890f4",
+      "source": "https://registry.npmjs.org/%40types%2Fnode"
+    },
+    {
+      "name": "is-mergeable-object",
+      "version": "1.1.1",
+      "published": "2019-07-08T22:12:26.885Z",
+      "engines": null,
+      "peers": null,
+      "metadata_sha256": "a9705a7e630745a78c734efaffb9d01c8955e142f9de2364e7885e6d7f9127bb",
+      "source": "https://registry.npmjs.org/is-mergeable-object"
+    },
+    {
+      "name": "is-plain-object",
+      "version": "5.1.0",
+      "published": "2026-08-21T10:21:18.639Z",
+      "engines": {
+        "node": ">=0.10.0"
+      },
+      "peers": null,
+      "metadata_sha256": "2839c9013c6be8ed6363987b45b1c94b1c2c532c7bfe90acf8a8860459146ead",
+      "source": "https://registry.npmjs.org/is-plain-object"
+    },
+    {
+      "name": "jsmd",
+      "version": "2.0.0",
+      "published": "2024-02-08T16:18:44.700Z",
+      "engines": {
+        "node": ">=4.0.0"
+      },
+      "peers": null,
+      "metadata_sha256": "b406163676661d65984530bf9b9cfc5ef64cfaad4f502fa0c23ed0f978fbdb6d",
+      "source": "https://registry.npmjs.org/jsmd"
+    },
+    {
+      "name": "rollup",
+      "version": "4.65.1",
+      "published": "2026-10-26T11:00:04.919Z",
+      "engines": {
+        "npm": ">=8.0.0",
+        "node": ">=18.0.0"
+      },
+      "peers": null,
+      "metadata_sha256": "348fe537d5b37f9dca1d0f9756004e73cada34fe4f3eb41fa7d8b68b1ce390d5",
+      "source": "https://registry.npmjs.org/rollup"
+    },
+    {
+      "name": "@rollup/plugin-commonjs",
+      "version": "29.0.3",
+      "published": "2026-05-29T13:49:12.581Z",
+      "engines": {
+        "node": ">=16.0.0 || 14 >= 14.17"
+      },
+      "peers": {
+        "rollup": "^2.68.0||^3.0.0||^4.0.0"
+      },
+      "metadata_sha256": "d0823253831c591d31906a46ae5706072046823d2aa7baa397f8ceb2821357cc",
+      "source": "https://registry.npmjs.org/%40rollup%2Fplugin-commonjs"
+    },
+    {
+      "name": "@rollup/plugin-node-resolve",
+      "version": "16.0.3",
+      "published": "2025-10-13T00:33:10.742Z",
+      "engines": {
+        "node": ">=14.0.0"
+      },
+      "peers": {
+        "rollup": "^2.78.0||^3.0.0||^4.0.0"
+      },
+      "metadata_sha256": "753181d40ed816277a25711aefb121f4d7354ae961d8a14eb0991e53e3a38b28",
+      "source": "https://registry.npmjs.org/%40rollup%2Fplugin-node-resolve"
+    },
+    {
+      "name": "tape",
+      "version": "5.10.3",
+      "published": "2026-10-14T07:15:05.305Z",
+      "engines": null,
+      "peers": null,
+      "metadata_sha256": "609db394eae3390e517990f0f5f1b0c7b1771734a83348c058819e6de73152ac",
+      "source": "https://registry.npmjs.org/tape"
+    },
+    {
+      "name": "ts-node",
+      "version": "10.9.2",
+      "published": "2023-12-08T12:04:46.154Z",
+      "engines": null,
+      "peers": {
+        "@swc/core": ">=1.2.50",
+        "@swc/wasm": ">=1.2.50",
+        "typescript": ">=2.7",
+        "@types/node": "*"
+      },
+      "metadata_sha256": "92aa2e942253e1cd69429bc9f06b3bdbc791990b8d388d81cd777388c070d214",
+      "source": "https://registry.npmjs.org/ts-node"
+    },
+    {
+      "name": "typescript",
+      "version": "7.0.2",
+      "published": "2026-07-08T15:55:18.431Z",
+      "engines": {
+        "node": ">=16.20.0"
+      },
+      "peers": null,
+      "metadata_sha256": "bf846923998f04c0be86eb0fa78dab2d39e5dac2192073ca8c18ea14b898012e",
+      "source": "https://registry.npmjs.org/typescript"
+    },
+    {
+      "name": "uglify-js",
+      "version": "3.19.3",
+      "published": "2024-08-29T13:49:01.316Z",
+      "engines": {
+        "node": ">=0.8.0"
+      },
+      "peers": null,
+      "metadata_sha256": "c5c447861f182a53d527adffa6b28dc8f7d119deecb3292b43ad7426b92a4e6e",
+      "source": "https://registry.npmjs.org/uglify-js"
+    },
+    {
+      "name": "npm",
+      "version": "12.2.1",
+      "published": "2026-10-15T17:40:08.077Z",
+      "engines": {
+        "node": "^22.22.2 || ^24.15.0 || >=26.0.0"
+      },
+      "peers": null,
+      "metadata_sha256": "6877b60bacd1d0d194cc155e9a5a35b8e14084b4f51a474eb796697ea182b144",
+      "source": "https://registry.npmjs.org/npm"
+    }
+  ],
+  "node": "26.12.1",
+  "npm": "12.2.1",
+  "production_changes": [
+    "index.js",
+    "rollup.config.js",
+    "package.json"
+  ],
+  "original_case_helper_assertion_fixture_selector_timeout_command_changes": [],
+  "complete_SDK_or_parent_adoption_qualified": false
+}
