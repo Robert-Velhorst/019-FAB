@@ -152,7 +152,8 @@
       "uglify-js": "3.19.3"
     },
     "license": "MIT",
-    "private": true
+    "private": true,
+    "types": "./index.d.ts"
   },
   "rollup_config": "const { nodeResolve } = require('@rollup/plugin-node-resolve')\nconst commonjs = require('@rollup/plugin-commonjs')\nconst pkg = require('./package.json')\n\nmodule.exports = {\n  input: 'index.js',\n  plugins: [commonjs(), nodeResolve()],\n  output: [\n    { file: pkg.main, format: 'cjs' },\n    { name: 'deepmerge', file: 'dist/umd.js', format: 'umd' },\n  ],\n}\n",
   "original_index_sha256": "12440c84957c1990ea2d5e33dc0091722dc1dc1585c6d20e0c780e568ffa9d30",
