@@ -1,0 +1,41 @@
+name: Brace Expansion Balanced Match 5 original SDK
+on:
+  pull_request:
+    paths:
+      - .github/qualification/brace-balanced5-original-sdk.json
+      - .github/scripts/qualify_brace_balanced5_sdk.py
+      - .github/workflows/brace-balanced5-original-sdk.yml
+permissions:
+  contents: read
+jobs:
+  original-sdk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [original-balanced4, candidate-balanced5]
+    env:
+      BRACE_PROFILE: ${{ matrix.profile }}
+      npm_config_engine_strict: 'true'
+      npm_config_strict_peer_deps: 'true'
+      npm_config_legacy_peer_deps: 'false'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26.12.1'
+      - name: Set current stable npm
+        run: npm install --global npm@12.2.1
+      - name: Run original SDK build, cases and complete unsuppressed gates
+        run: python .github/scripts/qualify_brace_balanced5_sdk.py
+      - name: Retain original source identities, cases, raw audit and private pack
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: brace-${{ matrix.profile }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: brace-balanced5-evidence/
+          if-no-files-found: error
+          retention-days: 14

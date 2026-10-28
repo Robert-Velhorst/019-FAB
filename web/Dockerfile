@@ -4,11 +4,12 @@ WORKDIR /app
 RUN test "$(node --version)" = "v26.12.1" \
     && grep -qx 'VERSION_ID=3.24.3' /etc/os-release \
     && npm install --global npm@12.2.1 --no-audit --no-fund \
-    && npm install --global pnpm@12.15.0 --no-audit --no-fund \
-    && test "$(pnpm --version)" = "12.15.0"
+    && npm install --global pnpm@12.16.1 --no-audit --no-fund \
+    && test "$(pnpm --version)" = "12.16.1"
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY patches ./patches
+COPY vendor/tailwindcss-typography ./vendor/tailwindcss-typography
 RUN pnpm install --frozen-lockfile
 
 COPY . .

@@ -8,6 +8,9 @@
 !vite.config.ts
 !patches/
 !patches/**
+!vendor/
+!vendor/tailwindcss-typography/
+!vendor/tailwindcss-typography/**
 !client/
 !client/**
 !server/

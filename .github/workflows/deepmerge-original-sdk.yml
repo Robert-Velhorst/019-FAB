@@ -1,0 +1,43 @@
+name: Deepmerge original SDK and production prototype port
+on:
+  pull_request:
+    paths:
+      - .github/qualification/deepmerge-own-properties.json
+      - .github/scripts/deepmerge_original_sdk.py
+      - .github/scripts/deepmerge_owned_regressions.cjs
+      - .github/workflows/deepmerge-original-sdk.yml
+permissions:
+  contents: read
+jobs:
+  complete-sdk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [original, candidate]
+    env:
+      DEEPMERGE_VARIANT: ${{ matrix.variant }}
+      npm_config_engine_strict: 'true'
+      npm_config_strict_peer_deps: 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26.12.1'
+      - name: Set current stable npm
+        run: npm install --global npm@12.2.1
+      - name: Run unchanged complete SDK commands and independent production regressions
+        run: python .github/scripts/deepmerge_original_sdk.py
+      - name: Retain complete source, original commands and unsuppressed failures
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: deepmerge-${{ matrix.variant }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            deepmerge-evidence/*.json
+            deepmerge-evidence/*.log
+          if-no-files-found: error
+          retention-days: 14

@@ -1,0 +1,756 @@
+{
+  "captured_at": "2026-10-28T15:00:49.457244+00:00",
+  "public_name": "@types/node",
+  "public_version": "26.6.5",
+  "official_tarball": "https://registry.npmjs.org/@types/node/-/node-26.6.5.tgz",
+  "official_integrity": "sha512-uMzsv9stDdofIZBx4UGh4Z9ZgXnGC9seRDscilBcTHAeOFk67MZg/k9bWVfO+bk4qZmG+l52hRnLwUiH2LnJTg==",
+  "archive_sha256": "e4e47dac860469aa5aa79043a6b83396299d9cd6ee23b30fcb2074625ac8dbdf",
+  "registry_metadata_sha256": "ca6bd5e530819935a1ada29877fc227e3869367e433dd33460fa00d9355890f4",
+  "source_payloads": [
+    {
+      "path": "LICENSE",
+      "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+      "bytes": 1141
+    },
+    {
+      "path": "README.md",
+      "sha256": "a0d8a62d4d92bfef39be27d1e6d48723962d31be7d494fea0b698a9c704d2e55",
+      "bytes": 1441
+    },
+    {
+      "path": "assert.d.ts",
+      "sha256": "594ae90cacd813fa392ff80d2e0a8eff4e41f4a136329a940e321399dd8895b4",
+      "bytes": 42891
+    },
+    {
+      "path": "async_hooks.d.ts",
+      "sha256": "0224aa4b3464895d69c413a640a19ac2166778a74eb5eb3b36b021c72d42b274",
+      "bytes": 29929
+    },
+    {
+      "path": "buffer.buffer.d.ts",
+      "sha256": "f9b68a1c3f8f45b4c199fa5b3ac09497230cb8f2f0cdcfebe5817b30b836a64a",
+      "bytes": 22956
+    },
+    {
+      "path": "buffer.d.ts",
+      "sha256": "575aa163c4c32e5b82e0e99b1f9f80806e1d78bfa259706e05139251c022277b",
+      "bytes": 81198
+    },
+    {
+      "path": "child_process.d.ts",
+      "sha256": "7fb21326854faaa31ef02c9d51629fb6acedacb9396e74bf22ff8409441ea9ae",
+      "bytes": 59901
+    },
+    {
+      "path": "cluster.d.ts",
+      "sha256": "2fbf504c4791f9d32cd766cfe6b605bcda63289b925401953a7900db9af85348",
+      "bytes": 19527
+    },
+    {
+      "path": "console.d.ts",
+      "sha256": "ed0fb633cae35948d9e144004299a4bdf1ab912667c787b7fbffcd6d8c7b92a2",
+      "bytes": 4250
+    },
+    {
+      "path": "constants.d.ts",
+      "sha256": "1678b04557dca52feab73cc67610918a7f5e25bfdba3e7fa081acd625d93106d",
+      "bytes": 491
+    },
+    {
+      "path": "crypto.d.ts",
+      "sha256": "9019e48ace02a7f39315d84261f4a3dd23b7a3b1f6584e694001ac93971791b7",
+      "bytes": 168968
+    },
+    {
+      "path": "dgram.d.ts",
+      "sha256": "2f78692a85ada51c8f0988184d34d28436c1040e8ccf0758ba70d4b32b9776ad",
+      "bytes": 31103
+    },
+    {
+      "path": "diagnostics_channel.d.ts",
+      "sha256": "97581dc7099ef3d844c83706d53a7ecf895c0e867fbf6b9dc035bb3080f677bd",
+      "bytes": 34563
+    },
+    {
+      "path": "dns.d.ts",
+      "sha256": "e494b286c8e27c52f8c7f945aa80ff223f2a3cd4f7a2619fa8991f1459e26f07",
+      "bytes": 34353
+    },
+    {
+      "path": "domain.d.ts",
+      "sha256": "41d17e1ad9a002feb11c8cdd2777e5bbc0cdb1e3f595d237e4dded0b6949983b",
+      "bytes": 6597
+    },
+    {
+      "path": "events.d.ts",
+      "sha256": "8c7e618c2a91ea7f6b5cca272a295864e92c16413be8fc56a943e8c7d5320011",
+      "bytes": 47375
+    },
+    {
+      "path": "ffi.d.ts",
+      "sha256": "13f487e411f9657df0e76572e500c1209b8fe95ee3b4cc6e6e7913c15f56207d",
+      "bytes": 20654
+    },
+    {
+      "path": "fs.d.ts",
+      "sha256": "9d37b8a9678efbcdf38238b59ce8e6f7db70aba1a516f3a4a671a301dbacfb3d",
+      "bytes": 202247
+    },
+    {
+      "path": "globals.d.ts",
+      "sha256": "f53a7652392cf26ebbe4e29fd0672aa87c93bd6d0241289c13fab87b9ac35c8a",
+      "bytes": 5084
+    },
+    {
+      "path": "globals.typedarray.d.ts",
+      "sha256": "0ccdaa19852d25ecd84eec365c3bfa16e7859cadecf6e9ca6d0dbbbee439743f",
+      "bytes": 4864
+    },
+    {
+      "path": "http.d.ts",
+      "sha256": "ad50512520720d10294c629cb4e2df23891c3fcbeaca00fbfb9e6bbea65f3dd6",
+      "bytes": 99276
+    },
+    {
+      "path": "http2.d.ts",
+      "sha256": "189769511b45c93b23ba76069f7701d3b631cfbedc1eb94c7753486c78736f78",
+      "bytes": 119406
+    },
+    {
+      "path": "https.d.ts",
+      "sha256": "2c2bdaa1d8ead9f68628d6d9d250e46ee8e81aa4898b4769a36956ae15e060fe",
+      "bytes": 16812
+    },
+    {
+      "path": "index.d.ts",
+      "sha256": "c46f111af647c4134ae869653130610d62da321f90ebf19e186a3ea4bed79350",
+      "bytes": 5053
+    },
+    {
+      "path": "inspector.d.ts",
+      "sha256": "ba389fd3d7fba6670e97bc82eb12469dcb371d22f24e63859c1df5a083c823ed",
+      "bytes": 12276
+    },
+    {
+      "path": "inspector.generated.d.ts",
+      "sha256": "5ff4433a2deae4f85ab1377e90a7554ce6b47ae51c69a84ca30a6e22fae85834",
+      "bytes": 228362
+    },
+    {
+      "path": "module.d.ts",
+      "sha256": "97234c5303866576f913d0ccae7d58d6322d9e803c7bf1228a3fda46ab8087b2",
+      "bytes": 32983
+    },
+    {
+      "path": "net.d.ts",
+      "sha256": "961dec547748827cb6b45f6fdc66273f7bacd9c73103c6779f070f2fd07f23f9",
+      "bytes": 47835
+    },
+    {
+      "path": "os.d.ts",
+      "sha256": "73eeb740dacc45adc607a4f59f90fa9dbe2717d93d82f115f45f34e18f8d644a",
+      "bytes": 19278
+    },
+    {
+      "path": "package.json",
+      "sha256": "e9bf302124358d90ec233c509c4f9fb2223129b988da8147b5c1bf835f652e86",
+      "bytes": 4057
+    },
+    {
+      "path": "path.d.ts",
+      "sha256": "ec501101c2a96133a6c695f934c8f6642149cc728571b29cbb7b770984c1088e",
+      "bytes": 7639
+    },
+    {
+      "path": "perf_hooks.d.ts",
+      "sha256": "d251cda16f3f6a3e07f07c9e6e823ef6c583c63f653eb8777dafa749a78298e3",
+      "bytes": 23593
+    },
+    {
+      "path": "process.d.ts",
+      "sha256": "361939136b496a38b3e6b7be750bbb6998ef289bb8dd304c673138542ca16137",
+      "bytes": 115113
+    },
+    {
+      "path": "punycode.d.ts",
+      "sha256": "230763250f20449fa7b3c9273e1967adb0023dc890d4be1553faca658ee65971",
+      "bytes": 3780
+    },
+    {
+      "path": "querystring.d.ts",
+      "sha256": "c3e9078b60cb329d1221f5878e88cecfa3e74460550e605a58fcfb41a66029ff",
+      "bytes": 6642
+    },
+    {
+      "path": "quic.d.ts",
+      "sha256": "89e2568ebc2ec1e4149384b105e80e8bbf41eb4d711547f1121f4f628028de96",
+      "bytes": 94639
+    },
+    {
+      "path": "readline.d.ts",
+      "sha256": "441b9bb09013654aa3d050e68b06464d8959b473e85868249d9d18f692acd35b",
+      "bytes": 21216
+    },
+    {
+      "path": "repl.d.ts",
+      "sha256": "55246f15e33ff1e2e9e679b25fa9790a48db55dc63d567fe25fac8b6a0efe911",
+      "bytes": 19023
+    },
+    {
+      "path": "sea.d.ts",
+      "sha256": "fa94bbf532b7af8f394b95fa310980d6e20bd2d4c871c6a6cb9f70f03750a44b",
+      "bytes": 2045
+    },
+    {
+      "path": "sqlite.d.ts",
+      "sha256": "925734f303b7f0cc111d42aeb21781d38a79e6d5ac05b2b1400cd1861a75d27b",
+      "bytes": 55651
+    },
+    {
+      "path": "stream.d.ts",
+      "sha256": "5b26c4dd672d88336bb929787c9bfb55119e80ba89ec6dc923da1c063892843e",
+      "bytes": 90588
+    },
+    {
+      "path": "string_decoder.d.ts",
+      "sha256": "841983e39bd4cbb463be385e92fda11057cab368bf27100a801c492f1d86cbaa",
+      "bytes": 1318
+    },
+    {
+      "path": "test.d.ts",
+      "sha256": "3e221ff0522e6ff95aa74a5211126aaf4d7e85ed8c8ff19290d591ad4bef988f",
+      "bytes": 120493
+    },
+    {
+      "path": "timers.d.ts",
+      "sha256": "e4156ddb25aa0e3b5303d372f26957b36778f0f6bbd4326359269873295e3058",
+      "bytes": 7351
+    },
+    {
+      "path": "tls.d.ts",
+      "sha256": "751048d4aa67e20e5ecd2692340ea0d19bae42a20cc651d6f56d095e411ce3ac",
+      "bytes": 60511
+    },
+    {
+      "path": "trace_events.d.ts",
+      "sha256": "7f78cfb2b343838612c192cb251746e3a7c62ac7675726a47e130d9b213f6580",
+      "bytes": 3842
+    },
+    {
+      "path": "tty.d.ts",
+      "sha256": "aed8f3e5c7e53462565eedf34a9bcb700393cb2c1ab0c768602b929c3ed3145d",
+      "bytes": 11270
+    },
+    {
+      "path": "url.d.ts",
+      "sha256": "8e2577e7262051fd3c5bd6ca2b2056d358ff8853565720f92455860824c25188",
+      "bytes": 25457
+    },
+    {
+      "path": "util.d.ts",
+      "sha256": "fb12cb2de38cc8b89e38ece1014b4ae1047cd89b8dd248c64adc1c53c358ca02",
+      "bytes": 65566
+    },
+    {
+      "path": "v8.d.ts",
+      "sha256": "9021dc5be8f3a87af5cede29221188a6497e2092b6889e0be212ef6b6b7153e9",
+      "bytes": 42889
+    },
+    {
+      "path": "vfs.d.ts",
+      "sha256": "4a8c8fd951d9fd9e0775f0aae8ed1f8b528204e24a2600bea3a1228ea83de52c",
+      "bytes": 6606
+    },
+    {
+      "path": "vm.d.ts",
+      "sha256": "5b9cc0c724a8ebc7a873ab8e73c20b2416cef04b9e9d7f95ef1fa0fdcd4e0ec8",
+      "bytes": 53187
+    },
+    {
+      "path": "wasi.d.ts",
+      "sha256": "99ab6d0d660ce4d21efb52288a39fd35bb3f556980ec5463b1ae8f304a3bbc85",
+      "bytes": 6250
+    },
+    {
+      "path": "worker_threads.d.ts",
+      "sha256": "80a4b7023a2cc9f14d3f2e4635d6615ab3eff4b5b3630f62a8e73992fdd8cdb9",
+      "bytes": 29817
+    },
+    {
+      "path": "zlib.d.ts",
+      "sha256": "7414ec88dbb6d1b4d07a6ffbb3592e56359343ddfd5b0b825721d736b04ab2b6",
+      "bytes": 23915
+    },
+    {
+      "path": "assert/strict.d.ts",
+      "sha256": "d1f333ade8ff35a409b4984e1f11956fe11c61855b0c7e9b59f0313e48b40c4a",
+      "bytes": 1652
+    },
+    {
+      "path": "dns/promises.d.ts",
+      "sha256": "f54f5f9e10bbceba7515dfad0ffc89dffdb8d749d0604594c57a725cf6d79c20",
+      "bytes": 20815
+    },
+    {
+      "path": "fs/promises.d.ts",
+      "sha256": "a47a792b8cff71443be8dfb199f2b77e102a7bf9d4f90c18059f05d9af2d7413",
+      "bytes": 63652
+    },
+    {
+      "path": "inspector/promises.d.ts",
+      "sha256": "82b91e4e42e6c41bc7fc1b6c2dc5eba6a2ba98375eb1f210e6ff6bba2d54177e",
+      "bytes": 1471
+    },
+    {
+      "path": "path/posix.d.ts",
+      "sha256": "b214ebcf76c51b115453f69729ee8aa7b7f8eccdae2a922b568a45c2d7ff52f7",
+      "bytes": 194
+    },
+    {
+      "path": "path/win32.d.ts",
+      "sha256": "429c9cdfa7d126255779efd7e6d9057ced2d69c81859bbab32073bad52e9ba76",
+      "bytes": 194
+    },
+    {
+      "path": "readline/promises.d.ts",
+      "sha256": "bc18a1991ba681f03e13285fa1d7b99b03b67ee671b7bc936254467177543890",
+      "bytes": 6418
+    },
+    {
+      "path": "stream/consumers.d.ts",
+      "sha256": "7fa2214bb0d64701bc6f9ce8cde2fd2ff8c571e0b23065fa04a8a5a6beb91511",
+      "bytes": 4272
+    },
+    {
+      "path": "stream/iter.d.ts",
+      "sha256": "7286e4e5f80c0b1ab16addbdbbc9dd47fbae1c42034189261177b84d745cde3b",
+      "bytes": 17286
+    },
+    {
+      "path": "stream/promises.d.ts",
+      "sha256": "f12624a4a8d042b68914eac1b0a16571fc1c523173fcdf2517c65d191bd5a86c",
+      "bytes": 7347
+    },
+    {
+      "path": "stream/web.d.ts",
+      "sha256": "cd2a656ba1d250c2002190b683e3826bf4362b6919450bc0f9bbf5612ebad837",
+      "bytes": 13018
+    },
+    {
+      "path": "test/reporters.d.ts",
+      "sha256": "7da83f6429c6298ebf2be43d296b56ecfc94c9c28f5471b2f23b87545b914cea",
+      "bytes": 2835
+    },
+    {
+      "path": "timers/promises.d.ts",
+      "sha256": "cc1b433a84cae05ddc5672d4823170af78606ad21ecef60dbc4570190cbf1357",
+      "bytes": 3383
+    },
+    {
+      "path": "ts5.6/buffer.buffer.d.ts",
+      "sha256": "697cf5ff22e25b78c1dcc108fb51838b335dbe8f2a024922bc93375d6c5d87a8",
+      "bytes": 22092
+    },
+    {
+      "path": "ts5.6/globals.typedarray.d.ts",
+      "sha256": "6f2442c0ca5e7fcb9d51ebbd7d43079844bcbfd947bb679b9419900745f871d5",
+      "bytes": 1238
+    },
+    {
+      "path": "ts5.6/index.d.ts",
+      "sha256": "c06cc00bc72dc896b4f1cceff8f1a52ea199ce23f8a0f7ccd93420e5906b17bd",
+      "bytes": 5381
+    },
+    {
+      "path": "ts5.7/index.d.ts",
+      "sha256": "62c781adc94b18f3f2982eb58a266cd48e118c3295adb7f1d51729215599c76b",
+      "bytes": 5380
+    },
+    {
+      "path": "util/types.d.ts",
+      "sha256": "bb9dbb4b2ad81e3e71ec5ba4314973718555b9d04ba2a17dfbf875efecb8e2c0",
+      "bytes": 23832
+    },
+    {
+      "path": "web-globals/abortcontroller.d.ts",
+      "sha256": "e5e01375c9e124a83b52ee4b3244ed1a4d214a6cfb54ac73e164a823a4a7860a",
+      "bytes": 1989
+    },
+    {
+      "path": "web-globals/blob.d.ts",
+      "sha256": "f90ae2bbce1505e67f2f6502392e318f5714bae82d2d969185c4a6cecc8af2fc",
+      "bytes": 902
+    },
+    {
+      "path": "web-globals/console.d.ts",
+      "sha256": "4b58e207b93a8f1c88bbf2a95ddc686ac83962b13830fe8ad3f404ffc7051fb4",
+      "bytes": 149
+    },
+    {
+      "path": "web-globals/crypto.d.ts",
+      "sha256": "1fefabcb2b06736a66d2904074d56268753654805e829989a46a0161cd8412c5",
+      "bytes": 1449
+    },
+    {
+      "path": "web-globals/domexception.d.ts",
+      "sha256": "b00a630557d1622ad312633bdbfbdb9c6b7220d948dca9f899db30679f160074",
+      "bytes": 3052
+    },
+    {
+      "path": "web-globals/encoding.d.ts",
+      "sha256": "c18a99f01eb788d849ad032b31cafd49de0b19e083fe775370834c5675d7df8e",
+      "bytes": 414
+    },
+    {
+      "path": "web-globals/events.d.ts",
+      "sha256": "5247874c2a23b9a62d178ae84f2db6a1d54e6c9a2e7e057e178cc5eea13757fc",
+      "bytes": 3367
+    },
+    {
+      "path": "web-globals/fetch.d.ts",
+      "sha256": "c3f5289820990ab66b70c7fb5b63cb674001009ff84b13de40619619a9c8175f",
+      "bytes": 3524
+    },
+    {
+      "path": "web-globals/importmeta.d.ts",
+      "sha256": "b3275d55fac10b799c9546804126239baf020d220136163f763b55a74e50e750",
+      "bytes": 259
+    },
+    {
+      "path": "web-globals/messaging.d.ts",
+      "sha256": "fa68a0a3b7cb32c00e39ee3cd31f8f15b80cac97dce51b6ee7fc14a1e8deb30b",
+      "bytes": 1113
+    },
+    {
+      "path": "web-globals/navigator.d.ts",
+      "sha256": "1cf059eaf468efcc649f8cf6075d3cb98e9a35a0fe9c44419ec3d2f5428d7123",
+      "bytes": 891
+    },
+    {
+      "path": "web-globals/performance.d.ts",
+      "sha256": "6c36e755bced82df7fb6ce8169265d0a7bb046ab4e2cb6d0da0cb72b22033e89",
+      "bytes": 2551
+    },
+    {
+      "path": "web-globals/storage.d.ts",
+      "sha256": "e7721c4f69f93c91360c26a0a84ee885997d748237ef78ef665b153e622b36c1",
+      "bytes": 724
+    },
+    {
+      "path": "web-globals/streams.d.ts",
+      "sha256": "279d0cc1a72879918854265c3405369aa2d4d23509b8694ea102995b298cc5e2",
+      "bytes": 6942
+    },
+    {
+      "path": "web-globals/timers.d.ts",
+      "sha256": "90e85f9bc549dfe2b5749b45fe734144e96cd5d04b38eae244028794e142a77e",
+      "bytes": 1557
+    },
+    {
+      "path": "web-globals/url.d.ts",
+      "sha256": "e0a5deeb610b2a50a6350bd23df6490036a1773a8a71d70f2f9549ab009e67ee",
+      "bytes": 800
+    },
+    {
+      "path": "zlib/iter.d.ts",
+      "sha256": "afa1c49f8e559e413d57343339db857d2a8159435cf9cf7d4deb41718fff1b88",
+      "bytes": 5077
+    },
+    {
+      "path": "ts5.6/compatibility/float16array.d.ts",
+      "sha256": "394fda71d5d6bd00a372437dff510feab37b92f345861e592f956d6995e9c1ce",
+      "bytes": 3811
+    },
+    {
+      "path": "ts5.7/compatibility/float16array.d.ts",
+      "sha256": "cebfeedf63623d54f7423d58cae1ec204c0d8d97a66d5fb17579e26a902085e1",
+      "bytes": 3872
+    }
+  ],
+  "original_manifest": {
+    "name": "@types/node",
+    "version": "26.6.5",
+    "description": "TypeScript definitions for node",
+    "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/node",
+    "license": "MIT",
+    "contributors": [
+      {
+        "name": "Microsoft TypeScript",
+        "githubUsername": "Microsoft",
+        "url": "https://github.com/Microsoft"
+      },
+      {
+        "name": "Alberto Schiabel",
+        "githubUsername": "jkomyno",
+        "url": "https://github.com/jkomyno"
+      },
+      {
+        "name": "Andrew Makarov",
+        "githubUsername": "r3nya",
+        "url": "https://github.com/r3nya"
+      },
+      {
+        "name": "Benjamin Toueg",
+        "githubUsername": "btoueg",
+        "url": "https://github.com/btoueg"
+      },
+      {
+        "name": "David Junger",
+        "githubUsername": "touffy",
+        "url": "https://github.com/touffy"
+      },
+      {
+        "name": "Mohsen Azimi",
+        "githubUsername": "mohsen1",
+        "url": "https://github.com/mohsen1"
+      },
+      {
+        "name": "Nikita Galkin",
+        "githubUsername": "galkin",
+        "url": "https://github.com/galkin"
+      },
+      {
+        "name": "Sebastian Silbermann",
+        "githubUsername": "eps1lon",
+        "url": "https://github.com/eps1lon"
+      },
+      {
+        "name": "Wilco Bakker",
+        "githubUsername": "WilcoBakker",
+        "url": "https://github.com/WilcoBakker"
+      },
+      {
+        "name": "Trivikram Kamat",
+        "githubUsername": "trivikr",
+        "url": "https://github.com/trivikr"
+      },
+      {
+        "name": "Junxiao Shi",
+        "githubUsername": "yoursunny",
+        "url": "https://github.com/yoursunny"
+      },
+      {
+        "name": "ExE Boss",
+        "githubUsername": "ExE-Boss",
+        "url": "https://github.com/ExE-Boss"
+      },
+      {
+        "name": "Piotr B\u0142a\u017cejewicz",
+        "githubUsername": "peterblazejewicz",
+        "url": "https://github.com/peterblazejewicz"
+      },
+      {
+        "name": "Anna Henningsen",
+        "githubUsername": "addaleax",
+        "url": "https://github.com/addaleax"
+      },
+      {
+        "name": "NodeJS Contributors",
+        "githubUsername": "NodeJS",
+        "url": "https://github.com/NodeJS"
+      },
+      {
+        "name": "Linus Unneb\u00e4ck",
+        "githubUsername": "LinusU",
+        "url": "https://github.com/LinusU"
+      },
+      {
+        "name": "wafuwafu13",
+        "githubUsername": "wafuwafu13",
+        "url": "https://github.com/wafuwafu13"
+      },
+      {
+        "name": "Matteo Collina",
+        "githubUsername": "mcollina",
+        "url": "https://github.com/mcollina"
+      },
+      {
+        "name": "Dmitry Semigradsky",
+        "githubUsername": "Semigradsky",
+        "url": "https://github.com/Semigradsky"
+      },
+      {
+        "name": "Ren\u00e9",
+        "githubUsername": "Renegade334",
+        "url": "https://github.com/Renegade334"
+      },
+      {
+        "name": "Yagiz Nizipli",
+        "githubUsername": "anonrig",
+        "url": "https://github.com/anonrig"
+      }
+    ],
+    "main": "",
+    "types": "index.d.ts",
+    "typesVersions": {
+      "<=5.6": {
+        "*": [
+          "ts5.6/*"
+        ]
+      },
+      "<=5.7": {
+        "*": [
+          "ts5.7/*"
+        ]
+      }
+    },
+    "repository": {
+      "type": "git",
+      "url": "https://github.com/DefinitelyTyped/DefinitelyTyped.git",
+      "directory": "types/node"
+    },
+    "scripts": {},
+    "dependencies": {
+      "undici-types": "~8.9.0"
+    },
+    "peerDependencies": {},
+    "typesPublisherContentHash": "3196021f34db9bcb68a729bd29ff60434d3b4c5f49619270db25e7dbd6dc651c",
+    "typeScriptVersion": "5.6"
+  },
+  "candidate_manifest": {
+    "name": "@types/node",
+    "version": "26.6.5+owned.undici8123.1",
+    "description": "TypeScript definitions for node",
+    "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/node",
+    "license": "MIT",
+    "contributors": [
+      {
+        "name": "Microsoft TypeScript",
+        "githubUsername": "Microsoft",
+        "url": "https://github.com/Microsoft"
+      },
+      {
+        "name": "Alberto Schiabel",
+        "githubUsername": "jkomyno",
+        "url": "https://github.com/jkomyno"
+      },
+      {
+        "name": "Andrew Makarov",
+        "githubUsername": "r3nya",
+        "url": "https://github.com/r3nya"
+      },
+      {
+        "name": "Benjamin Toueg",
+        "githubUsername": "btoueg",
+        "url": "https://github.com/btoueg"
+      },
+      {
+        "name": "David Junger",
+        "githubUsername": "touffy",
+        "url": "https://github.com/touffy"
+      },
+      {
+        "name": "Mohsen Azimi",
+        "githubUsername": "mohsen1",
+        "url": "https://github.com/mohsen1"
+      },
+      {
+        "name": "Nikita Galkin",
+        "githubUsername": "galkin",
+        "url": "https://github.com/galkin"
+      },
+      {
+        "name": "Sebastian Silbermann",
+        "githubUsername": "eps1lon",
+        "url": "https://github.com/eps1lon"
+      },
+      {
+        "name": "Wilco Bakker",
+        "githubUsername": "WilcoBakker",
+        "url": "https://github.com/WilcoBakker"
+      },
+      {
+        "name": "Trivikram Kamat",
+        "githubUsername": "trivikr",
+        "url": "https://github.com/trivikr"
+      },
+      {
+        "name": "Junxiao Shi",
+        "githubUsername": "yoursunny",
+        "url": "https://github.com/yoursunny"
+      },
+      {
+        "name": "ExE Boss",
+        "githubUsername": "ExE-Boss",
+        "url": "https://github.com/ExE-Boss"
+      },
+      {
+        "name": "Piotr B\u0142a\u017cejewicz",
+        "githubUsername": "peterblazejewicz",
+        "url": "https://github.com/peterblazejewicz"
+      },
+      {
+        "name": "Anna Henningsen",
+        "githubUsername": "addaleax",
+        "url": "https://github.com/addaleax"
+      },
+      {
+        "name": "NodeJS Contributors",
+        "githubUsername": "NodeJS",
+        "url": "https://github.com/NodeJS"
+      },
+      {
+        "name": "Linus Unneb\u00e4ck",
+        "githubUsername": "LinusU",
+        "url": "https://github.com/LinusU"
+      },
+      {
+        "name": "wafuwafu13",
+        "githubUsername": "wafuwafu13",
+        "url": "https://github.com/wafuwafu13"
+      },
+      {
+        "name": "Matteo Collina",
+        "githubUsername": "mcollina",
+        "url": "https://github.com/mcollina"
+      },
+      {
+        "name": "Dmitry Semigradsky",
+        "githubUsername": "Semigradsky",
+        "url": "https://github.com/Semigradsky"
+      },
+      {
+        "name": "Ren\u00e9",
+        "githubUsername": "Renegade334",
+        "url": "https://github.com/Renegade334"
+      },
+      {
+        "name": "Yagiz Nizipli",
+        "githubUsername": "anonrig",
+        "url": "https://github.com/anonrig"
+      }
+    ],
+    "main": "",
+    "types": "index.d.ts",
+    "typesVersions": {
+      "<=5.6": {
+        "*": [
+          "ts5.6/*"
+        ]
+      },
+      "<=5.7": {
+        "*": [
+          "ts5.7/*"
+        ]
+      }
+    },
+    "repository": {
+      "type": "git",
+      "url": "https://github.com/DefinitelyTyped/DefinitelyTyped.git",
+      "directory": "types/node"
+    },
+    "scripts": {},
+    "dependencies": {
+      "undici-types": "8.12.3"
+    },
+    "peerDependencies": {},
+    "typesPublisherContentHash": "3196021f34db9bcb68a729bd29ff60434d3b4c5f49619270db25e7dbd6dc651c",
+    "typeScriptVersion": "5.6",
+    "private": true
+  },
+  "selected_current_undici_types": "8.12.3",
+  "undici_metadata_sha256": "1c77f2801f7df72bc0d2644b6e78a7f7cb45b86e6e504d5d438a4a97127f9326",
+  "scope": "Explicit unadopted private declaration parent; all original declarations/resources/licenses preserved. Only package manifest version, dependency contract and private marker changed. Full upstream DefinitelyTyped SDK cases are not established by this npm archive.",
+  "root_override_alias_force_or_original_SDK_case_command_change": false
+}

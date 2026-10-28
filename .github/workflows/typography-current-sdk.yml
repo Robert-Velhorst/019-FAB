@@ -1,0 +1,162 @@
+name: FAB current Typography parent SDK
+
+on:
+  pull_request:
+    paths:
+      - web/pnpm-lock.yaml
+      - .github/scripts/fab_typography_offline_install.py
+      - .github/scripts/fab_typography_browser.mjs
+      - web/vendor/tailwindcss-typography/**
+      - .github/workflows/typography-current-sdk.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fab-typography-sdk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  original-sdk:
+    name: Original Typography SDK (${{ matrix.command }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+    strategy:
+      fail-fast: false
+      matrix:
+        command: [test, build]
+    defaults:
+      run:
+        working-directory: web/vendor/tailwindcss-typography
+    steps:
+      - name: Check out complete parent candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up current Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26.12.1'
+      - name: Set up current pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 12.16.1
+          run_install: false
+      - name: Verify every retained original upstream payload before install
+        run: |
+          python - <<'PY'
+          import hashlib, json, pathlib, subprocess
+          root = pathlib.Path('.')
+          provenance = json.loads((root / 'FAB_UPSTREAM_PROVENANCE.json').read_text())
+          port = json.loads((root / 'FAB_DEMO_COMPATIBILITY.json').read_text())
+          allowed = {'demo/pages/_app.js','demo/postcss.config.js','demo/next.config.js','demo/tailwind.config.js'}
+          assert set(port['production_changes']) == allowed and port['publisher_commit'] == provenance['commit']
+          unchanged = 0
+          for name, record in provenance['files'].items():
+              if name == 'package.json':
+                  continue
+              payload = (root / name).read_bytes()
+              if name in allowed:
+                  change = port['production_changes'][name]
+                  assert change['original_sha256'] == record['sha256'], name
+                  assert hashlib.sha256(payload).hexdigest() == change['ported_sha256'], name
+              else:
+                  assert hashlib.sha256(payload).hexdigest() == record['sha256'], name
+                  unchanged += 1
+          assert unchanged == 30
+          manifest = json.loads((root / 'package.json').read_text())
+          assert manifest['private'] is True
+          assert manifest['dependencies'] == {'postcss-selector-parser': '7.1.7'}
+          assert manifest['fabUpstream']['commit'] == provenance['commit']
+          assert manifest['scripts']['test'] == 'jest'
+          assert manifest['scripts']['build'] == 'next build demo'
+          record = {
+              'worker_commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+              'publisher_commit': provenance['commit'],
+              'original_payloads_verified_unchanged': unchanged,
+              'production_paths_explicitly_ported': sorted(allowed),
+              'manifest_sha256': hashlib.sha256((root / 'package.json').read_bytes()).hexdigest(),
+              'node': subprocess.check_output(['node', '--version'], text=True).strip(),
+              'pnpm': subprocess.check_output(['pnpm', '--version'], text=True).strip(),
+          }
+          (root / 'FAB_HOSTED_INPUT.json').write_text(json.dumps(record, indent=2))
+          PY
+      - name: Resolve current SDK normally with strict peers engines and intact age policy
+        run: pnpm install --lockfile-only --strict-peer-dependencies
+      - name: Fetch integrity-bound packages without lifecycle execution
+        run: pnpm fetch --ignore-scripts
+      - name: Install approved exact native scripts offline without network or privilege escalation
+        id: native-install
+        shell: bash
+        run: |
+          set -euo pipefail
+          runner_uid="$(id -u)"
+          runner_gid="$(id -g)"
+          host_network_namespace="$(readlink /proc/self/ns/net)"
+          sudo unshare --net -- setpriv \
+            --reuid="$runner_uid" --regid="$runner_gid" --clear-groups \
+            --no-new-privs --bounding-set=-all --inh-caps=-all --ambient-caps=-all \
+            env -i HOME="$HOME" PATH="$PATH" PNPM_HOME="$PNPM_HOME" CI=true \
+            GITHUB_ACTIONS=true GITHUB_REPOSITORY="$GITHUB_REPOSITORY" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" \
+            FAB_EXPECTED_UID="$runner_uid" FAB_EXPECTED_GID="$runner_gid" \
+            FAB_HOST_NETWORK_NAMESPACE="$host_network_namespace" \
+            python3 ../../../.github/scripts/fab_typography_offline_install.py
+      - name: Execute original complete publisher command
+        run: pnpm run ${{ matrix.command }}
+      - name: Retain actual demo routes and compiled Typography styles
+        if: success() && matrix.command == 'build'
+        shell: python
+        run: |
+          import hashlib,json,pathlib,shutil
+          root=pathlib.Path('demo/.next');output=pathlib.Path('FAB_NATIVE_INSTALL_EVIDENCE/demo-build');output.mkdir(parents=True,exist_ok=True)
+          required={'index','dark','themes','variants','list-items'}
+          pages={p.stem:p for p in (root/'server/pages').glob('*.html')}
+          assert required<=set(pages),sorted(pages)
+          css=sorted((root/'static').rglob('*.css'));assert css
+          assert any('.prose' in p.read_text() for p in css),'Actual compiled Typography CSS is missing.'
+          files={}
+          for p in [*pages.values(),*css,*(root/n for n in ['build-manifest.json','prerender-manifest.json','routes-manifest.json'] if (root/n).is_file())]:
+              name=p.relative_to(root);target=output/'generated'/name;target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(p,target)
+              files[str(name)]={'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()}
+          (output/'summary.json').write_text(json.dumps({'original_build_command_pass':True,'generated_routes':sorted(pages),'required_original_routes':sorted(required),'compiled_css_files':len(css),'compiled_Typography_present':True,'files':files,'browser_or_operator_acceptance':False},indent=2)+'\n')
+      - name: Render all original demo routes in sandboxed installed Chrome on loopback
+        if: success() && matrix.command == 'build'
+        run: node ../../../.github/scripts/fab_typography_browser.mjs
+      - name: Reconcile every tracked payload after original SDK commands and browser execution
+        if: always() && steps.native-install.outcome == 'success'
+        shell: python
+        run: |
+          import hashlib,json,os,pathlib,subprocess
+          root=pathlib.Path(subprocess.check_output(['git','rev-parse','--show-toplevel'],text=True).strip())
+          output=pathlib.Path('FAB_NATIVE_INSTALL_EVIDENCE');before=json.loads((output/'source-before.json').read_text())
+          observed={}
+          for name,row in before['payloads'].items():
+              source=root/name;payload=os.readlink(source).encode() if row['mode']=='120000' else source.read_bytes()
+              observed[name]={'mode':row['mode'],'blob':hashlib.sha1(b'blob '+str(len(payload)).encode()+b'\0'+payload).hexdigest(),'sha256':hashlib.sha256(payload).hexdigest()}
+          record={'head':before['head'],'tree':before['tree'],'payloads':observed}
+          (output/'source-after-complete-SDK.json').write_text(json.dumps(record,indent=2)+'\n')
+          assert record==before,'Tracked source changed during the complete original SDK/compiler/browser steps.'
+      - name: Audit the complete normally resolved SDK graph
+        if: always() && steps.native-install.outcome == 'success'
+        run: |
+          pnpm audit --audit-level=low --json > FAB_NATIVE_INSTALL_EVIDENCE/full-audit.json
+      - name: Require stable releases throughout the installed graph
+        if: always() && steps.native-install.outcome == 'success'
+        shell: python
+        run: |
+          import json,pathlib
+          rows=json.loads(pathlib.Path('FAB_NATIVE_INSTALL_EVIDENCE/installed-prereleases.json').read_text())
+          assert not rows,'Installed prerelease rows remain; every row is retained without exclusion.'
+      - name: Retain exact SDK input and normal resolved lock
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fab-typography-sdk-${{ matrix.command }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            web/vendor/tailwindcss-typography/FAB_HOSTED_INPUT.json
+            web/vendor/tailwindcss-typography/pnpm-lock.yaml
+            web/vendor/tailwindcss-typography/FAB_NATIVE_INSTALL_EVIDENCE/
+          if-no-files-found: error
+          retention-days: 14
