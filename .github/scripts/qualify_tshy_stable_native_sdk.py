@@ -57,7 +57,8 @@ ntbefore={n:hashlib.sha256((ntroot/n).read_bytes()).hexdigest() for n in ntexpec
 # Verify complete public parent source/cases, then stage explicit consumer ports.
 gp=json.loads((owner/'.github/qualification/tshy-current-glob-parent-ports.json').read_bytes())
 gparents={p['name']:p for p in gp['parents']};assert set(gparents)=={'resolve-import','rimraf','sync-content'}
-groot={};gbefore={};gsdk={}
+groot={};gbefore={};gsdk={};gmanifests={};garchives={}
+import gzip
 for name,p in gparents.items():
     original=p['original_SDK'];expected_source={r['path']:r for r in original['source_payloads']}
     with urllib.request.urlopen('https://codeload.github.com/'+original['repository']+'/tar.gz/'+original['commit'],timeout=60) as stream:raw=stream.read(32*1024*1024+1)
@@ -74,7 +75,7 @@ for name,p in gparents.items():
     with urllib.request.urlopen(p['tarball'],timeout=60) as stream:raw=stream.read(8*1024*1024+1)
     assert len(raw)<=8*1024*1024 and hashlib.sha256(raw).hexdigest()==p['archive_sha256']
     assert 'sha512-'+base64.b64encode(hashlib.sha512(raw).digest()).decode()==p['integrity']
-    parentroot=sdk/p['vendor_path'];parentroot.mkdir(parents=True);expected_source={r['path']:r for r in p['source_payloads']};source={}
+    parentroot=sdk/p['vendor_path'];parentroot.mkdir(parents=True);expected_source={r['path']:r for r in p['source_payloads']};source={};source_modes={}
     with tarfile.open(fileobj=io.BytesIO(raw),mode='r:gz') as tar:
         for member in tar.getmembers():
             assert member.isfile() or member.isdir()
@@ -82,14 +83,26 @@ for name,p in gparents.items():
             parts=pathlib.PurePosixPath(member.name).parts;assert len(parts)>1 and '..' not in parts and not member.name.startswith('/')
             rel='/'.join(parts[1:]);assert rel in expected_source and rel not in source and member.size<4*1024*1024
             data=tar.extractfile(member).read();assert len(data)==member.size and hashlib.sha256(data).hexdigest()==expected_source[rel]['sha256']
-            target=parentroot/rel;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(data);source[rel]=expected_source[rel]
+            target=parentroot/rel;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(data);source[rel]=expected_source[rel];source_modes[rel]=member.mode & 0o777
     assert source.keys()==expected_source.keys() and json.loads((parentroot/'package.json').read_bytes())==p['original_manifest']
     assert p['candidate_manifest'].get('scripts',{})==p['original_manifest'].get('scripts',{})
-    (parentroot/'package.json').write_bytes((json.dumps(p['candidate_manifest'],indent=2)+'\n').encode())
+    gmanifest=json.loads(json.dumps(p['candidate_manifest']))
+    if name=='sync-content':gmanifest['dependencies']['rimraf']='file:'+str(sdk/'vendor/owned-rimraf.tgz')
+    assert gmanifest.get('scripts',{})==p['original_manifest'].get('scripts',{})
+    (parentroot/'package.json').write_bytes((json.dumps(gmanifest,indent=2)+'\n').encode());gmanifests[name]=gmanifest
+    buffer=io.BytesIO()
+    with gzip.GzipFile(fileobj=buffer,mode='wb',filename='',mtime=0) as gz:
+        with tarfile.open(fileobj=gz,mode='w',format=tarfile.GNU_FORMAT) as tar:
+            for rel in sorted(expected_source):
+                data=(parentroot/rel).read_bytes();info=tarfile.TarInfo('package/'+rel);info.size=len(data);info.mode=source_modes[rel];info.mtime=0;info.uid=info.gid=0;info.uname=info.gname='';tar.addfile(info,io.BytesIO(data))
+    archive_data=buffer.getvalue();archive_path=sdk/(p['vendor_path']+'.tgz');archive_path.write_bytes(archive_data)
+    garchives[name]={'path':str(archive_path),'sha256':hashlib.sha256(archive_data).hexdigest(),'integrity':'sha512-'+base64.b64encode(hashlib.sha512(archive_data).digest()).decode(),'manifest':gmanifest,'source_modes':source_modes,'all_public_payloads':len(expected_source),'changed_public_payloads':['package.json'],'original_SDK_scripts_changed':False}
+    (out/('owned-'+name+'-consumer.tgz')).write_bytes(archive_data)
+
     groot[name]=parentroot;gbefore[name]={rel:hashlib.sha256((parentroot/rel).read_bytes()).hexdigest() for rel in expected_source}
-    manifest['dependencies'][name]='file:'+p['vendor_path']
+    manifest['dependencies'][name]='file:'+str(archive_path)
 (sdk/'package.json').write_bytes((json.dumps(manifest,indent=2)+'\n').encode())
-save('Glob-parent-original-SDK-source-and-case-proof.json',gsdk);save('Glob-parent-publisher-source-before.json',gbefore)
+save('Glob-parent-original-SDK-source-and-case-proof.json',gsdk);save('Glob-parent-publisher-source-before.json',gbefore);save('Glob-parent-consumer-archive-records.json',garchives)
 
 cli=sdk/'vendor/owned-native-typescript-cli';cli.mkdir(parents=True)
 for r in d['owned_cli_source_files']:
@@ -119,11 +132,22 @@ if metadata==0 and (sdk/'package-lock.json').is_file():
             assert r['version']==nt['candidate_manifest']['version'] and r['dependencies']==nt['candidate_manifest']['dependencies'];source_links.append({'path':name,**r});rows.append({'path':name,'name':'@types/node','version':nt['public_version'],'explicit_private_parent_version':r['version']});continue
         if name in {p['vendor_path'] for p in gparents.values()}:
             p=next(p for p in gparents.values() if p['vendor_path']==name);assert r['version']==p['candidate_manifest']['version'] and r['dependencies']==p['candidate_manifest']['dependencies'];source_links.append({'path':name,**r});rows.append({'path':name,'name':p['name'],'version':p['highest_public_nonretired_stable'],'explicit_private_parent_version':r['version']});continue
+        if name in {'node_modules/'+n for n in gparents}:
+            public_name=name.removeprefix('node_modules/');p=gparents[public_name];archive=garchives[public_name]
+            assert r['version']==archive['manifest']['version'] and r['dependencies']==archive['manifest']['dependencies'] and r['integrity']==archive['integrity'] and r['resolved'].startswith('file:')
+            assert (sdk/r['resolved'].removeprefix('file:')).resolve()==pathlib.Path(archive['path']).resolve()
+            source_links.append({'path':name,**r,'explicit_consumer_archive':archive});rows.append({'path':name,'name':public_name,'version':p['highest_public_nonretired_stable'],'explicit_private_parent_version':r['version'],'actual_archive_integrity':r['integrity']});continue
         assert 'node_modules/' in name and r.get('version'),(name,r)
         rows.append({'path':name,'name':name.rsplit('node_modules/',1)[1],'version':r['version']})
     prereleases=[r for r in rows if re.search(r'^\d+\.\d+\.\d+-',r['version'])];save('prerelease-lock-records.json',prereleases);save('explicit-source-link-records.json',source_links)
     if not prereleases:installed=run('normal-frozen-install-and-unchanged-prepare',['npm','ci','--strict-peer-deps'])==0
 if installed:
+    installed_parent_source={}
+    for name,p in gparents.items():
+        installed_root=sdk/'node_modules'/name
+        installed_parent_source[name]={r['path']:hashlib.sha256((installed_root/r['path']).read_bytes()).hexdigest() for r in p['source_payloads']}
+        assert installed_parent_source[name]==gbefore[name]
+    save('Glob-parent-installed-consumer-source-before.json',installed_parent_source)
     native_exit=run('real-stable-native-compiler-version',['node',str(cli/'bin/tsgo.cjs'),'--version'],extra_env={'OWNED_NATIVE_COMPILER_TRACE':'1'})
     text=(out/'real-stable-native-compiler-version.log').read_text();records=[json.loads(line.removeprefix('OWNED_NATIVE_COMPILER ')) for line in text.splitlines() if line.startswith('OWNED_NATIVE_COMPILER ')];assert native_exit==0 and len(records)==1 and re.search(r'^Version 7\.0\.2\s*$',text,re.M)
     native_proof=records[0];assert native_proof['compiler_package']=='typescript' and native_proof['compiler_version']=='7.0.2' and native_proof['argv']==['--version'];assert hashlib.sha256(pathlib.Path(native_proof['compiler_launcher']).read_bytes()).hexdigest()==native_proof['compiler_launcher_sha256'];save('actual-stable-native-compiler-proof.json',native_proof)
@@ -204,6 +228,10 @@ owned_after={r['path']:hashlib.sha256((cli/r['path']).read_bytes()).hexdigest() 
 gafter={name:{r['path']:hashlib.sha256((groot[name]/r['path']).read_bytes()).hexdigest() for r in p['source_payloads']} for name,p in gparents.items()};assert gbefore==gafter
 assert all(gafter[name][r['path']]==r['sha256'] for name,p in gparents.items() for r in p['source_payloads'] if r['path']!='package.json')
 save('Glob-parent-publisher-source-after.json',gafter)
+if installed:
+    installed_parent_after={name:{r['path']:hashlib.sha256((sdk/'node_modules'/name/r['path']).read_bytes()).hexdigest() for r in p['source_payloads']} for name,p in gparents.items()}
+    assert installed_parent_source==installed_parent_after;save('Glob-parent-installed-consumer-source-after.json',installed_parent_after)
+
 ntafter={n:hashlib.sha256((ntroot/n).read_bytes()).hexdigest() for n in ntexpected};assert ntbefore==ntafter
 save('Node-types-explicit-parent-source-after.json',{'actual':ntafter,'all_original_nonmanifest_payloads_unchanged':all(ntafter[n]==r['sha256'] for n,r in ntexpected.items() if n!='package.json'),'original_declared_dependency':nt['original_manifest']['dependencies'],'explicit_private_parent_dependency':nt['candidate_manifest']['dependencies']})
 for selector in ['tsc','tsgo']:
